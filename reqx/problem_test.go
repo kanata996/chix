@@ -89,4 +89,24 @@ func TestProblemConstructors(t *testing.T) {
 			t.Fatalf("unexpected detail: %#v", detail)
 		}
 	})
+
+	t.Run("remaining detail helpers", func(t *testing.T) {
+		tests := []Detail{
+			InvalidUUID(InPath, "uuid"),
+			InvalidInteger(InQuery, "limit"),
+			InvalidValue(InBody, "name"),
+		}
+
+		want := []Detail{
+			{In: InPath, Field: "uuid", Code: DetailCodeInvalidUUID},
+			{In: InQuery, Field: "limit", Code: DetailCodeInvalidInteger},
+			{In: InBody, Field: "name", Code: DetailCodeInvalidValue},
+		}
+
+		for i := range tests {
+			if tests[i] != want[i] {
+				t.Fatalf("unexpected detail at %d: %#v", i, tests[i])
+			}
+		}
+	})
 }

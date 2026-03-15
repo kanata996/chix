@@ -157,20 +157,53 @@ func TestDecodeJSON(t *testing.T) {
 		}
 	})
 
+	t.Run("trailing empty object", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{} {}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		var got struct{}
+		err := DecodeJSON(rec, req, &got)
+		problem, ok := AsProblem(err)
+		if !ok {
+			t.Fatalf("expected problem, got %T (%v)", err, err)
+		}
+		if len(problem.Details) != 1 || problem.Details[0] != TrailingData() {
+			t.Fatalf("unexpected details: %#v", problem.Details)
+		}
+	})
+
+	t.Run("payload too large while checking trailing whitespace", func(t *testing.T) {
+		body := `{"name":"alice"}` + strings.Repeat(" ", int(DefaultJSONMaxBytes))
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		var got payload
+		err := DecodeJSON(rec, req, &got)
+		problem, ok := AsProblem(err)
+		if !ok {
+			t.Fatalf("expected problem, got %T (%v)", err, err)
+		}
+		if problem.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Fatalf("unexpected status: %d", problem.StatusCode)
+		}
+	})
+
 	t.Run("boundary errors", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"alice"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		var got payload
 
-		if err := DecodeJSON(nil, req, &got); err == nil {
-			t.Fatal("expected nil writer error")
+		if err := DecodeJSON(nil, req, &got); !errors.Is(err, ErrNilResponseWriter) {
+			t.Fatalf("expected ErrNilResponseWriter, got %v", err)
 		}
-		if err := DecodeJSON(rec, nil, &got); err == nil {
-			t.Fatal("expected nil request error")
+		if err := DecodeJSON(rec, nil, &got); !errors.Is(err, ErrNilRequest) {
+			t.Fatalf("expected ErrNilRequest, got %v", err)
 		}
-		if err := DecodeJSON(rec, req, nil); err == nil {
-			t.Fatal("expected nil target error")
+		if err := DecodeJSON(rec, req, nil); !errors.Is(err, ErrNilTarget) {
+			t.Fatalf("expected ErrNilTarget, got %v", err)
 		}
 	})
 
@@ -183,6 +216,9 @@ func TestDecodeJSON(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected invalid target error")
 		}
+		if !errors.Is(err, ErrInvalidDecodeTarget) {
+			t.Fatalf("expected ErrInvalidDecodeTarget, got %v", err)
+		}
 		if _, ok := AsProblem(err); ok {
 			t.Fatalf("expected plain error, got problem: %#v", err)
 		}
@@ -192,8 +228,63 @@ func TestDecodeJSON(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected nil pointer target error")
 		}
+		if !errors.Is(err, ErrInvalidDecodeTarget) {
+			t.Fatalf("expected ErrInvalidDecodeTarget, got %v", err)
+		}
 		if _, ok := AsProblem(err); ok {
 			t.Fatalf("expected plain error, got problem: %#v", err)
+		}
+	})
+}
+
+func TestValidateDecodeTarget(t *testing.T) {
+	if err := validateDecodeTarget(nil); !errors.Is(err, ErrNilTarget) {
+		t.Fatalf("expected ErrNilTarget, got %v", err)
+	}
+}
+
+func TestDecodeJSONWith(t *testing.T) {
+	type payload struct {
+		Name string `json:"name"`
+	}
+
+	t.Run("allow unknown fields", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"alice","extra":1}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		var got payload
+		if err := DecodeJSONWith(rec, req, &got, DecodeOptions{AllowUnknownFields: true}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Name != "alice" {
+			t.Fatalf("unexpected payload: %#v", got)
+		}
+	})
+
+	t.Run("skip content type check", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"alice"}`))
+		rec := httptest.NewRecorder()
+
+		var got payload
+		if err := DecodeJSONWith(rec, req, &got, DecodeOptions{SkipContentTypeCheck: true}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("custom max bytes", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"alice"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		var got payload
+		err := DecodeJSONWith(rec, req, &got, DecodeOptions{MaxBytes: 8})
+		problem, ok := AsProblem(err)
+		if !ok {
+			t.Fatalf("expected problem, got %T (%v)", err, err)
+		}
+		if problem.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Fatalf("unexpected status: %d", problem.StatusCode)
 		}
 	})
 }
@@ -225,9 +316,19 @@ func TestMapJSONError(t *testing.T) {
 			want: InvalidType(InBody, "count"),
 		},
 		{
+			name: "type error without field falls back to body",
+			err:  &json.UnmarshalTypeError{},
+			want: InvalidType(InBody, "body"),
+		},
+		{
 			name: "unknown field",
 			err:  errors.New(`json: unknown field "extra"`),
 			want: UnknownField("extra"),
+		},
+		{
+			name: "unknown field without name falls back to body",
+			err:  errors.New(`json: unknown field ""`),
+			want: UnknownField("body"),
 		},
 		{
 			name: "fallback",

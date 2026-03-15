@@ -21,15 +21,19 @@
 // 返回约定：
 //   - 正常请求错误返回 *Problem，例如 400/413/415/422。
 //   - 编程错误返回普通 error，例如 nil writer / nil request / 非法 decode target /
-//     非法 validate target。
+//     非法 validate target；可通过 errors.Is 判断 ErrNilRequest / ErrNilTarget /
+//     ErrInvalidDecodeTarget / ErrInvalidValidateTarget。
 //   - handler 拿到 *Problem 时应交给 resp.Problem；拿到普通 error 时仍可继续交给
 //     resp.Problem，由边界按 internal 故障收口。
 //
 // 稳定输入/输出：
 //   - DecodeJSON 统一处理 content-type、payload too large、unknown field、
-//     trailing data、JSON 语法错误和类型错误。
-//   - ValidateBody 对 body DTO 返回 422；ValidateQuery / ValidatePath 对 query/path DTO
-//     返回 400。
+//     trailing data、JSON 语法错误和类型错误；需要非 nil 指针 target。
+//   - DecodeJSONWith 可按 endpoint 覆盖默认大小限制、unknown field 策略或
+//     content-type 检查。
+//   - ValidateBody / ValidateQuery / ValidatePath 只接受非 nil `*struct`。
+//     ValidateBody 对 body DTO 返回 422；ValidateQuery / ValidatePath 对 query/path
+//     DTO 返回 400。
 //   - Detail 只保留 in/field/code 三个稳定字段，不负责展示型 message。
 //
 // 包间协作：
@@ -63,6 +67,17 @@
 //
 //	query := listQueryRequest{Limit: limit, Offset: offset}
 //	if err := reqx.ValidateQuery(&query); err != nil {
+//	    resp.Problem(w, r, err)
+//	    return
+//	}
+//
+// 某些 endpoint 需要放宽默认 decode 策略时，可使用 DecodeJSONWith：
+//
+//	if err := reqx.DecodeJSONWith(w, r, &body, reqx.DecodeOptions{
+//	    MaxBytes:             4 << 20,
+//	    AllowUnknownFields:   true,
+//	    SkipContentTypeCheck: false,
+//	}); err != nil {
 //	    resp.Problem(w, r, err)
 //	    return
 //	}
