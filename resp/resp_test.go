@@ -1,8 +1,11 @@
 package resp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"github.com/kanata996/chix/errx"
+	"github.com/kanata996/chix/reqx"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -89,6 +92,47 @@ func TestJSON_WriteError(t *testing.T) {
 	if len(w.lastWrite) == 0 {
 		t.Fatal("expected non-empty write payload")
 	}
+}
+
+func TestWriteErrorEnvelope_WithDetails(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	writeErrorEnvelope(rec, errx.Mapping{
+		StatusCode: http.StatusConflict,
+		Code:       499999,
+		Message:    "Custom Conflict",
+	}, []reqx.Detail{reqx.Required(reqx.InQuery, "limit")})
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status mismatch: want %d, got %d", http.StatusConflict, rec.Code)
+	}
+
+	var body envelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != 499999 || body.Message != "Custom Conflict" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+	if len(body.Details) != 1 || body.Details[0].Field != "limit" {
+		t.Fatalf("unexpected details: %#v", body.Details)
+	}
+}
+
+func TestRequestContext_NilRequestUsesBackground(t *testing.T) {
+	if got := requestContext(nil); got != context.Background() {
+		t.Fatalf("expected context.Background, got %#v", got)
+	}
+}
+
+func TestMustMapping_PanicsOnInvalidMapping(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered == nil {
+			t.Fatal("expected panic for invalid mapping")
+		}
+	}()
+
+	_ = mustMapping(errx.Mapping{})
 }
 
 func TestSuccess(t *testing.T) {
@@ -181,6 +225,38 @@ func TestSuccess_CustomNullJSONPayloadFailsClosed(t *testing.T) {
 	if rec.Body.Len() != 0 {
 		t.Fatalf("expected empty body, got %q", rec.Body.String())
 	}
+}
+
+func TestEncodeSuccessData_UnencodablePayloadFailsClosed(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	body, ok := encodeSuccessData(rec, http.StatusOK, func() {})
+
+	if ok {
+		t.Fatal("expected encodeSuccessData to fail")
+	}
+	if body != nil {
+		t.Fatalf("expected nil body, got %q", body)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status mismatch: want %d, got %d", http.StatusInternalServerError, rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "" {
+		t.Fatalf("content-type mismatch: want empty, got %q", got)
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("expected empty body, got %q", rec.Body.String())
+	}
+}
+
+func TestFailClosedSuccess_NilWriterDoesNotPanic(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("did not expect panic, got %#v", recovered)
+		}
+	}()
+
+	failClosedSuccess(nil, http.StatusOK, "could not encode success response", errors.New("boom"))
 }
 
 func TestCreated(t *testing.T) {
