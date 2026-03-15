@@ -1,10 +1,14 @@
 package reqx
 
 import (
+	"errors"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
+
+	ut "github.com/go-playground/universal-translator"
+	"github.com/go-playground/validator/v10"
 )
 
 type validateLoginDTO struct {
@@ -43,6 +47,24 @@ func (q *normalizedQueryDTO) Normalize() {
 type pathDTO struct {
 	UUID string `param:"uuid" validate:"required,uuid"`
 }
+
+type fakeFieldError struct {
+	field string
+	tag   string
+}
+
+func (f fakeFieldError) Tag() string                    { return f.tag }
+func (f fakeFieldError) ActualTag() string              { return f.tag }
+func (f fakeFieldError) Namespace() string              { return f.field }
+func (f fakeFieldError) StructNamespace() string        { return f.field }
+func (f fakeFieldError) Field() string                  { return f.field }
+func (f fakeFieldError) StructField() string            { return f.field }
+func (f fakeFieldError) Value() interface{}             { return nil }
+func (f fakeFieldError) Param() string                  { return "" }
+func (f fakeFieldError) Kind() reflect.Kind             { return reflect.String }
+func (f fakeFieldError) Type() reflect.Type             { return reflect.TypeOf("") }
+func (f fakeFieldError) Translate(ut.Translator) string { return "" }
+func (f fakeFieldError) Error() string                  { return "fake field error" }
 
 func TestValidateBody(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
@@ -86,15 +108,29 @@ func TestValidateBody(t *testing.T) {
 	})
 
 	t.Run("nil target is boundary error", func(t *testing.T) {
-		if err := ValidateBody(nil); err == nil {
-			t.Fatal("expected error")
+		if err := ValidateBody(nil); !errors.Is(err, ErrNilTarget) {
+			t.Fatalf("expected ErrNilTarget, got %v", err)
 		}
 	})
 
 	t.Run("invalid target is boundary error", func(t *testing.T) {
-		err := ValidateBody(123)
+		err := ValidateBody(normalizedJSONPayload{})
+		if err == nil {
+			t.Fatal("expected struct value error")
+		}
+		if !errors.Is(err, ErrInvalidValidateTarget) {
+			t.Fatalf("expected ErrInvalidValidateTarget, got %v", err)
+		}
+		if _, ok := AsProblem(err); ok {
+			t.Fatalf("expected plain error, got problem: %#v", err)
+		}
+
+		err = ValidateBody(123)
 		if err == nil {
 			t.Fatal("expected error")
+		}
+		if !errors.Is(err, ErrInvalidValidateTarget) {
+			t.Fatalf("expected ErrInvalidValidateTarget, got %v", err)
 		}
 		if _, ok := AsProblem(err); ok {
 			t.Fatalf("expected plain error, got problem: %#v", err)
@@ -104,6 +140,9 @@ func TestValidateBody(t *testing.T) {
 		err = ValidateBody(payload)
 		if err == nil {
 			t.Fatal("expected nil pointer error")
+		}
+		if !errors.Is(err, ErrInvalidValidateTarget) {
+			t.Fatalf("expected ErrInvalidValidateTarget, got %v", err)
 		}
 		if _, ok := AsProblem(err); ok {
 			t.Fatalf("expected plain error, got problem: %#v", err)
@@ -290,6 +329,17 @@ func TestValidateStructForSource(t *testing.T) {
 		}
 	})
 
+	t.Run("invalid payload for query falls back to request field", func(t *testing.T) {
+		details := validateStructForSource(123, sourceQuery)
+
+		if len(details) != 1 {
+			t.Fatalf("expected 1 detail, got %#v", details)
+		}
+		if details[0].In != InQuery || details[0].Field != "request" || details[0].Code != DetailCodeInvalidValue {
+			t.Fatalf("unexpected detail: %#v", details[0])
+		}
+	})
+
 	t.Run("required code", func(t *testing.T) {
 		type dto struct {
 			Name string `json:"name" validate:"required"`
@@ -375,6 +425,34 @@ func TestValidationHelpers(t *testing.T) {
 		}
 	})
 
+	t.Run("validator engine fallback", func(t *testing.T) {
+		if validatorEngine(sourceKind("other")) != validatorEngine(sourceJSON) {
+			t.Fatal("expected unknown source to reuse json validator")
+		}
+	})
+
+	t.Run("details from validation deduplicates and sorts", func(t *testing.T) {
+		if details := detailsFromValidation(sourceJSON, validator.ValidationErrors{}); details != nil {
+			t.Fatalf("expected nil details, got %#v", details)
+		}
+
+		details := detailsFromValidation(sourceJSON, validator.ValidationErrors{
+			fakeFieldError{field: "zeta", tag: "required"},
+			fakeFieldError{field: "", tag: "required"},
+			fakeFieldError{field: "alpha", tag: "uuid4"},
+			fakeFieldError{field: "alpha", tag: "max"},
+		})
+
+		want := []Detail{
+			InvalidUUID(InBody, "alpha"),
+			Required(InBody, "body"),
+			Required(InBody, "zeta"),
+		}
+		if !reflect.DeepEqual(details, want) {
+			t.Fatalf("unexpected details: %#v", details)
+		}
+	})
+
 	t.Run("source kind in", func(t *testing.T) {
 		tests := []struct {
 			source sourceKind
@@ -423,5 +501,74 @@ func TestValidationHelpers(t *testing.T) {
 		if got := fieldAlias(plainField, sourceQuery); got != "Plain" {
 			t.Fatalf("unexpected plain fallback: %q", got)
 		}
+	})
+
+	t.Run("default field", func(t *testing.T) {
+		if got := defaultField(sourceJSON); got != "body" {
+			t.Fatalf("unexpected body default field: %q", got)
+		}
+		if got := defaultField(sourcePath); got != "request" {
+			t.Fatalf("unexpected request default field: %q", got)
+		}
+	})
+
+	t.Run("normalize target boundary cases", func(t *testing.T) {
+		normalizeTarget(nil)
+
+		var dto *normalizedQueryDTO
+		normalizeTarget(dto)
+		normalizeTarget(struct{}{})
+	})
+
+	t.Run("nospace validator", func(t *testing.T) {
+		type dto struct {
+			Name string `json:"name" validate:"required,nospace"`
+		}
+
+		if err := ValidateBody(&dto{Name: "alice"}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		err := ValidateBody(&dto{Name: "alice bob"})
+		problem, ok := AsProblem(err)
+		if !ok {
+			t.Fatalf("expected problem, got %T (%v)", err, err)
+		}
+		if len(problem.Details) != 1 || problem.Details[0] != InvalidValue(InBody, "name") {
+			t.Fatalf("unexpected details: %#v", problem.Details)
+		}
+	})
+
+	t.Run("nospace rejects non string fields", func(t *testing.T) {
+		type dto struct {
+			Count int `json:"count" validate:"nospace"`
+		}
+
+		err := ValidateBody(&dto{Count: 1})
+		problem, ok := AsProblem(err)
+		if !ok {
+			t.Fatalf("expected problem, got %T (%v)", err, err)
+		}
+		if len(problem.Details) != 1 || problem.Details[0] != InvalidValue(InBody, "count") {
+			t.Fatalf("unexpected details: %#v", problem.Details)
+		}
+	})
+
+	t.Run("must register validation panics on invalid input", func(t *testing.T) {
+		defer func() {
+			got := recover()
+			if got == nil {
+				t.Fatal("expected panic")
+			}
+			message, ok := got.(string)
+			if !ok {
+				t.Fatalf("unexpected panic type: %T", got)
+			}
+			if !strings.Contains(message, `reqx: register validator ""`) {
+				t.Fatalf("unexpected panic message: %q", message)
+			}
+		}()
+
+		mustRegisterValidation(validator.New(), "", validateNoSpace)
 	})
 }

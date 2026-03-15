@@ -65,21 +65,18 @@ func validateForSource(target any, source sourceKind) error {
 
 func validateTarget(target any) error {
 	if target == nil {
-		return fmt.Errorf("reqx: validate target must not be nil")
+		return ErrNilTarget
 	}
 
 	value := reflect.ValueOf(target)
 	if !value.IsValid() {
-		return fmt.Errorf("reqx: validate target must not be nil")
+		return ErrNilTarget
 	}
-	if value.Kind() == reflect.Pointer {
-		if value.IsNil() {
-			return fmt.Errorf("reqx: validate target must not be nil")
-		}
-		value = value.Elem()
+	if value.Kind() != reflect.Pointer || value.IsNil() {
+		return fmt.Errorf("%w: target must be a non-nil pointer to struct", ErrInvalidValidateTarget)
 	}
-	if value.Kind() != reflect.Struct {
-		return fmt.Errorf("reqx: validate target must be struct or pointer to struct")
+	if value.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("%w: target must be a non-nil pointer to struct", ErrInvalidValidateTarget)
 	}
 
 	return nil
@@ -209,27 +206,7 @@ func detailsFromValidation(source sourceKind, errs validator.ValidationErrors) [
 
 // normalizeTarget 支持 DTO 在校验前自行归一化。
 func normalizeTarget(target any) {
-	if target == nil {
-		return
-	}
-
 	if normalizer, ok := target.(Normalizer); ok {
-		normalizer.Normalize()
-		return
-	}
-
-	value := reflect.ValueOf(target)
-	if !value.IsValid() {
-		return
-	}
-	if value.Kind() == reflect.Pointer {
-		return
-	}
-	if !value.CanAddr() {
-		return
-	}
-
-	if normalizer, ok := value.Addr().Interface().(Normalizer); ok {
 		normalizer.Normalize()
 	}
 }
