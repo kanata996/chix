@@ -306,6 +306,31 @@ func TestWriteHelpers_TypedNilWriterDoesNotPanic(t *testing.T) {
 	writeJSONBody(writer, http.StatusOK, []byte(`{"code":0}`))
 }
 
+func TestWriteJSON_EncodeErrorWithNilWriterDoesNotPanic(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("did not expect panic, got %#v", recovered)
+		}
+	}()
+
+	writeJSON(nil, http.StatusOK, func() {})
+}
+
+func TestHasResponseWriter(t *testing.T) {
+	if hasResponseWriter(nil) {
+		t.Fatal("expected nil writer to be false")
+	}
+
+	var writer *errWriter
+	if hasResponseWriter(writer) {
+		t.Fatal("expected typed nil writer to be false")
+	}
+
+	if !hasResponseWriter(httptest.NewRecorder()) {
+		t.Fatal("expected recorder writer to be true")
+	}
+}
+
 func TestCreated(t *testing.T) {
 	rec := httptest.NewRecorder()
 	Created(rec, map[string]any{"id": 1})
