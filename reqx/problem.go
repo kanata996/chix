@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	InBody  = "body"
-	InPath  = "path"
-	InQuery = "query"
+	InBody   = "body"
+	InHeader = "header"
+	InPath   = "path"
+	InQuery  = "query"
 )
 
 const (

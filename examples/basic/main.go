@@ -35,11 +35,7 @@ func getItem(w http.ResponseWriter, r *http.Request) {
 
 func createItem(w http.ResponseWriter, r *http.Request) {
 	var body createItemRequest
-	if err := reqx.DecodeJSON(w, r, &body); err != nil {
-		resp.Problem(w, r, err)
-		return
-	}
-	if err := reqx.ValidateBody(&body); err != nil {
+	if err := reqx.DecodeValidateJSON(w, r, &body); err != nil {
 		resp.Problem(w, r, err)
 		return
 	}

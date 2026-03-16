@@ -14,14 +14,14 @@ go get github.com/kanata996/chix
 
 当前公开的核心包：
 
-- `chix`：推荐入口，提供 `chi` 下的 path/query facade
-- `reqx`：JSON body 解码、DTO 校验、请求错误建模
+- `chix`：推荐入口，提供 `chi` 下的 path/query/header facade
+- `reqx`：JSON body 解码、DTO 校验、请求错误建模，以及常见 body 流程的组合 helper
 - `errx`：业务/系统错误语义与 mapper
 - `resp`：统一成功/请求错误/业务错误响应写回
 
 内部实现：
 
-- `internal/paramx`：`chi` 下的 path/query 参数读取与基础解析，由根包 `chix` 对外转发
+- `internal/paramx`：`chi` 下的 path/query/header 参数读取与基础解析，由根包 `chix` 对外转发
 
 设计原则：
 

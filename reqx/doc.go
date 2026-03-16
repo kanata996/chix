@@ -16,7 +16,7 @@
 //   - 做 validator/v10 校验，并在校验前调用 DTO 的 Normalize。
 //   - 不做业务错误映射。
 //   - 不写 HTTP 响应。
-//   - 不负责 path/query 的提取，参数提取仍放在 handler。
+//   - 不负责 path/query/header 的提取，参数提取仍放在 handler。
 //
 // 返回约定：
 //   - 正常请求错误返回 *Problem，例如 400/413/415/422。
@@ -32,6 +32,8 @@
 //     会统一按缺失 payload 处理；需要非 nil 指针 target。
 //   - DecodeJSONWith 可按 endpoint 覆盖默认大小限制、unknown field 策略或
 //     content-type 检查。
+//   - DecodeValidateJSON 组合执行 DecodeJSON + ValidateBody，适合常见 body DTO
+//     流程；target 需要是非 nil `*struct`。
 //   - ValidateBody / ValidateQuery / ValidatePath 只接受非 nil `*struct`。
 //     ValidateBody 对 body DTO 返回 422；ValidateQuery / ValidatePath 对 query/path
 //     DTO 返回 400。
@@ -46,11 +48,7 @@
 //
 //	var body CreateRequest
 //
-//	if err := reqx.DecodeJSON(w, r, &body); err != nil {
-//	    resp.Problem(w, r, err)
-//	    return
-//	}
-//	if err := reqx.ValidateBody(&body); err != nil {
+//	if err := reqx.DecodeValidateJSON(w, r, &body); err != nil {
 //	    resp.Problem(w, r, err)
 //	    return
 //	}
@@ -72,7 +70,8 @@
 //	    return
 //	}
 //
-// 某些 endpoint 需要放宽默认 decode 策略时，可使用 DecodeJSONWith：
+// 某些 endpoint 需要放宽默认 decode 策略时，可继续显式使用 DecodeJSONWith +
+// ValidateBody：
 //
 //	if err := reqx.DecodeJSONWith(w, r, &body, reqx.DecodeOptions{
 //	    MaxBytes:             4 << 20,
@@ -121,6 +120,6 @@
 //
 // 反例：
 //   - 不要把业务校验错误塞进 reqx.BadRequest / ValidationFailed。
-//   - 不要让 reqx 直接读取 chi.URLParam / r.URL.Query() 之类的业务入口细节。
+//   - 不要让 reqx 直接读取 chi.URLParam / r.URL.Query() / r.Header 之类的业务入口细节。
 //   - 不要在 handler 手写一套并行的 details 结构。
 package reqx
