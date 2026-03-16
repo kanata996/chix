@@ -1,0 +1,368 @@
+//line /Users/yogo/Work/chix/internal/paramx/paramx.go:1:1
+package paramx
+
+import (
+	"errors"
+	"github.com/kanata996/chix/reqx"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+)
+
+type PathReader struct {
+	request *http.Request
+}
+
+type QueryReader struct {
+	request *http.Request
+}
+
+func Path(r *http.Request) PathReader {goCover_8159306524ac__0[0] = 1 ; goCover_8159306524ac__0[1] = goCover_8159306524ac_P ; goCover_8159306524ac__0[2] = 0 ; goCover_8159306524ac__0[3] = 1;
+	return PathReader{request: r}
+}
+
+func Query(r *http.Request) QueryReader {goCover_8159306524ac__1[0] = 1 ; goCover_8159306524ac__1[1] = goCover_8159306524ac_P ; goCover_8159306524ac__1[2] = 1 ; goCover_8159306524ac__1[3] = 1;
+	return QueryReader{request: r}
+}
+
+func (p PathReader) String(name string) (string, error) {goCover_8159306524ac__2[0] = 7 ; goCover_8159306524ac__2[1] = goCover_8159306524ac_P ; goCover_8159306524ac__2[2] = 2 ; goCover_8159306524ac__2[3] = 1;
+	name, err := normalizeName(name)
+	if err != nil {goCover_8159306524ac__2[7] = 1;
+		return "", err
+	}
+	goCover_8159306524ac__2[4] = 1;if p.request == nil {goCover_8159306524ac__2[8] = 1;
+		return "", errors.New("paramx: request must not be nil")
+	}
+
+	goCover_8159306524ac__2[5] = 1;value := strings.TrimSpace(chi.URLParam(p.request, name))
+	if value == "" {goCover_8159306524ac__2[9] = 1;
+		return "", reqx.BadRequest(reqx.Required(reqx.InPath, name))
+	}
+	goCover_8159306524ac__2[6] = 1;return value, nil
+}
+
+func (p PathReader) UUID(name string) (string, error) {goCover_8159306524ac__3[0] = 5 ; goCover_8159306524ac__3[1] = goCover_8159306524ac_P ; goCover_8159306524ac__3[2] = 3 ; goCover_8159306524ac__3[3] = 1;
+	value, err := p.String(name)
+	if err != nil {goCover_8159306524ac__3[6] = 1;
+		return "", err
+	}
+
+	goCover_8159306524ac__3[4] = 1;parsed, err := uuid.Parse(value)
+	if err != nil {goCover_8159306524ac__3[7] = 1;
+		return "", reqx.BadRequest(reqx.InvalidUUID(reqx.InPath, name))
+	}
+	goCover_8159306524ac__3[5] = 1;return parsed.String(), nil
+}
+
+func (p PathReader) Int(name string) (int, error) {goCover_8159306524ac__4[0] = 5 ; goCover_8159306524ac__4[1] = goCover_8159306524ac_P ; goCover_8159306524ac__4[2] = 4 ; goCover_8159306524ac__4[3] = 1;
+	value, err := p.String(name)
+	if err != nil {goCover_8159306524ac__4[6] = 1;
+		return 0, err
+	}
+
+	goCover_8159306524ac__4[4] = 1;parsed, err := strconv.Atoi(value)
+	if err != nil {goCover_8159306524ac__4[7] = 1;
+		return 0, reqx.BadRequest(reqx.InvalidInteger(reqx.InPath, name))
+	}
+	goCover_8159306524ac__4[5] = 1;return parsed, nil
+}
+
+func (q QueryReader) String(name string) (string, bool, error) {goCover_8159306524ac__5[0] = 5 ; goCover_8159306524ac__5[1] = goCover_8159306524ac_P ; goCover_8159306524ac__5[2] = 5 ; goCover_8159306524ac__5[3] = 1;
+	value, err := q.scalar(name)
+	if err != nil {goCover_8159306524ac__5[6] = 1;
+		return "", false, err
+	}
+	goCover_8159306524ac__5[4] = 1;if !value.present {goCover_8159306524ac__5[7] = 1;
+		return "", false, nil
+	}
+	goCover_8159306524ac__5[5] = 1;return value.raw, true, nil
+}
+
+func (q QueryReader) Strings(name string) ([]string, bool, error) {goCover_8159306524ac__6[0] = 5 ; goCover_8159306524ac__6[1] = goCover_8159306524ac_P ; goCover_8159306524ac__6[2] = 6 ; goCover_8159306524ac__6[3] = 1;
+	values, err := q.list(name)
+	if err != nil {goCover_8159306524ac__6[6] = 1;
+		return nil, false, err
+	}
+	goCover_8159306524ac__6[4] = 1;if len(values) == 0 {goCover_8159306524ac__6[7] = 1;
+		return nil, false, nil
+	}
+	goCover_8159306524ac__6[5] = 1;return values, true, nil
+}
+
+func (q QueryReader) RequiredString(name string) (string, error) {goCover_8159306524ac__7[0] = 5 ; goCover_8159306524ac__7[1] = goCover_8159306524ac_P ; goCover_8159306524ac__7[2] = 7 ; goCover_8159306524ac__7[3] = 1;
+	value, err := q.scalar(name)
+	if err != nil {goCover_8159306524ac__7[6] = 1;
+		return "", err
+	}
+	goCover_8159306524ac__7[4] = 1;if !value.present || value.raw == "" {goCover_8159306524ac__7[7] = 1;
+		return "", reqx.BadRequest(reqx.Required(reqx.InQuery, name))
+	}
+	goCover_8159306524ac__7[5] = 1;return value.raw, nil
+}
+
+func (q QueryReader) RequiredStrings(name string) ([]string, error) {goCover_8159306524ac__8[0] = 5 ; goCover_8159306524ac__8[1] = goCover_8159306524ac_P ; goCover_8159306524ac__8[2] = 8 ; goCover_8159306524ac__8[3] = 1;
+	values, err := q.list(name)
+	if err != nil {goCover_8159306524ac__8[6] = 1;
+		return nil, err
+	}
+	goCover_8159306524ac__8[4] = 1;if len(values) == 0 {goCover_8159306524ac__8[7] = 1;
+		return nil, reqx.BadRequest(reqx.Required(reqx.InQuery, name))
+	}
+	goCover_8159306524ac__8[5] = 1;return values, nil
+}
+
+func (q QueryReader) Int(name string) (int, bool, error) {goCover_8159306524ac__9[0] = 9 ; goCover_8159306524ac__9[1] = goCover_8159306524ac_P ; goCover_8159306524ac__9[2] = 9 ; goCover_8159306524ac__9[3] = 1;
+	value, err := q.scalar(name)
+	if err != nil {goCover_8159306524ac__9[8] = 1;
+		return 0, false, err
+	}
+	goCover_8159306524ac__9[4] = 1;if !value.present {goCover_8159306524ac__9[9] = 1;
+		return 0, false, nil
+	}
+	goCover_8159306524ac__9[5] = 1;if value.raw == "" {goCover_8159306524ac__9[10] = 1;
+		return 0, false, reqx.BadRequest(reqx.InvalidInteger(reqx.InQuery, name))
+	}
+
+	goCover_8159306524ac__9[6] = 1;parsed, err := strconv.Atoi(value.raw)
+	if err != nil {goCover_8159306524ac__9[11] = 1;
+		return 0, false, reqx.BadRequest(reqx.InvalidInteger(reqx.InQuery, name))
+	}
+	goCover_8159306524ac__9[7] = 1;return parsed, true, nil
+}
+
+func (q QueryReader) RequiredInt(name string) (int, error) {goCover_8159306524ac__10[0] = 9 ; goCover_8159306524ac__10[1] = goCover_8159306524ac_P ; goCover_8159306524ac__10[2] = 10 ; goCover_8159306524ac__10[3] = 1;
+	value, err := q.scalar(name)
+	if err != nil {goCover_8159306524ac__10[8] = 1;
+		return 0, err
+	}
+	goCover_8159306524ac__10[4] = 1;if !value.present {goCover_8159306524ac__10[9] = 1;
+		return 0, reqx.BadRequest(reqx.Required(reqx.InQuery, name))
+	}
+	goCover_8159306524ac__10[5] = 1;if value.raw == "" {goCover_8159306524ac__10[10] = 1;
+		return 0, reqx.BadRequest(reqx.InvalidInteger(reqx.InQuery, name))
+	}
+
+	goCover_8159306524ac__10[6] = 1;parsed, err := strconv.Atoi(value.raw)
+	if err != nil {goCover_8159306524ac__10[11] = 1;
+		return 0, reqx.BadRequest(reqx.InvalidInteger(reqx.InQuery, name))
+	}
+	goCover_8159306524ac__10[7] = 1;return parsed, nil
+}
+
+func (q QueryReader) Int16(name string) (int16, bool, error) {goCover_8159306524ac__11[0] = 9 ; goCover_8159306524ac__11[1] = goCover_8159306524ac_P ; goCover_8159306524ac__11[2] = 11 ; goCover_8159306524ac__11[3] = 1;
+	value, err := q.scalar(name)
+	if err != nil {goCover_8159306524ac__11[8] = 1;
+		return 0, false, err
+	}
+	goCover_8159306524ac__11[4] = 1;if !value.present {goCover_8159306524ac__11[9] = 1;
+		return 0, false, nil
+	}
+	goCover_8159306524ac__11[5] = 1;if value.raw == "" {goCover_8159306524ac__11[10] = 1;
+		return 0, false, reqx.BadRequest(reqx.InvalidInteger(reqx.InQuery, name))
+	}
+
+	goCover_8159306524ac__11[6] = 1;parsed, err := strconv.ParseInt(value.raw, 10, 16)
+	if err != nil {goCover_8159306524ac__11[11] = 1;
+		return 0, false, reqx.BadRequest(reqx.InvalidInteger(reqx.InQuery, name))
+	}
+	goCover_8159306524ac__11[7] = 1;return int16(parsed), true, nil
+}
+
+func (q QueryReader) RequiredInt16(name string) (int16, error) {goCover_8159306524ac__12[0] = 9 ; goCover_8159306524ac__12[1] = goCover_8159306524ac_P ; goCover_8159306524ac__12[2] = 12 ; goCover_8159306524ac__12[3] = 1;
+	value, err := q.scalar(name)
+	if err != nil {goCover_8159306524ac__12[8] = 1;
+		return 0, err
+	}
+	goCover_8159306524ac__12[4] = 1;if !value.present {goCover_8159306524ac__12[9] = 1;
+		return 0, reqx.BadRequest(reqx.Required(reqx.InQuery, name))
+	}
+	goCover_8159306524ac__12[5] = 1;if value.raw == "" {goCover_8159306524ac__12[10] = 1;
+		return 0, reqx.BadRequest(reqx.InvalidInteger(reqx.InQuery, name))
+	}
+
+	goCover_8159306524ac__12[6] = 1;parsed, err := strconv.ParseInt(value.raw, 10, 16)
+	if err != nil {goCover_8159306524ac__12[11] = 1;
+		return 0, reqx.BadRequest(reqx.InvalidInteger(reqx.InQuery, name))
+	}
+	goCover_8159306524ac__12[7] = 1;return int16(parsed), nil
+}
+
+func (q QueryReader) UUID(name string) (string, bool, error) {goCover_8159306524ac__13[0] = 9 ; goCover_8159306524ac__13[1] = goCover_8159306524ac_P ; goCover_8159306524ac__13[2] = 13 ; goCover_8159306524ac__13[3] = 1;
+	value, err := q.scalar(name)
+	if err != nil {goCover_8159306524ac__13[8] = 1;
+		return "", false, err
+	}
+	goCover_8159306524ac__13[4] = 1;if !value.present {goCover_8159306524ac__13[9] = 1;
+		return "", false, nil
+	}
+	goCover_8159306524ac__13[5] = 1;if value.raw == "" {goCover_8159306524ac__13[10] = 1;
+		return "", false, reqx.BadRequest(reqx.InvalidUUID(reqx.InQuery, name))
+	}
+
+	goCover_8159306524ac__13[6] = 1;parsed, err := uuid.Parse(value.raw)
+	if err != nil {goCover_8159306524ac__13[11] = 1;
+		return "", false, reqx.BadRequest(reqx.InvalidUUID(reqx.InQuery, name))
+	}
+	goCover_8159306524ac__13[7] = 1;return parsed.String(), true, nil
+}
+
+func (q QueryReader) UUIDs(name string) ([]string, bool, error) {goCover_8159306524ac__14[0] = 9 ; goCover_8159306524ac__14[1] = goCover_8159306524ac_P ; goCover_8159306524ac__14[2] = 14 ; goCover_8159306524ac__14[3] = 1;
+	values, err := q.list(name)
+	if err != nil {goCover_8159306524ac__14[7] = 1;
+		return nil, false, err
+	}
+	goCover_8159306524ac__14[4] = 1;if len(values) == 0 {goCover_8159306524ac__14[8] = 1;
+		return nil, false, nil
+	}
+
+	goCover_8159306524ac__14[5] = 1;parsedValues := make([]string, 0, len(values))
+	for _, value := range values {goCover_8159306524ac__14[9] = 1;
+		parsed, err := uuid.Parse(value)
+		if err != nil {goCover_8159306524ac__14[11] = 1;
+			return nil, false, reqx.BadRequest(reqx.InvalidUUID(reqx.InQuery, name))
+		}
+		goCover_8159306524ac__14[10] = 1;parsedValues = append(parsedValues, parsed.String())
+	}
+	goCover_8159306524ac__14[6] = 1;return parsedValues, true, nil
+}
+
+func (q QueryReader) RequiredUUID(name string) (string, error) {goCover_8159306524ac__15[0] = 9 ; goCover_8159306524ac__15[1] = goCover_8159306524ac_P ; goCover_8159306524ac__15[2] = 15 ; goCover_8159306524ac__15[3] = 1;
+	value, err := q.scalar(name)
+	if err != nil {goCover_8159306524ac__15[8] = 1;
+		return "", err
+	}
+	goCover_8159306524ac__15[4] = 1;if !value.present {goCover_8159306524ac__15[9] = 1;
+		return "", reqx.BadRequest(reqx.Required(reqx.InQuery, name))
+	}
+	goCover_8159306524ac__15[5] = 1;if value.raw == "" {goCover_8159306524ac__15[10] = 1;
+		return "", reqx.BadRequest(reqx.InvalidUUID(reqx.InQuery, name))
+	}
+
+	goCover_8159306524ac__15[6] = 1;parsed, err := uuid.Parse(value.raw)
+	if err != nil {goCover_8159306524ac__15[11] = 1;
+		return "", reqx.BadRequest(reqx.InvalidUUID(reqx.InQuery, name))
+	}
+	goCover_8159306524ac__15[7] = 1;return parsed.String(), nil
+}
+
+func (q QueryReader) RequiredUUIDs(name string) ([]string, error) {goCover_8159306524ac__16[0] = 9 ; goCover_8159306524ac__16[1] = goCover_8159306524ac_P ; goCover_8159306524ac__16[2] = 16 ; goCover_8159306524ac__16[3] = 1;
+	values, err := q.list(name)
+	if err != nil {goCover_8159306524ac__16[7] = 1;
+		return nil, err
+	}
+	goCover_8159306524ac__16[4] = 1;if len(values) == 0 {goCover_8159306524ac__16[8] = 1;
+		return nil, reqx.BadRequest(reqx.Required(reqx.InQuery, name))
+	}
+
+	goCover_8159306524ac__16[5] = 1;parsedValues := make([]string, 0, len(values))
+	for _, value := range values {goCover_8159306524ac__16[9] = 1;
+		parsed, err := uuid.Parse(value)
+		if err != nil {goCover_8159306524ac__16[11] = 1;
+			return nil, reqx.BadRequest(reqx.InvalidUUID(reqx.InQuery, name))
+		}
+		goCover_8159306524ac__16[10] = 1;parsedValues = append(parsedValues, parsed.String())
+	}
+	goCover_8159306524ac__16[6] = 1;return parsedValues, nil
+}
+
+func (q QueryReader) Bool(name string) (bool, bool, error) {goCover_8159306524ac__17[0] = 8 ; goCover_8159306524ac__17[1] = goCover_8159306524ac_P ; goCover_8159306524ac__17[2] = 17 ; goCover_8159306524ac__17[3] = 1;
+	value, err := q.scalar(name)
+	if err != nil {goCover_8159306524ac__17[6] = 1;
+		return false, false, err
+	}
+	goCover_8159306524ac__17[4] = 1;if !value.present {goCover_8159306524ac__17[7] = 1;
+		return false, false, nil
+	}
+
+	goCover_8159306524ac__17[5] = 1;switch value.raw {
+	case "true":goCover_8159306524ac__17[8] = 1;
+		return true, true, nil
+	case "false":goCover_8159306524ac__17[9] = 1;
+		return false, true, nil
+	default:goCover_8159306524ac__17[10] = 1;
+		return false, false, reqx.BadRequest(reqx.InvalidValue(reqx.InQuery, name))
+	}
+}
+
+func (q QueryReader) RequiredBool(name string) (bool, error) {goCover_8159306524ac__18[0] = 8 ; goCover_8159306524ac__18[1] = goCover_8159306524ac_P ; goCover_8159306524ac__18[2] = 18 ; goCover_8159306524ac__18[3] = 1;
+	value, err := q.scalar(name)
+	if err != nil {goCover_8159306524ac__18[6] = 1;
+		return false, err
+	}
+	goCover_8159306524ac__18[4] = 1;if !value.present {goCover_8159306524ac__18[7] = 1;
+		return false, reqx.BadRequest(reqx.Required(reqx.InQuery, name))
+	}
+
+	goCover_8159306524ac__18[5] = 1;switch value.raw {
+	case "true":goCover_8159306524ac__18[8] = 1;
+		return true, nil
+	case "false":goCover_8159306524ac__18[9] = 1;
+		return false, nil
+	default:goCover_8159306524ac__18[10] = 1;
+		return false, reqx.BadRequest(reqx.InvalidValue(reqx.InQuery, name))
+	}
+}
+
+type scalarValue struct {
+	raw     string
+	present bool
+}
+
+func (q QueryReader) list(name string) ([]string, error) {goCover_8159306524ac__19[0] = 11 ; goCover_8159306524ac__19[1] = goCover_8159306524ac_P ; goCover_8159306524ac__19[2] = 19 ; goCover_8159306524ac__19[3] = 1;
+	name, err := normalizeName(name)
+	if err != nil {goCover_8159306524ac__19[8] = 1;
+		return nil, err
+	}
+	goCover_8159306524ac__19[4] = 1;if q.request == nil {goCover_8159306524ac__19[9] = 1;
+		return nil, errors.New("paramx: request must not be nil")
+	}
+
+	goCover_8159306524ac__19[5] = 1;rawValues := q.request.URL.Query()[name]
+	if len(rawValues) == 0 {goCover_8159306524ac__19[10] = 1;
+		return nil, nil
+	}
+
+	goCover_8159306524ac__19[6] = 1;values := make([]string, 0, len(rawValues))
+	for _, rawValue := range rawValues {goCover_8159306524ac__19[11] = 1;
+		value := strings.TrimSpace(rawValue)
+		if value == "" {goCover_8159306524ac__19[13] = 1;
+			return nil, reqx.BadRequest(reqx.InvalidValue(reqx.InQuery, name))
+		}
+		goCover_8159306524ac__19[12] = 1;values = append(values, value)
+	}
+	goCover_8159306524ac__19[7] = 1;return values, nil
+}
+
+func (q QueryReader) scalar(name string) (scalarValue, error) {goCover_8159306524ac__20[0] = 8 ; goCover_8159306524ac__20[1] = goCover_8159306524ac_P ; goCover_8159306524ac__20[2] = 20 ; goCover_8159306524ac__20[3] = 1;
+	name, err := normalizeName(name)
+	if err != nil {goCover_8159306524ac__20[6] = 1;
+		return scalarValue{}, err
+	}
+	goCover_8159306524ac__20[4] = 1;if q.request == nil {goCover_8159306524ac__20[7] = 1;
+		return scalarValue{}, errors.New("paramx: request must not be nil")
+	}
+
+	goCover_8159306524ac__20[5] = 1;values := q.request.URL.Query()[name]
+	switch len(values) {
+	case 0:goCover_8159306524ac__20[8] = 1;
+		return scalarValue{}, nil
+	case 1:goCover_8159306524ac__20[9] = 1;
+		return scalarValue{
+			raw:     strings.TrimSpace(values[0]),
+			present: true,
+		}, nil
+	default:goCover_8159306524ac__20[10] = 1;
+		return scalarValue{}, reqx.BadRequest(reqx.MultipleValues(reqx.InQuery, name))
+	}
+}
+
+func normalizeName(name string) (string, error) {goCover_8159306524ac__21[0] = 3 ; goCover_8159306524ac__21[1] = goCover_8159306524ac_P ; goCover_8159306524ac__21[2] = 21 ; goCover_8159306524ac__21[3] = 1;
+	name = strings.TrimSpace(name)
+	if name == "" {goCover_8159306524ac__21[5] = 1;
+		return "", errors.New("paramx: name must not be blank")
+	}
+	goCover_8159306524ac__21[4] = 1;return name, nil
+}

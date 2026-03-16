@@ -1,0 +1,20 @@
+//line /Users/yogo/Work/chix/chix.go:1:1
+package chix
+
+import (
+	"github.com/kanata996/chix/internal/paramx"
+	"net/http"
+)
+
+type PathReader = paramx.PathReader
+type QueryReader = paramx.QueryReader
+
+// Path returns a chi-backed path reader.
+func Path(r *http.Request) PathReader {goCover_30f523716387__0[0] = 1 ; goCover_30f523716387__0[1] = goCover_30f523716387_P ; goCover_30f523716387__0[2] = 0 ; goCover_30f523716387__0[3] = 1;
+	return paramx.Path(r)
+}
+
+// Query returns a query reader with chix's default parsing semantics.
+func Query(r *http.Request) QueryReader {goCover_30f523716387__1[0] = 1 ; goCover_30f523716387__1[1] = goCover_30f523716387_P ; goCover_30f523716387__1[2] = 1 ; goCover_30f523716387__1[3] = 1;
+	return paramx.Query(r)
+}

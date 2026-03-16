@@ -1,0 +1,8 @@
+./chain.go
+./doc.go
+./errx.go
+./mapper.go
+./meta.go
+./errx_test.go
+./example_test.go
+./mapping_test.go

@@ -82,6 +82,25 @@ func TestDecodeJSON(t *testing.T) {
 		}
 	})
 
+	t.Run("top-level null body", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(` null `))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		var got payload
+		err := DecodeJSON(rec, req, &got)
+		problem, ok := AsProblem(err)
+		if !ok {
+			t.Fatalf("expected problem, got %T (%v)", err, err)
+		}
+		if problem.StatusCode != http.StatusBadRequest {
+			t.Fatalf("unexpected status: %d", problem.StatusCode)
+		}
+		if len(problem.Details) != 1 || problem.Details[0] != Required(InBody, "body") {
+			t.Fatalf("unexpected details: %#v", problem.Details)
+		}
+	})
+
 	t.Run("invalid type", func(t *testing.T) {
 		type countPayload struct {
 			Count int `json:"count"`
@@ -285,6 +304,25 @@ func TestDecodeJSONWith(t *testing.T) {
 		}
 		if problem.StatusCode != http.StatusRequestEntityTooLarge {
 			t.Fatalf("unexpected status: %d", problem.StatusCode)
+		}
+	})
+
+	t.Run("top-level null body", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`null`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		var got payload
+		err := DecodeJSONWith(rec, req, &got, DecodeOptions{AllowUnknownFields: true})
+		problem, ok := AsProblem(err)
+		if !ok {
+			t.Fatalf("expected problem, got %T (%v)", err, err)
+		}
+		if problem.StatusCode != http.StatusBadRequest {
+			t.Fatalf("unexpected status: %d", problem.StatusCode)
+		}
+		if len(problem.Details) != 1 || problem.Details[0] != Required(InBody, "body") {
+			t.Fatalf("unexpected details: %#v", problem.Details)
 		}
 	})
 }

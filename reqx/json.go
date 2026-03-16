@@ -1,6 +1,7 @@
 package reqx
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,8 +52,17 @@ func DecodeJSONWith(w http.ResponseWriter, r *http.Request, target any, options 
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, options.MaxBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return mapJSONError(err)
+	}
 
-	decoder := json.NewDecoder(r.Body)
+	trimmedBody := bytes.TrimSpace(body)
+	if len(trimmedBody) == 0 || bytes.Equal(trimmedBody, []byte("null")) {
+		return BadRequest(Required(InBody, "body"))
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	if !options.AllowUnknownFields {
 		decoder.DisallowUnknownFields()
 	}

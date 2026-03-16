@@ -28,7 +28,8 @@
 //
 // 稳定输入/输出：
 //   - DecodeJSON 统一处理 content-type、payload too large、unknown field、
-//     trailing data、JSON 语法错误和类型错误；需要非 nil 指针 target。
+//     trailing data、JSON 语法错误和类型错误；空 body 或 top-level null body
+//     会统一按缺失 payload 处理；需要非 nil 指针 target。
 //   - DecodeJSONWith 可按 endpoint 覆盖默认大小限制、unknown field 策略或
 //     content-type 检查。
 //   - ValidateBody / ValidateQuery / ValidatePath 只接受非 nil `*struct`。
