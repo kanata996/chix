@@ -1,0 +1,54 @@
+//line /Users/yogo/Work/chix/resp/error.go:1:1
+package resp
+
+import (
+	"context"
+	"github.com/kanata996/chix/errx"
+	"log/slog"
+	"net/http"
+)
+
+// Error 写业务/系统错误响应。
+// 它优先保留 errx 内建语义；只有未识别时才进入 feature mapper。
+func Error(w http.ResponseWriter, r *http.Request, err error, mapper errx.Mapper) {goCover_a9a7cd90d936__0[0] = 5 ; goCover_a9a7cd90d936__0[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__0[2] = 0 ; goCover_a9a7cd90d936__0[3] = 1;
+	mapping, invalidMappingErr := resolveErrorMapping(err, mapper)
+
+	if mapping.StatusCode >= http.StatusInternalServerError {goCover_a9a7cd90d936__0[5] = 1;
+		attrs := []any{
+			"error", err,
+			"error_chain", errx.FormatChain(err),
+		}
+		if invalidMappingErr != nil {goCover_a9a7cd90d936__0[7] = 1;
+			attrs = append(attrs, "invalid_mapping", true)
+			attrs = append(attrs, "invalid_mapping_error", invalidMappingErr)
+		}
+		goCover_a9a7cd90d936__0[6] = 1;slog.ErrorContext(requestContext(r), "internal error", attrs...)
+	}
+
+	goCover_a9a7cd90d936__0[4] = 1;writeErrorEnvelope(w, mapping, nil)
+}
+
+// requestContext 统一兜底 nil request，保证边界日志始终有合法 context。
+func requestContext(r *http.Request) context.Context {goCover_a9a7cd90d936__1[0] = 3 ; goCover_a9a7cd90d936__1[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__1[2] = 1 ; goCover_a9a7cd90d936__1[3] = 1;
+	if r == nil {goCover_a9a7cd90d936__1[5] = 1;
+		return context.Background()
+	}
+	goCover_a9a7cd90d936__1[4] = 1;return r.Context()
+}
+
+// resolveErrorMapping 统一处理 Error 的映射优先级：
+// errx 内建语义 -> feature mapper -> internal fallback。
+func resolveErrorMapping(err error, mapper errx.Mapper) (errx.Mapping, error) {goCover_a9a7cd90d936__2[0] = 7 ; goCover_a9a7cd90d936__2[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__2[2] = 2 ; goCover_a9a7cd90d936__2[3] = 1;
+	if mapping, ok := errx.Lookup(err); ok {goCover_a9a7cd90d936__2[7] = 1;
+		return mapping, nil
+	}
+	goCover_a9a7cd90d936__2[4] = 1;if mapper == nil {goCover_a9a7cd90d936__2[8] = 1;
+		return internalMapping, nil
+	}
+
+	goCover_a9a7cd90d936__2[5] = 1;mapping := mapper.Map(err)
+	if validationErr := mapping.Validate(); validationErr != nil {goCover_a9a7cd90d936__2[9] = 1;
+		return internalMapping, validationErr
+	}
+	goCover_a9a7cd90d936__2[6] = 1;return mapping, nil
+}

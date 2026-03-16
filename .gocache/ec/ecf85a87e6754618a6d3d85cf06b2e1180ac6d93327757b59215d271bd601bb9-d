@@ -1,0 +1,142 @@
+//line /Users/yogo/Work/chix/reqx/json.go:1:1
+package reqx
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"reflect"
+	"strings"
+)
+
+// DefaultJSONMaxBytes 是默认 JSON body 大小上限，当前为 1 MiB。
+const DefaultJSONMaxBytes int64 = 1 << 20
+
+// DecodeOptions 用于覆盖默认的严格 JSON 解码策略。
+// 零值会沿用 DecodeJSON 的默认行为。
+type DecodeOptions struct {
+	MaxBytes             int64
+	AllowUnknownFields   bool
+	SkipContentTypeCheck bool
+}
+
+// DecodeJSON 负责 JSON body 的通用边界检查。
+// 它会处理 content-type、大小限制、unknown field、trailing data
+// 以及常见 JSON 语法/类型错误，并统一返回 *Problem。
+func DecodeJSON(w http.ResponseWriter, r *http.Request, target any) error {goCover_383483981573__0[0] = 1 ; goCover_383483981573__0[1] = goCover_383483981573_P ; goCover_383483981573__0[2] = 0 ; goCover_383483981573__0[3] = 1;
+	return DecodeJSONWith(w, r, target, DecodeOptions{})
+}
+
+// DecodeJSONWith 与 DecodeJSON 行为一致，但允许按 endpoint 覆盖默认策略。
+func DecodeJSONWith(w http.ResponseWriter, r *http.Request, target any, options DecodeOptions) error {goCover_383483981573__1[0] = 21 ; goCover_383483981573__1[1] = goCover_383483981573_P ; goCover_383483981573__1[2] = 1 ; goCover_383483981573__1[3] = 1;
+	if w == nil {goCover_383483981573__1[12] = 1;
+		return ErrNilResponseWriter
+	}
+	goCover_383483981573__1[4] = 1;if r == nil {goCover_383483981573__1[13] = 1;
+		return ErrNilRequest
+	}
+	goCover_383483981573__1[5] = 1;if target == nil {goCover_383483981573__1[14] = 1;
+		return ErrNilTarget
+	}
+	goCover_383483981573__1[6] = 1;if err := validateDecodeTarget(target); err != nil {goCover_383483981573__1[15] = 1;
+		return err
+	}
+
+	goCover_383483981573__1[7] = 1;options = normalizeDecodeOptions(options)
+
+	if !options.SkipContentTypeCheck && !hasJSONContentType(r.Header.Get("Content-Type")) {goCover_383483981573__1[16] = 1;
+		return UnsupportedMediaType()
+	}
+
+	goCover_383483981573__1[8] = 1;r.Body = http.MaxBytesReader(w, r.Body, options.MaxBytes)
+
+	decoder := json.NewDecoder(r.Body)
+	if !options.AllowUnknownFields {goCover_383483981573__1[17] = 1;
+		decoder.DisallowUnknownFields()
+	}
+	goCover_383483981573__1[9] = 1;if err := decoder.Decode(target); err != nil {goCover_383483981573__1[18] = 1;
+		return mapJSONError(err)
+	}
+
+	goCover_383483981573__1[10] = 1;if err := decoder.Decode(&struct{}{}); err == nil {goCover_383483981573__1[19] = 1;
+		return BadRequest(TrailingData())
+	} else{ goCover_383483981573__1[20] = 1;if !errors.Is(err, io.EOF) {goCover_383483981573__1[21] = 1;
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {goCover_383483981573__1[23] = 1;
+			return PayloadTooLarge()
+		}
+		goCover_383483981573__1[22] = 1;return BadRequest(TrailingData())
+	}}
+
+	goCover_383483981573__1[11] = 1;return nil
+}
+
+func normalizeDecodeOptions(options DecodeOptions) DecodeOptions {goCover_383483981573__2[0] = 3 ; goCover_383483981573__2[1] = goCover_383483981573_P ; goCover_383483981573__2[2] = 2 ; goCover_383483981573__2[3] = 1;
+	if options.MaxBytes <= 0 {goCover_383483981573__2[5] = 1;
+		options.MaxBytes = DefaultJSONMaxBytes
+	}
+	goCover_383483981573__2[4] = 1;return options
+}
+
+func validateDecodeTarget(target any) error {goCover_383483981573__3[0] = 7 ; goCover_383483981573__3[1] = goCover_383483981573_P ; goCover_383483981573__3[2] = 3 ; goCover_383483981573__3[3] = 1;
+	value := reflect.ValueOf(target)
+	if !value.IsValid() {goCover_383483981573__3[7] = 1;
+		return ErrNilTarget
+	}
+	goCover_383483981573__3[4] = 1;if value.Kind() != reflect.Pointer {goCover_383483981573__3[8] = 1;
+		return fmt.Errorf("%w: target must be a non-nil pointer", ErrInvalidDecodeTarget)
+	}
+	goCover_383483981573__3[5] = 1;if value.IsNil() {goCover_383483981573__3[9] = 1;
+		return fmt.Errorf("%w: target must be a non-nil pointer", ErrInvalidDecodeTarget)
+	}
+	goCover_383483981573__3[6] = 1;return nil
+}
+
+func hasJSONContentType(contentType string) bool {goCover_383483981573__4[0] = 3 ; goCover_383483981573__4[1] = goCover_383483981573_P ; goCover_383483981573__4[2] = 4 ; goCover_383483981573__4[3] = 1;
+	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(contentType))
+	if err != nil {goCover_383483981573__4[5] = 1;
+		return false
+	}
+	goCover_383483981573__4[4] = 1;return mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")
+}
+
+// mapJSONError 把底层 JSON 解码错误压成稳定的请求错误细节。
+func mapJSONError(err error) error {goCover_383483981573__5[0] = 15 ; goCover_383483981573__5[1] = goCover_383483981573_P ; goCover_383483981573__5[2] = 5 ; goCover_383483981573__5[3] = 1;
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {goCover_383483981573__5[9] = 1;
+		return PayloadTooLarge()
+	}
+
+	goCover_383483981573__5[4] = 1;if errors.Is(err, io.EOF) {goCover_383483981573__5[10] = 1;
+		return BadRequest(Required(InBody, "body"))
+	}
+
+	goCover_383483981573__5[5] = 1;var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {goCover_383483981573__5[11] = 1;
+		return BadRequest(MalformedJSON())
+	}
+
+	goCover_383483981573__5[6] = 1;var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {goCover_383483981573__5[12] = 1;
+		field := strings.TrimSpace(typeErr.Field)
+		if field == "" {goCover_383483981573__5[14] = 1;
+			field = "body"
+		}
+		goCover_383483981573__5[13] = 1;return BadRequest(InvalidType(InBody, field))
+	}
+
+	goCover_383483981573__5[7] = 1;const unknownFieldPrefix = "json: unknown field "
+	msg := err.Error()
+	if strings.HasPrefix(msg, unknownFieldPrefix) {goCover_383483981573__5[15] = 1;
+		field := strings.Trim(strings.TrimPrefix(msg, unknownFieldPrefix), "\"")
+		if field == "" {goCover_383483981573__5[17] = 1;
+			field = "body"
+		}
+		goCover_383483981573__5[16] = 1;return BadRequest(UnknownField(field))
+	}
+
+	goCover_383483981573__5[8] = 1;return BadRequest(MalformedJSON())
+}

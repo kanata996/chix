@@ -1,0 +1,77 @@
+//line /Users/yogo/Work/chix/resp/success.go:1:1
+package resp
+
+import (
+	"bytes"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+)
+
+// Success 写 200 统一成功包络。
+// 调用方必须保证 data 语义完整且顶层编码后非 null。
+func Success(w http.ResponseWriter, data any) {goCover_a9a7cd90d936__13[0] = 1 ; goCover_a9a7cd90d936__13[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__13[2] = 13 ; goCover_a9a7cd90d936__13[3] = 1;
+	writeSuccess(w, http.StatusOK, data)
+}
+
+// Created 写 201 统一成功包络。
+// 调用方必须保证 data 语义完整且顶层编码后非 null。
+func Created(w http.ResponseWriter, data any) {goCover_a9a7cd90d936__14[0] = 1 ; goCover_a9a7cd90d936__14[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__14[2] = 14 ; goCover_a9a7cd90d936__14[3] = 1;
+	writeSuccess(w, http.StatusCreated, data)
+}
+
+// writeSuccess 负责 success 包络的统一写回。
+// 若 payload 缺失或边界编码失败，则 fail-closed 为裸 500。
+func writeSuccess(w http.ResponseWriter, statusCode int, data any) {goCover_a9a7cd90d936__15[0] = 5 ; goCover_a9a7cd90d936__15[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__15[2] = 15 ; goCover_a9a7cd90d936__15[3] = 1;
+	dataBody, ok := encodeSuccessData(w, statusCode, data)
+	if !ok {goCover_a9a7cd90d936__15[6] = 1;
+		return
+	}
+
+	goCover_a9a7cd90d936__15[4] = 1;body, err := encodeJSON(envelope{Code: 0, Data: json.RawMessage(dataBody)})
+	if err != nil {goCover_a9a7cd90d936__15[7] = 1;
+		failClosedSuccess(w, statusCode, "could not encode success response", err)
+		return
+	}
+
+	goCover_a9a7cd90d936__15[5] = 1;writeJSONBody(w, statusCode, body)
+}
+
+// encodeSuccessData 预先验证 success payload 是否存在且不会编码成顶层 null。
+func encodeSuccessData(w http.ResponseWriter, statusCode int, data any) ([]byte, bool) {goCover_a9a7cd90d936__16[0] = 7 ; goCover_a9a7cd90d936__16[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__16[2] = 16 ; goCover_a9a7cd90d936__16[3] = 1;
+	if data == nil {goCover_a9a7cd90d936__16[7] = 1;
+		failClosedSuccess(w, statusCode, "missing success response payload", nil)
+		return nil, false
+	}
+
+	goCover_a9a7cd90d936__16[4] = 1;dataBody, err := encodeJSON(data)
+	if err != nil {goCover_a9a7cd90d936__16[8] = 1;
+		failClosedSuccess(w, statusCode, "could not encode success response", err)
+		return nil, false
+	}
+
+	goCover_a9a7cd90d936__16[5] = 1;dataBody = bytes.TrimSpace(dataBody)
+	if len(dataBody) == 0 || bytes.Equal(dataBody, []byte("null")) {goCover_a9a7cd90d936__16[9] = 1;
+		failClosedSuccess(w, statusCode, "missing success response payload", nil)
+		return nil, false
+	}
+
+	goCover_a9a7cd90d936__16[6] = 1;return dataBody, true
+}
+
+// failClosedSuccess 统一处理 success 边界自故障。
+func failClosedSuccess(w http.ResponseWriter, statusCode int, message string, err error) {goCover_a9a7cd90d936__17[0] = 4 ; goCover_a9a7cd90d936__17[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__17[2] = 17 ; goCover_a9a7cd90d936__17[3] = 1;
+	attrs := []any{"status_code", statusCode}
+	if err != nil {goCover_a9a7cd90d936__17[5] = 1;
+		attrs = append(attrs, "error", err)
+	}
+	goCover_a9a7cd90d936__17[4] = 1;slog.Error(message, attrs...)
+	if w != nil {goCover_a9a7cd90d936__17[6] = 1;
+		writeStatusOnly(w, http.StatusInternalServerError)
+	}
+}
+
+// NoContent 写 204 无 body 成功响应。
+func NoContent(w http.ResponseWriter) {goCover_a9a7cd90d936__18[0] = 1 ; goCover_a9a7cd90d936__18[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__18[2] = 18 ; goCover_a9a7cd90d936__18[3] = 1;
+	writeStatusOnly(w, http.StatusNoContent)
+}

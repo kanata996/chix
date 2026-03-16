@@ -1,0 +1,271 @@
+//line /Users/yogo/Work/chix/reqx/validate.go:1:1
+package reqx
+
+import (
+	"errors"
+	"fmt"
+	"reflect"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/go-playground/validator/v10"
+)
+
+var (
+	validatorOnce      sync.Once
+	validatorInstances map[sourceKind]*validator.Validate
+)
+
+// Normalizer 允许 DTO 在校验前先做最小规范化。
+// 常见用法是 trim 字符串、归一化空值或默认值。
+type Normalizer interface {
+	Normalize()
+}
+
+type sourceKind string
+
+const (
+	sourceJSON  sourceKind = "json"
+	sourceQuery sourceKind = "query"
+	sourcePath  sourceKind = "param"
+)
+
+func ValidateBody(target any) error {goCover_383483981573__23[0] = 1 ; goCover_383483981573__23[1] = goCover_383483981573_P ; goCover_383483981573__23[2] = 23 ; goCover_383483981573__23[3] = 1;
+	return validateForSource(target, sourceJSON)
+}
+
+func ValidateQuery(target any) error {goCover_383483981573__24[0] = 1 ; goCover_383483981573__24[1] = goCover_383483981573_P ; goCover_383483981573__24[2] = 24 ; goCover_383483981573__24[3] = 1;
+	return validateForSource(target, sourceQuery)
+}
+
+func ValidatePath(target any) error {goCover_383483981573__25[0] = 1 ; goCover_383483981573__25[1] = goCover_383483981573_P ; goCover_383483981573__25[2] = 25 ; goCover_383483981573__25[3] = 1;
+	return validateForSource(target, sourcePath)
+}
+
+// validateForSource 统一处理 normalize、validator 校验以及请求错误映射。
+func validateForSource(target any, source sourceKind) error {goCover_383483981573__26[0] = 7 ; goCover_383483981573__26[1] = goCover_383483981573_P ; goCover_383483981573__26[2] = 26 ; goCover_383483981573__26[3] = 1;
+	if err := validateTarget(target); err != nil {goCover_383483981573__26[6] = 1;
+		return err
+	}
+
+	goCover_383483981573__26[4] = 1;normalizeTarget(target)
+
+	details := validateStructForSource(target, source)
+	if len(details) == 0 {goCover_383483981573__26[7] = 1;
+		return nil
+	}
+
+	goCover_383483981573__26[5] = 1;switch source {
+	case sourceJSON:goCover_383483981573__26[8] = 1;
+		return ValidationFailed(details...)
+	default:goCover_383483981573__26[9] = 1;
+		return BadRequest(details...)
+	}
+}
+
+func validateTarget(target any) error {goCover_383483981573__27[0] = 9 ; goCover_383483981573__27[1] = goCover_383483981573_P ; goCover_383483981573__27[2] = 27 ; goCover_383483981573__27[3] = 1;
+	if target == nil {goCover_383483981573__27[8] = 1;
+		return ErrNilTarget
+	}
+
+	goCover_383483981573__27[4] = 1;value := reflect.ValueOf(target)
+	if !value.IsValid() {goCover_383483981573__27[9] = 1;
+		return ErrNilTarget
+	}
+	goCover_383483981573__27[5] = 1;if value.Kind() != reflect.Pointer || value.IsNil() {goCover_383483981573__27[10] = 1;
+		return fmt.Errorf("%w: target must be a non-nil pointer to struct", ErrInvalidValidateTarget)
+	}
+	goCover_383483981573__27[6] = 1;if value.Elem().Kind() != reflect.Struct {goCover_383483981573__27[11] = 1;
+		return fmt.Errorf("%w: target must be a non-nil pointer to struct", ErrInvalidValidateTarget)
+	}
+
+	goCover_383483981573__27[7] = 1;return nil
+}
+
+// validateStructForSource 只做 validator -> []Detail 的转换，不做响应写回。
+func validateStructForSource(target any, source sourceKind) []Detail {goCover_383483981573__28[0] = 9 ; goCover_383483981573__28[1] = goCover_383483981573_P ; goCover_383483981573__28[2] = 28 ; goCover_383483981573__28[3] = 1;
+	in := source.in()
+	err := validatorEngine(source).Struct(target)
+	if err == nil {goCover_383483981573__28[7] = 1;
+		return nil
+	}
+
+	goCover_383483981573__28[4] = 1;var invalidValidationErr *validator.InvalidValidationError
+	if errors.As(err, &invalidValidationErr) {goCover_383483981573__28[8] = 1;
+		field := "request"
+		if in == InBody {goCover_383483981573__28[10] = 1;
+			field = "body"
+		}
+		goCover_383483981573__28[9] = 1;return []Detail{{
+			In:    in,
+			Field: field,
+			Code:  DetailCodeInvalidValue,
+		}}
+	}
+
+	goCover_383483981573__28[5] = 1;var validationErrs validator.ValidationErrors
+	if !errors.As(err, &validationErrs) {goCover_383483981573__28[11] = 1;
+		return nil
+	}
+
+	goCover_383483981573__28[6] = 1;return detailsFromValidation(source, validationErrs)
+}
+
+// validatorEngine 为 body/query/path 分别构造 validator，
+// 这样 Field() 直接就是当前 source 对应的 tag 名，无需再做复杂反射修正。
+func validatorEngine(source sourceKind) *validator.Validate {goCover_383483981573__29[0] = 5 ; goCover_383483981573__29[1] = goCover_383483981573_P ; goCover_383483981573__29[2] = 29 ; goCover_383483981573__29[3] = 1;
+	validatorOnce.Do(func() {goCover_383483981573__29[6] = 1;
+		validatorInstances = map[sourceKind]*validator.Validate{
+			sourceJSON:  newValidator(sourceJSON),
+			sourceQuery: newValidator(sourceQuery),
+			sourcePath:  newValidator(sourcePath),
+		}
+	})
+
+	goCover_383483981573__29[4] = 1;if validatorInstance, ok := validatorInstances[source]; ok {goCover_383483981573__29[7] = 1;
+		return validatorInstance
+	}
+	goCover_383483981573__29[5] = 1;return validatorInstances[sourceJSON]
+}
+
+func newValidator(source sourceKind) *validator.Validate {goCover_383483981573__30[0] = 3 ; goCover_383483981573__30[1] = goCover_383483981573_P ; goCover_383483981573__30[2] = 30 ; goCover_383483981573__30[3] = 1;
+	v := validator.New(validator.WithRequiredStructEnabled())
+	v.RegisterTagNameFunc(func(field reflect.StructField) string {goCover_383483981573__30[5] = 1;
+		return fieldAlias(field, source)
+	})
+	goCover_383483981573__30[4] = 1;mustRegisterValidation(v, "nospace", validateNoSpace)
+	return v
+}
+
+func fieldAlias(field reflect.StructField, source sourceKind) string {goCover_383483981573__31[0] = 4 ; goCover_383483981573__31[1] = goCover_383483981573_P ; goCover_383483981573__31[2] = 31 ; goCover_383483981573__31[3] = 1;
+	for _, tagName := range sourceTagPriority(source) {goCover_383483981573__31[5] = 1;
+		if name := tagValue(field, tagName); name != "" {goCover_383483981573__31[6] = 1;
+			return name
+		}
+	}
+	goCover_383483981573__31[4] = 1;return field.Name
+}
+
+func validationCode(tag string) string {goCover_383483981573__32[0] = 5 ; goCover_383483981573__32[1] = goCover_383483981573_P ; goCover_383483981573__32[2] = 32 ; goCover_383483981573__32[3] = 1;
+	switch tag {
+	case "required":goCover_383483981573__32[4] = 1;
+		return DetailCodeRequired
+	case "uuid", "uuid3", "uuid4", "uuid5", "uuid_rfc4122":goCover_383483981573__32[5] = 1;
+		return DetailCodeInvalidUUID
+	case "min", "max", "len", "gt", "gte", "lt", "lte":goCover_383483981573__32[6] = 1;
+		return DetailCodeOutOfRange
+	default:goCover_383483981573__32[7] = 1;
+		return DetailCodeInvalidValue
+	}
+}
+
+// detailsFromValidation 把 validator 错误压成稳定的 Detail 列表。
+// 这里有意只保留 field/code，不再生成展示型 message。
+func detailsFromValidation(source sourceKind, errs validator.ValidationErrors) []Detail {goCover_383483981573__33[0] = 13 ; goCover_383483981573__33[1] = goCover_383483981573_P ; goCover_383483981573__33[2] = 33 ; goCover_383483981573__33[3] = 1;
+	if len(errs) == 0 {goCover_383483981573__33[8] = 1;
+		return nil
+	}
+
+	goCover_383483981573__33[4] = 1;in := source.in()
+	seen := make(map[string]struct{})
+	type entry struct {
+		field string
+		code  string
+	}
+	entries := make([]entry, 0, len(errs))
+
+	for _, validationErr := range errs {goCover_383483981573__33[9] = 1;
+		field := strings.TrimSpace(validationErr.Field())
+		if field == "" {goCover_383483981573__33[12] = 1;
+			field = defaultField(source)
+		}
+		goCover_383483981573__33[10] = 1;if _, exists := seen[field]; exists {goCover_383483981573__33[13] = 1;
+			continue
+		}
+		goCover_383483981573__33[11] = 1;seen[field] = struct{}{}
+		entries = append(entries, entry{
+			field: field,
+			code:  validationCode(validationErr.Tag()),
+		})
+	}
+
+	goCover_383483981573__33[5] = 1;sort.Slice(entries, func(i int, j int) bool {goCover_383483981573__33[14] = 1;
+		return entries[i].field < entries[j].field
+	})
+
+	goCover_383483981573__33[6] = 1;details := make([]Detail, 0, len(entries))
+	for _, entry := range entries {goCover_383483981573__33[15] = 1;
+		details = append(details, Detail{
+			In:    in,
+			Field: entry.field,
+			Code:  entry.code,
+		})
+	}
+	goCover_383483981573__33[7] = 1;return details
+}
+
+// normalizeTarget 支持 DTO 在校验前自行归一化。
+func normalizeTarget(target any) {goCover_383483981573__34[0] = 2 ; goCover_383483981573__34[1] = goCover_383483981573_P ; goCover_383483981573__34[2] = 34 ; goCover_383483981573__34[3] = 1;
+	if normalizer, ok := target.(Normalizer); ok {goCover_383483981573__34[4] = 1;
+		normalizer.Normalize()
+	}
+}
+
+func (source sourceKind) in() string {goCover_383483981573__35[0] = 5 ; goCover_383483981573__35[1] = goCover_383483981573_P ; goCover_383483981573__35[2] = 35 ; goCover_383483981573__35[3] = 1;
+	switch source {
+	case sourceJSON:goCover_383483981573__35[4] = 1;
+		return InBody
+	case sourcePath:goCover_383483981573__35[5] = 1;
+		return InPath
+	case sourceQuery:goCover_383483981573__35[6] = 1;
+		return InQuery
+	default:goCover_383483981573__35[7] = 1;
+		return InBody
+	}
+}
+
+func tagValue(field reflect.StructField, tagName string) string {goCover_383483981573__36[0] = 5 ; goCover_383483981573__36[1] = goCover_383483981573_P ; goCover_383483981573__36[2] = 36 ; goCover_383483981573__36[3] = 1;
+	value := strings.TrimSpace(field.Tag.Get(tagName))
+	if value == "" {goCover_383483981573__36[6] = 1;
+		return ""
+	}
+	goCover_383483981573__36[4] = 1;value = strings.Split(value, ",")[0]
+	value = strings.TrimSpace(value)
+	if value == "" || value == "-" {goCover_383483981573__36[7] = 1;
+		return ""
+	}
+	goCover_383483981573__36[5] = 1;return value
+}
+
+func sourceTagPriority(source sourceKind) []string {goCover_383483981573__37[0] = 4 ; goCover_383483981573__37[1] = goCover_383483981573_P ; goCover_383483981573__37[2] = 37 ; goCover_383483981573__37[3] = 1;
+	switch source {
+	case sourceQuery:goCover_383483981573__37[4] = 1;
+		return []string{"query", "json", "param"}
+	case sourcePath:goCover_383483981573__37[5] = 1;
+		return []string{"param", "json", "query"}
+	default:goCover_383483981573__37[6] = 1;
+		return []string{"json", "query", "param"}
+	}
+}
+
+func defaultField(source sourceKind) string {goCover_383483981573__38[0] = 3 ; goCover_383483981573__38[1] = goCover_383483981573_P ; goCover_383483981573__38[2] = 38 ; goCover_383483981573__38[3] = 1;
+	if source == sourceJSON {goCover_383483981573__38[5] = 1;
+		return "body"
+	}
+	goCover_383483981573__38[4] = 1;return "request"
+}
+
+func mustRegisterValidation(v *validator.Validate, tag string, fn validator.Func) {goCover_383483981573__39[0] = 2 ; goCover_383483981573__39[1] = goCover_383483981573_P ; goCover_383483981573__39[2] = 39 ; goCover_383483981573__39[3] = 1;
+	if err := v.RegisterValidation(tag, fn); err != nil {goCover_383483981573__39[4] = 1;
+		panic(fmt.Sprintf("reqx: register validator %q: %v", tag, err))
+	}
+}
+
+func validateNoSpace(fl validator.FieldLevel) bool {goCover_383483981573__40[0] = 3 ; goCover_383483981573__40[1] = goCover_383483981573_P ; goCover_383483981573__40[2] = 40 ; goCover_383483981573__40[3] = 1;
+	field := fl.Field()
+	if field.Kind() != reflect.String {goCover_383483981573__40[5] = 1;
+		return false
+	}
+	goCover_383483981573__40[4] = 1;return !strings.ContainsRune(field.String(), ' ')
+}

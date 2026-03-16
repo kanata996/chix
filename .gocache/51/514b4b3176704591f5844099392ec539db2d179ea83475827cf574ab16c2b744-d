@@ -1,0 +1,31 @@
+//line /Users/yogo/Work/chix/resp/problem.go:1:1
+package resp
+
+import (
+	"github.com/kanata996/chix/reqx"
+	"log/slog"
+	"net/http"
+)
+
+// Problem 写请求错误响应。
+// 它只接受 reqx.Problem；其他 error 会被视为边界故障并回退到 internal。
+func Problem(w http.ResponseWriter, r *http.Request, err error) {goCover_a9a7cd90d936__3[0] = 5 ; goCover_a9a7cd90d936__3[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__3[2] = 3 ; goCover_a9a7cd90d936__3[3] = 1;
+	problem, ok := reqx.AsProblem(err)
+	if !ok {goCover_a9a7cd90d936__3[6] = 1;
+		slog.ErrorContext(requestContext(r), "unexpected non-problem request error", "error", err)
+		writeInternalEnvelope(w)
+		return
+	}
+
+	goCover_a9a7cd90d936__3[4] = 1;code, ok := lookupRequestProblemCode(problem.StatusCode)
+	if !ok {goCover_a9a7cd90d936__3[7] = 1;
+		slog.ErrorContext(requestContext(r), "invalid request problem status",
+			"status_code", problem.StatusCode,
+			"error", err,
+		)
+		writeInternalEnvelope(w)
+		return
+	}
+
+	goCover_a9a7cd90d936__3[5] = 1;writeProblemEnvelope(w, problem.StatusCode, code, problem.Error(), problem.Details)
+}

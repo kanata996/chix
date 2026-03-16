@@ -1,0 +1,118 @@
+//line /Users/yogo/Work/chix/resp/resp.go:1:1
+package resp
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"github.com/kanata996/chix/errx"
+	"github.com/kanata996/chix/reqx"
+	"log/slog"
+	"net/http"
+)
+
+type envelope struct {
+	Code    int64         `json:"code"`
+	Message string        `json:"message,omitempty"`
+	Data    any           `json:"data,omitempty"`
+	Details []reqx.Detail `json:"details,omitempty"`
+}
+
+var (
+	internalMapping = mustMapping(errx.Internal(errx.CodeInternal))
+
+	requestProblemCodes = map[int]int64{
+		http.StatusBadRequest:            errx.CodeInvalidRequest,
+		http.StatusRequestEntityTooLarge: errx.CodePayloadTooLarge,
+		http.StatusUnsupportedMediaType:  errx.CodeUnsupportedMediaType,
+		http.StatusUnprocessableEntity:   errx.CodeUnprocessableEntity,
+	}
+)
+
+// encodeJSON 只负责把 payload 编成一段完整 JSON，不直接写回响应。
+func encodeJSON(payload any) ([]byte, error) {goCover_a9a7cd90d936__4[0] = 3 ; goCover_a9a7cd90d936__4[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__4[2] = 4 ; goCover_a9a7cd90d936__4[3] = 1;
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(payload); err != nil {goCover_a9a7cd90d936__4[5] = 1;
+		return nil, err
+	}
+	goCover_a9a7cd90d936__4[4] = 1;return buf.Bytes(), nil
+}
+
+// writeJSON 是 resp 最底层的 JSON 写回 helper。
+// 若边界自身编码失败，则 fail-closed 为裸 500。
+func writeJSON(w http.ResponseWriter, statusCode int, payload any) {goCover_a9a7cd90d936__5[0] = 3 ; goCover_a9a7cd90d936__5[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__5[2] = 5 ; goCover_a9a7cd90d936__5[3] = 1;
+	body, err := encodeJSON(payload)
+	if err != nil {goCover_a9a7cd90d936__5[5] = 1;
+		slog.Error("could not encode response",
+			"status_code", statusCode,
+			"error", err,
+		)
+		writeStatusOnly(w, http.StatusInternalServerError)
+		return
+	}
+
+	goCover_a9a7cd90d936__5[4] = 1;writeJSONBody(w, statusCode, body)
+}
+
+// writeErrorEnvelope 统一写业务/系统错误包络。
+func writeErrorEnvelope(w http.ResponseWriter, mapping errx.Mapping, details []reqx.Detail) {goCover_a9a7cd90d936__6[0] = 3 ; goCover_a9a7cd90d936__6[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__6[2] = 6 ; goCover_a9a7cd90d936__6[3] = 1;
+	payload := envelope{
+		Code:    mapping.Code,
+		Message: mapping.Message,
+	}
+	if len(details) != 0 {goCover_a9a7cd90d936__6[5] = 1;
+		payload.Details = append([]reqx.Detail(nil), details...)
+	}
+	goCover_a9a7cd90d936__6[4] = 1;writeJSON(w, mapping.StatusCode, payload)
+}
+
+// writeInternalEnvelope 用于边界自故障时回退到标准 internal 包络。
+func writeInternalEnvelope(w http.ResponseWriter) {goCover_a9a7cd90d936__7[0] = 1 ; goCover_a9a7cd90d936__7[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__7[2] = 7 ; goCover_a9a7cd90d936__7[3] = 1;
+	writeErrorEnvelope(w, internalMapping, nil)
+}
+
+// writeProblemEnvelope 统一写请求错误包络。
+// 请求错误 message 跟随 reqx.Problem 的 HTTP 语义，code 由 resp 侧稳定映射。
+func writeProblemEnvelope(w http.ResponseWriter, statusCode int, code int64, message string, details []reqx.Detail) {goCover_a9a7cd90d936__8[0] = 3 ; goCover_a9a7cd90d936__8[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__8[2] = 8 ; goCover_a9a7cd90d936__8[3] = 1;
+	payload := envelope{
+		Code:    code,
+		Message: message,
+	}
+	if len(details) != 0 {goCover_a9a7cd90d936__8[5] = 1;
+		payload.Details = append([]reqx.Detail(nil), details...)
+	}
+	goCover_a9a7cd90d936__8[4] = 1;writeJSON(w, statusCode, payload)
+}
+
+// writeStatusOnly 用于 fail-closed 场景或无 body 场景。
+func writeStatusOnly(w http.ResponseWriter, statusCode int) {goCover_a9a7cd90d936__9[0] = 1 ; goCover_a9a7cd90d936__9[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__9[2] = 9 ; goCover_a9a7cd90d936__9[3] = 1;
+	w.Header().Del("Content-Type")
+	w.WriteHeader(statusCode)
+}
+
+// writeJSONBody 假定 body 已经编码完成，只负责最终写回。
+// 若写回阶段发生 transport 错误，只做 best-effort 观测，不再改写响应。
+func writeJSONBody(w http.ResponseWriter, statusCode int, body []byte) {goCover_a9a7cd90d936__10[0] = 2 ; goCover_a9a7cd90d936__10[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__10[2] = 10 ; goCover_a9a7cd90d936__10[3] = 1;
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	if _, err := w.Write(body); err != nil {goCover_a9a7cd90d936__10[4] = 1;
+		slog.Warn("response write failed",
+			"status_code", statusCode,
+			"error", err,
+		)
+	}
+}
+
+// lookupRequestProblemCode 把请求类 HTTP 状态码映射到稳定错误码。
+func lookupRequestProblemCode(statusCode int) (int64, bool) {goCover_a9a7cd90d936__11[0] = 1 ; goCover_a9a7cd90d936__11[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__11[2] = 11 ; goCover_a9a7cd90d936__11[3] = 1;
+	code, ok := requestProblemCodes[statusCode]
+	return code, ok
+}
+
+// mustMapping 用于声明期校验 resp 内建 mapping，避免把契约问题拖到运行时。
+func mustMapping(mapping errx.Mapping) errx.Mapping {goCover_a9a7cd90d936__12[0] = 3 ; goCover_a9a7cd90d936__12[1] = goCover_a9a7cd90d936_P ; goCover_a9a7cd90d936__12[2] = 12 ; goCover_a9a7cd90d936__12[3] = 1;
+	if err := mapping.Validate(); err != nil {goCover_a9a7cd90d936__12[5] = 1;
+		panic(fmt.Sprintf("resp: invalid mapping: %v", err))
+	}
+	goCover_a9a7cd90d936__12[4] = 1;return mapping
+}

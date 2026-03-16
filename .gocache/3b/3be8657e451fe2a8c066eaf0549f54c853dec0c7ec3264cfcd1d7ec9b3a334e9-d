@@ -1,0 +1,39 @@
+//line /Users/yogo/Work/chix/errx/chain.go:1:1
+package errx
+
+import "strings"
+
+const maxChainDepth = 32
+
+func FormatChain(err error) string {goCover_f4d5289bb932__0[0] = 5 ; goCover_f4d5289bb932__0[1] = goCover_f4d5289bb932_P ; goCover_f4d5289bb932__0[2] = 0 ; goCover_f4d5289bb932__0[3] = 1;
+	if err == nil {goCover_f4d5289bb932__0[6] = 1;
+		return ""
+	}
+
+	goCover_f4d5289bb932__0[4] = 1;parts := make([]string, 0, 8)
+	collectChain(err, &parts, 0)
+	if len(parts) == 0 {goCover_f4d5289bb932__0[7] = 1;
+		return ""
+	}
+	goCover_f4d5289bb932__0[5] = 1;return strings.Join(parts, " ==> ")
+}
+
+func collectChain(err error, parts *[]string, depth int) {goCover_f4d5289bb932__1[0] = 8 ; goCover_f4d5289bb932__1[1] = goCover_f4d5289bb932_P ; goCover_f4d5289bb932__1[2] = 1 ; goCover_f4d5289bb932__1[3] = 1;
+	if err == nil || depth >= maxChainDepth {goCover_f4d5289bb932__1[6] = 1;
+		return
+	}
+
+	goCover_f4d5289bb932__1[4] = 1;msg := strings.TrimSpace(err.Error())
+	if msg != "" {goCover_f4d5289bb932__1[7] = 1;
+		*parts = append(*parts, msg)
+	}
+
+	goCover_f4d5289bb932__1[5] = 1;switch x := err.(type) {
+	case interface{ Unwrap() []error }:goCover_f4d5289bb932__1[8] = 1;
+		for _, cause := range x.Unwrap() {goCover_f4d5289bb932__1[10] = 1;
+			collectChain(cause, parts, depth+1)
+		}
+	case interface{ Unwrap() error }:goCover_f4d5289bb932__1[9] = 1;
+		collectChain(x.Unwrap(), parts, depth+1)
+	}
+}

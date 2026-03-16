@@ -1,13 +1,14 @@
-// Package paramx 提供基于 chi 的 path/query 参数最小读取器。
+// Package paramx 提供基于 chi 的 path/query/header 参数最小读取器。
 //
 // 说明：
 //   - 该包位于 internal 下，作为 chix 根包 facade 背后的 transport helper。
-//   - 外部调用方默认应优先使用 chix.Path(r) / chix.Query(r)，而不是直接依赖
+//   - 外部调用方默认应优先使用 chix.Path(r) / chix.Query(r) / chix.Header(r)，而不是直接依赖
 //     internal 布局。
 //
 // 定位：
 //   - 读取 chi 路由中的 path 参数。
 //   - 读取 URL query 中的标量或列表参数。
+//   - 读取 HTTP header 中的标量或列表参数。
 //   - 对读取到的原始值做最小规范化（trim 空白）。
 //   - 做基础类型解析，如 string / int / int16 / uuid / bool。
 //   - 将 transport 层参数错误统一建模为 *reqx.Problem，供 resp.Problem 收口。
@@ -15,13 +16,14 @@
 // 设计目标：
 //   - handler 仍然显式掌握 path/query 参数入口，paramx 不接管 handler。
 //   - 不做类似 echo binding 的大而全绑定，避免 DTO、路由参数和业务入口耦合。
-//   - 让 path/query 参数的 trim、重复 key 处理和基础类型转换有稳定语义。
+//   - 让 path/query/header 参数的 trim、重复值处理和基础类型转换有稳定语义。
 //   - 为 reqx.ValidatePath / ValidateQuery 提供更干净、更稳定的输入。
 //   - 列表 query 统一采用重复 key 形式，例如 ?tag=a&tag=b。
+//   - 列表 header 统一采用重复字段形式，不做逗号分隔拆分。
 //
 // 边界：
 //   - 不做 struct binding，不使用反射自动填充 DTO。
-//   - 不做 path/query/body 混绑。
+//   - 不做 path/query/header/body 混绑。
 //   - 不做业务校验，例如 oneof、范围校验、互斥关系、跨字段规则。
 //   - 不写 HTTP 响应，不记录日志。
 //   - 不替代 reqx.ValidateQuery / ValidatePath 的结构校验。
@@ -36,11 +38,16 @@
 // 稳定语义：
 //   - Path(r).Xxx(...) 默认是 required 语义；缺失或空值直接返回请求错误。
 //   - Query(r).Xxx(...) 默认是 optional 语义；参数缺失时返回 ok=false。
+//   - Header(r).Xxx(...) 默认是 optional 语义；参数缺失时返回 ok=false。
 //   - optional query 参数若“出现但无效”，仍视为请求错误，不会偷偷按缺失处理。
+//   - optional header 参数若“出现但无效”，仍视为请求错误，不会偷偷按缺失处理。
 //   - scalar query 参数若重复出现（如 ?limit=10&limit=20），统一返回
+//     multiple_values。
+//   - scalar header 若重复出现（如 X-Limit: 10 / X-Limit: 20），统一返回
 //     multiple_values。
 //   - list query 参数使用重复 key 读取为切片（如 ?tag=a&tag=b -> []string{"a",
 //     "b"}）。
+//   - list header 使用重复字段读取为切片。
 //   - bool 只接受小写 true / false。
 //   - UUID 会在解析成功后统一规范化为 canonical 字符串。
 //

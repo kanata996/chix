@@ -1,28 +1,27 @@
 package errx
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strings"
 	"testing"
 )
 
-func TestMapper_MapToStandardSemantic(t *testing.T) {
+func TestMapper_MapCustomMapping(t *testing.T) {
 	errMissingActor := errors.New("actor missing")
 
 	mapping := NewMapper(CodeInternal,
-		MapTo(errMissingActor, ErrUnauthorized),
+		Map(errMissingActor, AsUnauthorized(401101, "actor missing")),
 	).Map(errMissingActor)
 
 	if mapping.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status mismatch: want %d, got %d", http.StatusUnauthorized, mapping.StatusCode)
 	}
-	if mapping.Code != CodeUnauthorized {
-		t.Fatalf("code mismatch: want %d, got %d", CodeUnauthorized, mapping.Code)
+	if mapping.Code != 401101 {
+		t.Fatalf("code mismatch: want %d, got %d", 401101, mapping.Code)
 	}
-	if mapping.Message != http.StatusText(http.StatusUnauthorized) {
-		t.Fatalf("message mismatch: want %q, got %q", http.StatusText(http.StatusUnauthorized), mapping.Message)
+	if mapping.Message != "actor missing" {
+		t.Fatalf("message mismatch: want %q, got %q", "actor missing", mapping.Message)
 	}
 }
 
@@ -53,12 +52,8 @@ func TestMappingValidate(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid",
-			mapping: Mapping{
-				StatusCode: http.StatusConflict,
-				Code:       CodeConflict,
-				Message:    "Conflict",
-			},
+			name:    "valid",
+			mapping: AsConflict(409101, "item already exists"),
 			wantErr: false,
 		},
 		{
@@ -89,21 +84,13 @@ func TestMappingValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "reserved code status mismatch",
-			mapping: Mapping{
-				StatusCode: http.StatusConflict,
-				Code:       CodeUnauthorized,
-				Message:    http.StatusText(http.StatusUnauthorized),
-			},
+			name:    "reserved code status mismatch",
+			mapping: AsConflict(CodeUnauthorized, http.StatusText(http.StatusUnauthorized)),
 			wantErr: true,
 		},
 		{
-			name: "reserved code message mismatch",
-			mapping: Mapping{
-				StatusCode: http.StatusUnauthorized,
-				Code:       CodeUnauthorized,
-				Message:    "custom unauthorized",
-			},
+			name:    "reserved code message mismatch",
+			mapping: AsUnauthorized(CodeUnauthorized, "custom unauthorized"),
 			wantErr: true,
 		},
 	}
@@ -158,23 +145,23 @@ func TestNewMapper_InvalidConfigPanics(t *testing.T) {
 		{
 			name: "nil match error",
 			builder: func() {
-				MapTo(nil, ErrInvalidRequest)
+				Map(nil, AsUnauthorized(401101, "actor missing"))
 			},
 			want: "match error must not be nil",
 		},
 		{
-			name: "invalid target",
+			name: "invalid mapping",
 			builder: func() {
-				MapTo(errors.New("missing"), errors.New("unknown semantic"))
+				Map(errors.New("missing"), Mapping{})
 			},
-			want: "target must resolve to a standard errx semantic",
+			want: "mapping invalid",
 		},
 		{
-			name: "transport target",
+			name: "reserved code with custom message",
 			builder: func() {
-				MapTo(errors.New("missing"), context.Canceled)
+				Map(errors.New("missing"), AsUnauthorized(CodeUnauthorized, "custom unauthorized"))
 			},
-			want: "target must resolve to a standard errx semantic",
+			want: "mapping invalid",
 		},
 	}
 

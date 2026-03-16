@@ -1,0 +1,51 @@
+//line /Users/yogo/Work/chix/examples/basic/main.go:1:1
+package main; import _ "runtime/coverage"
+
+import (
+	"github.com/kanata996/chix"
+	"github.com/kanata996/chix/reqx"
+	"github.com/kanata996/chix/resp"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+)
+
+type createItemRequest struct {
+	Name string `json:"name" validate:"required"`
+}
+
+func main() {goCover_0d1efb9d2af4__0[0] = 1 ; goCover_0d1efb9d2af4__0[1] = goCover_0d1efb9d2af4_P ; goCover_0d1efb9d2af4__0[2] = 0 ; goCover_0d1efb9d2af4__0[3] = 1;
+	r := chi.NewRouter()
+	r.Get("/items/{uuid}", getItem)
+	r.Post("/items", createItem)
+
+	_ = http.ListenAndServe(":8080", r)
+}
+
+func getItem(w http.ResponseWriter, r *http.Request) {goCover_0d1efb9d2af4__1[0] = 3 ; goCover_0d1efb9d2af4__1[1] = goCover_0d1efb9d2af4_P ; goCover_0d1efb9d2af4__1[2] = 1 ; goCover_0d1efb9d2af4__1[3] = 1;
+	itemUUID, err := chix.Path(r).UUID("uuid")
+	if err != nil {goCover_0d1efb9d2af4__1[5] = 1;
+		resp.Problem(w, r, err)
+		return
+	}
+
+	goCover_0d1efb9d2af4__1[4] = 1;resp.Success(w, map[string]any{
+		"uuid": itemUUID,
+	})
+}
+
+func createItem(w http.ResponseWriter, r *http.Request) {goCover_0d1efb9d2af4__2[0] = 5 ; goCover_0d1efb9d2af4__2[1] = goCover_0d1efb9d2af4_P ; goCover_0d1efb9d2af4__2[2] = 2 ; goCover_0d1efb9d2af4__2[3] = 1;
+	var body createItemRequest
+	if err := reqx.DecodeJSON(w, r, &body); err != nil {goCover_0d1efb9d2af4__2[6] = 1;
+		resp.Problem(w, r, err)
+		return
+	}
+	goCover_0d1efb9d2af4__2[4] = 1;if err := reqx.ValidateBody(&body); err != nil {goCover_0d1efb9d2af4__2[7] = 1;
+		resp.Problem(w, r, err)
+		return
+	}
+
+	goCover_0d1efb9d2af4__2[5] = 1;resp.Created(w, map[string]any{
+		"name": body.Name,
+	})
+}

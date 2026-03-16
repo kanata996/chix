@@ -1,0 +1,9 @@
+covervars.go
+chain.cover.go
+doc.cover.go
+errx.cover.go
+mapper.cover.go
+meta.cover.go
+./errx_test.go
+./example_test.go
+./mapping_test.go

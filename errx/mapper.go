@@ -6,8 +6,8 @@ import (
 	"net/http"
 )
 
-// Rule 表示一条 feature 本地错误到标准 errx 语义的绑定规则。
-// Rule 只应通过 MapTo 构造。
+// Rule 表示一条 feature 本地错误到 HTTP-facing Mapping 的绑定规则。
+// Rule 只应通过 Map 构造。
 type Rule struct {
 	match   error
 	mapping Mapping
@@ -24,16 +24,13 @@ func (m Mapper) Map(err error) Mapping {
 	return m(err)
 }
 
-// MapTo 把 feature 本地错误绑定到一个标准 errx 语义。
-// target 必须能解析为标准 errx 语义，不接受 transport 生命周期错误。
-func MapTo(match error, target error) Rule {
+// Map 把 feature 本地错误绑定到一个已校验的 HTTP-facing Mapping。
+func Map(match error, mapping Mapping) Rule {
 	if match == nil {
 		panic("errx: match error must not be nil")
 	}
-
-	mapping, ok := lookupSemanticMapping(target)
-	if !ok {
-		panic("errx: target must resolve to a standard errx semantic")
+	if err := mapping.Validate(); err != nil {
+		panic(fmt.Sprintf("errx: mapping invalid: %v", err))
 	}
 
 	return Rule{

@@ -27,6 +27,8 @@
 //   - reqx 负责构造请求错误，resp.Problem 负责最终写回。
 //   - errx 负责业务错误映射，resp.Error 负责最终写回。
 //   - handler 只做解请求、调 service、选对 resp 入口。
+//   - 传入 mapper 时，推荐使用 errx.NewMapper，让 feature 规则优先于通用语义，
+//     再由 errx 内建语义与 fallback 兜底。
 //
 // 推荐用法：
 //

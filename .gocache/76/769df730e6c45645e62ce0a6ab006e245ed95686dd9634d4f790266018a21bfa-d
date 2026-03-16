@@ -1,0 +1,120 @@
+//line /Users/yogo/Work/chix/errx/meta.go:1:1
+package errx
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+)
+
+type standardMapping struct {
+	match   error
+	mapping Mapping
+}
+
+var (
+	semanticMappings = []standardMapping{
+		{match: ErrInvalidRequest, mapping: statusMapping(http.StatusBadRequest, CodeInvalidRequest)},
+		{match: ErrUnauthorized, mapping: statusMapping(http.StatusUnauthorized, CodeUnauthorized)},
+		{match: ErrForbidden, mapping: statusMapping(http.StatusForbidden, CodeForbidden)},
+		{match: ErrNotFound, mapping: statusMapping(http.StatusNotFound, CodeNotFound)},
+		{match: ErrConflict, mapping: statusMapping(http.StatusConflict, CodeConflict)},
+		{match: ErrUnprocessableEntity, mapping: statusMapping(http.StatusUnprocessableEntity, CodeUnprocessableEntity)},
+		{match: ErrTooManyRequests, mapping: statusMapping(http.StatusTooManyRequests, CodeTooManyRequests)},
+		{match: ErrServiceUnavailable, mapping: statusMapping(http.StatusServiceUnavailable, CodeServiceUnavailable)},
+		{match: ErrTimeout, mapping: statusMapping(http.StatusGatewayTimeout, CodeTimeout)},
+	}
+
+	clientClosedMapping = Mapping{
+		StatusCode: 499,
+		Code:       CodeClientClosed,
+		Message:    "Client Closed Request",
+	}
+
+	reservedMappingsByCode = map[int64]Mapping{
+		CodeInvalidRequest:       statusMapping(http.StatusBadRequest, CodeInvalidRequest),
+		CodeUnauthorized:         statusMapping(http.StatusUnauthorized, CodeUnauthorized),
+		CodeForbidden:            statusMapping(http.StatusForbidden, CodeForbidden),
+		CodeNotFound:             statusMapping(http.StatusNotFound, CodeNotFound),
+		CodeConflict:             statusMapping(http.StatusConflict, CodeConflict),
+		CodePayloadTooLarge:      statusMapping(http.StatusRequestEntityTooLarge, CodePayloadTooLarge),
+		CodeUnsupportedMediaType: statusMapping(http.StatusUnsupportedMediaType, CodeUnsupportedMediaType),
+		CodeUnprocessableEntity:  statusMapping(http.StatusUnprocessableEntity, CodeUnprocessableEntity),
+		CodeTooManyRequests:      statusMapping(http.StatusTooManyRequests, CodeTooManyRequests),
+		CodeClientClosed:         clientClosedMapping,
+		CodeInternal:             statusMapping(http.StatusInternalServerError, CodeInternal),
+		CodeServiceUnavailable:   statusMapping(http.StatusServiceUnavailable, CodeServiceUnavailable),
+		CodeTimeout:              statusMapping(http.StatusGatewayTimeout, CodeTimeout),
+	}
+)
+
+// Lookup 查询 errx 内建标准语义与 transport 生命周期错误。
+// 未识别时返回 ok=false，由 feature mapper 或 fallback 决定后续行为。
+func Lookup(err error) (Mapping, bool) {goCover_f4d5289bb932__6[0] = 4 ; goCover_f4d5289bb932__6[1] = goCover_f4d5289bb932_P ; goCover_f4d5289bb932__6[2] = 6 ; goCover_f4d5289bb932__6[3] = 1;
+	switch {
+	case errors.Is(err, context.Canceled):goCover_f4d5289bb932__6[5] = 1;
+		return clientClosedMapping, true
+	case errors.Is(err, context.DeadlineExceeded):goCover_f4d5289bb932__6[6] = 1;
+		return statusMapping(http.StatusGatewayTimeout, CodeTimeout), true
+	}
+
+	goCover_f4d5289bb932__6[4] = 1;return lookupSemanticMapping(err)
+}
+
+func Internal(code int64) Mapping {goCover_f4d5289bb932__7[0] = 3 ; goCover_f4d5289bb932__7[1] = goCover_f4d5289bb932_P ; goCover_f4d5289bb932__7[2] = 7 ; goCover_f4d5289bb932__7[3] = 1;
+	if code <= 0 {goCover_f4d5289bb932__7[5] = 1;
+		panic(fmt.Sprintf("errx: internal code must be positive, got %d", code))
+	}
+
+	goCover_f4d5289bb932__7[4] = 1;return Mapping{
+		StatusCode: http.StatusInternalServerError,
+		Code:       code,
+		Message:    http.StatusText(http.StatusInternalServerError),
+	}
+}
+
+func (m Mapping) Validate() error {goCover_f4d5289bb932__8[0] = 1 ; goCover_f4d5289bb932__8[1] = goCover_f4d5289bb932_P ; goCover_f4d5289bb932__8[2] = 8 ; goCover_f4d5289bb932__8[3] = 1;
+	return validateMapping(m)
+}
+
+func validateMapping(mapping Mapping) error {goCover_f4d5289bb932__9[0] = 12 ; goCover_f4d5289bb932__9[1] = goCover_f4d5289bb932_P ; goCover_f4d5289bb932__9[2] = 9 ; goCover_f4d5289bb932__9[3] = 1;
+	if !validStatusCode(mapping.StatusCode) {goCover_f4d5289bb932__9[8] = 1;
+		return fmt.Errorf("status code must be 4xx/5xx or 499, got %d", mapping.StatusCode)
+	}
+	goCover_f4d5289bb932__9[4] = 1;if mapping.Code <= 0 {goCover_f4d5289bb932__9[9] = 1;
+		return fmt.Errorf("code must be positive, got %d", mapping.Code)
+	}
+	goCover_f4d5289bb932__9[5] = 1;if strings.TrimSpace(mapping.Message) == "" {goCover_f4d5289bb932__9[10] = 1;
+		return errors.New("message must not be blank")
+	}
+	goCover_f4d5289bb932__9[6] = 1;if reserved, ok := reservedMappingsByCode[mapping.Code]; ok {goCover_f4d5289bb932__9[11] = 1;
+		if mapping.StatusCode != reserved.StatusCode {goCover_f4d5289bb932__9[13] = 1;
+			return fmt.Errorf("reserved code %d requires status code %d, got %d", mapping.Code, reserved.StatusCode, mapping.StatusCode)
+		}
+		goCover_f4d5289bb932__9[12] = 1;if mapping.Message != reserved.Message {goCover_f4d5289bb932__9[14] = 1;
+			return fmt.Errorf("reserved code %d requires message %q, got %q", mapping.Code, reserved.Message, mapping.Message)
+		}
+	}
+
+	goCover_f4d5289bb932__9[7] = 1;return nil
+}
+
+func lookupSemanticMapping(err error) (Mapping, bool) {goCover_f4d5289bb932__10[0] = 4 ; goCover_f4d5289bb932__10[1] = goCover_f4d5289bb932_P ; goCover_f4d5289bb932__10[2] = 10 ; goCover_f4d5289bb932__10[3] = 1;
+	for _, standard := range semanticMappings {goCover_f4d5289bb932__10[5] = 1;
+		if errors.Is(err, standard.match) {goCover_f4d5289bb932__10[6] = 1;
+			return standard.mapping, true
+		}
+	}
+
+	goCover_f4d5289bb932__10[4] = 1;return Mapping{}, false
+}
+
+func statusMapping(statusCode int, code int64) Mapping {goCover_f4d5289bb932__11[0] = 1 ; goCover_f4d5289bb932__11[1] = goCover_f4d5289bb932_P ; goCover_f4d5289bb932__11[2] = 11 ; goCover_f4d5289bb932__11[3] = 1;
+	return Mapping{
+		StatusCode: statusCode,
+		Code:       code,
+		Message:    http.StatusText(statusCode),
+	}
+}

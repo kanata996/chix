@@ -1,0 +1,4 @@
+covervars.go
+doc.cover.go
+paramx.cover.go
+./paramx_test.go

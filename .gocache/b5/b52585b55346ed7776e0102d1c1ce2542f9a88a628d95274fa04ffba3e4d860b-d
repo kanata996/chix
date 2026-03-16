@@ -1,0 +1,136 @@
+//line /Users/yogo/Work/chix/reqx/problem.go:1:1
+package reqx
+
+import (
+	"errors"
+	"net/http"
+)
+
+const (
+	InBody  = "body"
+	InPath  = "path"
+	InQuery = "query"
+)
+
+const (
+	DetailCodeRequired             = "required"
+	DetailCodeMalformedJSON        = "malformed_json"
+	DetailCodeInvalidType          = "invalid_type"
+	DetailCodeUnknownField         = "unknown_field"
+	DetailCodeTrailingData         = "trailing_data"
+	DetailCodeMultipleValues       = "multiple_values"
+	DetailCodeUnsupportedMediaType = "unsupported_media_type"
+	DetailCodePayloadTooLarge      = "payload_too_large"
+	DetailCodeInvalidUUID          = "invalid_uuid"
+	DetailCodeInvalidInteger       = "invalid_integer"
+	DetailCodeOutOfRange           = "out_of_range"
+	DetailCodeInvalidValue         = "invalid_value"
+)
+
+type Detail struct {
+	In    string `json:"in,omitempty"`
+	Field string `json:"field"`
+	Code  string `json:"code,omitempty"`
+}
+
+// Problem 是请求侧错误的统一载体。
+// StatusCode 只表达 HTTP 语义；稳定错误码由 resp 层映射。
+type Problem struct {
+	StatusCode int
+	Details    []Detail
+}
+
+func (p *Problem) Error() string {goCover_383483981573__6[0] = 7 ; goCover_383483981573__6[1] = goCover_383483981573_P ; goCover_383483981573__6[2] = 6 ; goCover_383483981573__6[3] = 1;
+	if p == nil {goCover_383483981573__6[7] = 1;
+		return "request problem"
+	}
+	goCover_383483981573__6[4] = 1;if p.StatusCode == http.StatusUnprocessableEntity {goCover_383483981573__6[8] = 1;
+		return "Validation Failed"
+	}
+	goCover_383483981573__6[5] = 1;if message := http.StatusText(p.StatusCode); message != "" {goCover_383483981573__6[9] = 1;
+		return message
+	}
+	goCover_383483981573__6[6] = 1;return "request problem"
+}
+
+func AsProblem(err error) (*Problem, bool) {goCover_383483981573__7[0] = 3 ; goCover_383483981573__7[1] = goCover_383483981573_P ; goCover_383483981573__7[2] = 7 ; goCover_383483981573__7[3] = 1;
+	var problem *Problem
+	if !errors.As(err, &problem) {goCover_383483981573__7[5] = 1;
+		return nil, false
+	}
+	goCover_383483981573__7[4] = 1;return problem, true
+}
+
+// BadRequest 用于 path/query 解析错误和通用 400 请求错误。
+func BadRequest(details ...Detail) *Problem {goCover_383483981573__8[0] = 1 ; goCover_383483981573__8[1] = goCover_383483981573_P ; goCover_383483981573__8[2] = 8 ; goCover_383483981573__8[3] = 1;
+	return newProblem(http.StatusBadRequest, details...)
+}
+
+// ValidationFailed 用于 body 已成功解析，但 DTO 校验失败的场景。
+func ValidationFailed(details ...Detail) *Problem {goCover_383483981573__9[0] = 1 ; goCover_383483981573__9[1] = goCover_383483981573_P ; goCover_383483981573__9[2] = 9 ; goCover_383483981573__9[3] = 1;
+	return newProblem(http.StatusUnprocessableEntity, details...)
+}
+
+// UnsupportedMediaType 用于 body 媒体类型不受支持的场景。
+func UnsupportedMediaType(details ...Detail) *Problem {goCover_383483981573__10[0] = 3 ; goCover_383483981573__10[1] = goCover_383483981573_P ; goCover_383483981573__10[2] = 10 ; goCover_383483981573__10[3] = 1;
+	if len(details) == 0 {goCover_383483981573__10[5] = 1;
+		details = []Detail{{In: InBody, Field: "body", Code: DetailCodeUnsupportedMediaType}}
+	}
+	goCover_383483981573__10[4] = 1;return newProblem(http.StatusUnsupportedMediaType, details...)
+}
+
+// PayloadTooLarge 用于 body 超过服务端允许上限的场景。
+func PayloadTooLarge(details ...Detail) *Problem {goCover_383483981573__11[0] = 3 ; goCover_383483981573__11[1] = goCover_383483981573_P ; goCover_383483981573__11[2] = 11 ; goCover_383483981573__11[3] = 1;
+	if len(details) == 0 {goCover_383483981573__11[5] = 1;
+		details = []Detail{{In: InBody, Field: "body", Code: DetailCodePayloadTooLarge}}
+	}
+	goCover_383483981573__11[4] = 1;return newProblem(http.StatusRequestEntityTooLarge, details...)
+}
+
+// 下列 helper 用于构造稳定的请求错误细节。
+func Required(in string, field string) Detail {goCover_383483981573__12[0] = 1 ; goCover_383483981573__12[1] = goCover_383483981573_P ; goCover_383483981573__12[2] = 12 ; goCover_383483981573__12[3] = 1;
+	return Detail{In: in, Field: field, Code: DetailCodeRequired}
+}
+
+func InvalidType(in string, field string) Detail {goCover_383483981573__13[0] = 1 ; goCover_383483981573__13[1] = goCover_383483981573_P ; goCover_383483981573__13[2] = 13 ; goCover_383483981573__13[3] = 1;
+	return Detail{In: in, Field: field, Code: DetailCodeInvalidType}
+}
+
+func UnknownField(field string) Detail {goCover_383483981573__14[0] = 1 ; goCover_383483981573__14[1] = goCover_383483981573_P ; goCover_383483981573__14[2] = 14 ; goCover_383483981573__14[3] = 1;
+	return Detail{In: InBody, Field: field, Code: DetailCodeUnknownField}
+}
+
+func MalformedJSON() Detail {goCover_383483981573__15[0] = 1 ; goCover_383483981573__15[1] = goCover_383483981573_P ; goCover_383483981573__15[2] = 15 ; goCover_383483981573__15[3] = 1;
+	return Detail{In: InBody, Field: "body", Code: DetailCodeMalformedJSON}
+}
+
+func TrailingData() Detail {goCover_383483981573__16[0] = 1 ; goCover_383483981573__16[1] = goCover_383483981573_P ; goCover_383483981573__16[2] = 16 ; goCover_383483981573__16[3] = 1;
+	return Detail{In: InBody, Field: "body", Code: DetailCodeTrailingData}
+}
+
+func MultipleValues(in string, field string) Detail {goCover_383483981573__17[0] = 1 ; goCover_383483981573__17[1] = goCover_383483981573_P ; goCover_383483981573__17[2] = 17 ; goCover_383483981573__17[3] = 1;
+	return Detail{In: in, Field: field, Code: DetailCodeMultipleValues}
+}
+
+func InvalidUUID(in string, field string) Detail {goCover_383483981573__18[0] = 1 ; goCover_383483981573__18[1] = goCover_383483981573_P ; goCover_383483981573__18[2] = 18 ; goCover_383483981573__18[3] = 1;
+	return Detail{In: in, Field: field, Code: DetailCodeInvalidUUID}
+}
+
+func InvalidInteger(in string, field string) Detail {goCover_383483981573__19[0] = 1 ; goCover_383483981573__19[1] = goCover_383483981573_P ; goCover_383483981573__19[2] = 19 ; goCover_383483981573__19[3] = 1;
+	return Detail{In: in, Field: field, Code: DetailCodeInvalidInteger}
+}
+
+func OutOfRange(in string, field string) Detail {goCover_383483981573__20[0] = 1 ; goCover_383483981573__20[1] = goCover_383483981573_P ; goCover_383483981573__20[2] = 20 ; goCover_383483981573__20[3] = 1;
+	return Detail{In: in, Field: field, Code: DetailCodeOutOfRange}
+}
+
+func InvalidValue(in string, field string) Detail {goCover_383483981573__21[0] = 1 ; goCover_383483981573__21[1] = goCover_383483981573_P ; goCover_383483981573__21[2] = 21 ; goCover_383483981573__21[3] = 1;
+	return Detail{In: in, Field: field, Code: DetailCodeInvalidValue}
+}
+
+func newProblem(statusCode int, details ...Detail) *Problem {goCover_383483981573__22[0] = 1 ; goCover_383483981573__22[1] = goCover_383483981573_P ; goCover_383483981573__22[2] = 22 ; goCover_383483981573__22[3] = 1;
+	return &Problem{
+		StatusCode: statusCode,
+		Details:    append([]Detail(nil), details...),
+	}
+}
