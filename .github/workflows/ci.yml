@@ -8,6 +8,8 @@ on:
     branches:
       - main
   workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 1"
 
 permissions:
   contents: read
@@ -17,8 +19,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  go:
-    name: Go Checks
+  test:
+    name: Test
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -46,5 +49,51 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
-      - name: Run tests
-        run: go test ./...
+      - name: Run tests (race)
+        run: go test ./... -race
+
+  lint:
+    name: Lint
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+      - name: Run golangci-lint
+        run: $(go env GOPATH)/bin/golangci-lint run ./...
+
+  govulncheck:
+    name: Govulncheck
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: $(go env GOPATH)/bin/govulncheck ./...

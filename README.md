@@ -37,3 +37,16 @@ go get github.com/kanata996/chix
 `service/repo -> errx -> resp.Error`
 
 最小示例见 [`examples/basic/main.go`](./examples/basic/main.go)。
+
+## 本地质量检查
+
+```bash
+make ci
+```
+
+## 社区与治理
+
+- 贡献指南：[`CONTRIBUTING.md`](./CONTRIBUTING.md)
+- 行为准则：[`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md)
+- 安全策略：[`SECURITY.md`](./SECURITY.md)
+- 许可证：[`LICENSE`](./LICENSE)
