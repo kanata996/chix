@@ -175,10 +175,7 @@ func detailsFromValidation(source sourceKind, errs validator.ValidationErrors) [
 	entries := make([]entry, 0, len(errs))
 
 	for _, validationErr := range errs {
-		field := strings.TrimSpace(validationErr.Field())
-		if field == "" {
-			field = defaultField(source)
-		}
+		field := validationFieldPath(source, validationErr)
 		if _, exists := seen[field]; exists {
 			continue
 		}
@@ -202,6 +199,26 @@ func detailsFromValidation(source sourceKind, errs validator.ValidationErrors) [
 		})
 	}
 	return details
+}
+
+func validationFieldPath(source sourceKind, err validator.FieldError) string {
+	namespace := strings.TrimSpace(err.Namespace())
+	if namespace != "" {
+		if dot := strings.Index(namespace, "."); dot >= 0 {
+			namespace = namespace[dot+1:]
+		}
+		namespace = strings.TrimSpace(namespace)
+		if namespace != "" {
+			return namespace
+		}
+	}
+
+	field := strings.TrimSpace(err.Field())
+	if field != "" {
+		return field
+	}
+
+	return defaultField(source)
 }
 
 // normalizeTarget 支持 DTO 在校验前自行归一化。

@@ -22,6 +22,7 @@
 //   - success payload 缺失、顶层 data 编码后为 null、或边界编码失败时，返回裸 500。
 //   - Problem 收到非 reqx.Problem 或非法状态码时，回退到 internal 包络。
 //   - Error 收到非法 feature Mapping 时，回退到 internal 包络并记录原因。
+//   - 公开写回 API 收到 nil writer 时，只记录日志并放弃写回，不会 panic。
 //
 // 包间协作：
 //   - reqx 负责构造请求错误，resp.Problem 负责最终写回。

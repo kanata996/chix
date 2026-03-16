@@ -107,6 +107,52 @@ func TestValidateBody(t *testing.T) {
 		}
 	})
 
+	t.Run("nested validation uses stable field paths", func(t *testing.T) {
+		type item struct {
+			Name string `json:"item_name" validate:"required"`
+		}
+		type payload struct {
+			Items []item `json:"items" validate:"dive"`
+		}
+
+		err := ValidateBody(&payload{
+			Items: []item{{}},
+		})
+		problem, ok := AsProblem(err)
+		if !ok {
+			t.Fatalf("expected problem, got %T (%v)", err, err)
+		}
+		if problem.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("unexpected status: %d", problem.StatusCode)
+		}
+		if len(problem.Details) != 1 || problem.Details[0].Field != "items[0].item_name" || problem.Details[0].Code != DetailCodeRequired {
+			t.Fatalf("unexpected details: %#v", problem.Details)
+		}
+	})
+
+	t.Run("same leaf names stay distinct across paths", func(t *testing.T) {
+		type address struct {
+			ID string `json:"id" validate:"required"`
+		}
+		type payload struct {
+			Billing  address `json:"billing"`
+			Shipping address `json:"shipping"`
+		}
+
+		err := ValidateBody(&payload{})
+		problem, ok := AsProblem(err)
+		if !ok {
+			t.Fatalf("expected problem, got %T (%v)", err, err)
+		}
+		want := []Detail{
+			Required(InBody, "billing.id"),
+			Required(InBody, "shipping.id"),
+		}
+		if !reflect.DeepEqual(problem.Details, want) {
+			t.Fatalf("unexpected details: %#v", problem.Details)
+		}
+	})
+
 	t.Run("nil target is boundary error", func(t *testing.T) {
 		if err := ValidateBody(nil); !errors.Is(err, ErrNilTarget) {
 			t.Fatalf("expected ErrNilTarget, got %v", err)
@@ -369,8 +415,28 @@ func TestValidateStructForSource(t *testing.T) {
 		if len(details) != 1 {
 			t.Fatalf("expected 1 detail, got %#v", details)
 		}
-		if details[0].Field != "item_name" || details[0].Code != DetailCodeRequired {
+		if details[0].Field != "items[0].item_name" || details[0].Code != DetailCodeRequired {
 			t.Fatalf("unexpected detail: %#v", details[0])
+		}
+	})
+
+	t.Run("nested fields keep full paths", func(t *testing.T) {
+		type address struct {
+			ID string `json:"id" validate:"required,uuid"`
+		}
+		type dto struct {
+			Billing  address `json:"billing"`
+			Shipping address `json:"shipping"`
+		}
+
+		details := validateStructForSource(dto{}, sourceJSON)
+		want := []Detail{
+			Required(InBody, "billing.id"),
+			Required(InBody, "shipping.id"),
+		}
+
+		if !reflect.DeepEqual(details, want) {
+			t.Fatalf("unexpected details: %#v", details)
 		}
 	})
 

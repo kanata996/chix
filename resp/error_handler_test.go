@@ -98,7 +98,7 @@ func TestError_NoLogForContextCanceled(t *testing.T) {
 	}
 }
 
-func TestError_InvalidMapperLogsReason(t *testing.T) {
+func TestError_ZeroValueMapperMissDoesNotLogInvalidMapping(t *testing.T) {
 	prev := slog.Default()
 	defer slog.SetDefault(prev)
 
@@ -107,21 +107,12 @@ func TestError_InvalidMapperLogsReason(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
-	Error(rec, req, errors.New("feature boom"), stubMapper(func(error) errx.Mapping {
-		return errx.Mapping{}
-	}))
+	Error(rec, req, errors.New("feature boom"), &errx.Mapper{})
 
 	if counter.Count() != 1 {
 		t.Fatalf("expected one error log, got %d", counter.Count())
 	}
-	if got := counter.LastAttr("invalid_mapping"); got != true {
-		t.Fatalf("expected invalid_mapping=true, got %#v", got)
-	}
-	errAttr, ok := counter.LastAttr("invalid_mapping_error").(error)
-	if !ok || errAttr == nil {
-		t.Fatalf("expected invalid_mapping_error attr, got %#v", counter.LastAttr("invalid_mapping_error"))
-	}
-	if got := errAttr.Error(); got == "" {
-		t.Fatal("expected invalid_mapping_error message")
+	if got := counter.LastAttr("invalid_mapping"); got != nil {
+		t.Fatalf("expected no invalid_mapping attr, got %#v", got)
 	}
 }

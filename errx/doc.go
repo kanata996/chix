@@ -16,7 +16,7 @@
 // 核心概念：
 //   - 标准语义：ErrUnauthorized / ErrNotFound / ErrConflict 这类跨模块通用错误。
 //   - Lookup(err)：只查询 errx 内建语义与 transport 生命周期错误。
-//   - Mapper：feature 本地 error -> Mapping 函数，用于补充模块规则与 fallback。
+//   - Mapper：feature 本地 error -> Mapping 的不透明规则集，用于补充模块规则与 fallback。
 //   - Map(match, mapping)：把 feature 本地错误绑定到一个构造期已校验的 Mapping。
 //   - AsNotFound / AsConflict / AsUnauthorized...：固定 HTTP status、允许业务方
 //     自定义 code/message 的 Mapping constructor。

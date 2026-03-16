@@ -9,8 +9,6 @@ import (
 	"testing"
 )
 
-type stubMapper = errx.Mapper
-
 func TestError_UsesMapperForFeatureError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -105,40 +103,32 @@ func TestError_Fallback(t *testing.T) {
 	}
 }
 
-func TestError_InvalidMapperFailsClosed(t *testing.T) {
+func TestError_ZeroValueMapperFallsBackToBuiltInLookup(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
-	featureErr := errors.New("feature unauthorized")
+	mapper := &errx.Mapper{}
 
-	Error(rec, req, featureErr, stubMapper(func(error) errx.Mapping {
-		return errx.Mapping{}
-	}))
+	Error(rec, req, errx.ErrUnauthorized, mapper)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status mismatch: want %d, got %d", http.StatusInternalServerError, rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status mismatch: want %d, got %d", http.StatusUnauthorized, rec.Code)
 	}
 
 	var body envelope
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.Code != errx.CodeInternal || body.Message != http.StatusText(http.StatusInternalServerError) {
+	if body.Code != errx.CodeUnauthorized || body.Message != http.StatusText(http.StatusUnauthorized) {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
 
-func TestError_ReservedCodeMismatchFailsClosed(t *testing.T) {
+func TestError_ZeroValueMapperUnknownErrorFallsBackInternal(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
-	featureErr := errors.New("feature unauthorized")
+	mapper := &errx.Mapper{}
 
-	Error(rec, req, featureErr, stubMapper(func(error) errx.Mapping {
-		return errx.Mapping{
-			StatusCode: http.StatusConflict,
-			Code:       errx.CodeUnauthorized,
-			Message:    http.StatusText(http.StatusUnauthorized),
-		}
-	}))
+	Error(rec, req, errors.New("feature unauthorized"), mapper)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status mismatch: want %d, got %d", http.StatusInternalServerError, rec.Code)

@@ -149,9 +149,9 @@ func createItem(w http.ResponseWriter, r *http.Request) {
 入口：
 
 ```go
-type PathReader = paramx.PathReader
-type QueryReader = paramx.QueryReader
-type HeaderReader = paramx.HeaderReader
+type PathReader struct { /* opaque */ }
+type QueryReader struct { /* opaque */ }
+type HeaderReader struct { /* opaque */ }
 
 func Path(r *http.Request) PathReader
 func Query(r *http.Request) QueryReader
@@ -329,6 +329,7 @@ var (
 - `DecodeValidateJSON` 只是 `DecodeJSON + ValidateBody` 的组合 helper
 - `ValidateBody` 只接受非 nil `*struct`，校验失败返回 `422`
 - `ValidateQuery` / `ValidatePath` 只接受非 nil `*struct`，校验失败返回 `400`
+- 嵌套 DTO 的 `details.field` 使用稳定路径格式，例如 `items[0].name`、`billing.id`
 - DTO 若实现 `Normalizer`，会先执行 `Normalize()` 再校验
 
 ### `errx`
@@ -395,11 +396,11 @@ feature rule：
 
 ```go
 type Rule struct { /* opaque */ }
-type Mapper func(error) Mapping
+type Mapper struct { /* opaque */ }
 
-func (Mapper) Map(err error) Mapping
+func (*Mapper) Map(err error) Mapping
 func Map(match error, mapping Mapping) Rule
-func NewMapper(fallbackCode int64, rules ...Rule) Mapper
+func NewMapper(fallbackCode int64, rules ...Rule) *Mapper
 ```
 
 状态预设 constructor：
@@ -421,6 +422,7 @@ func AsTimeout(code int64, message string) Mapping
 - `context.Canceled` 会映射到 `499 / CodeClientClosed`
 - `context.DeadlineExceeded` 会映射到 `504 / CodeTimeout`
 - `Map(match, mapping)` 会在构造期校验 `mapping`
+- `Mapper` 是不透明类型，只通过 `NewMapper(...)` 构造
 - `NewMapper(fallbackCode, rules...)` 的顺序是 `rules -> Lookup -> fallback`
 - `fallbackCode` 会通过 `Internal(code)` 构造，非法 code 会直接 panic
 - 预设 `AsXxx(...)` 固定 HTTP status，业务方提供自定义 `code` 和 `message`
@@ -455,7 +457,7 @@ func Created(w http.ResponseWriter, data any)
 func NoContent(w http.ResponseWriter)
 
 func Problem(w http.ResponseWriter, r *http.Request, err error)
-func Error(w http.ResponseWriter, r *http.Request, err error, mapper errx.Mapper)
+func Error(w http.ResponseWriter, r *http.Request, err error, mapper *errx.Mapper)
 ```
 
 稳定语义：
@@ -469,6 +471,7 @@ func Error(w http.ResponseWriter, r *http.Request, err error, mapper errx.Mapper
 - `Problem` 收到非 `reqx.Problem` 或非法请求状态码时，会回退到 internal 包络
 - `Error` 有 `mapper` 时优先走 feature 规则；未命中时再回落到 `errx` 内建语义或 fallback
 - `Error` 收到非法 `Mapping` 时，会回退到 internal 包络并记录原因
+- `Success` / `Created` / `NoContent` / `Problem` / `Error` 收到 `nil` writer 时只记录日志并放弃写回，不会 panic
 
 ## 选型建议
 

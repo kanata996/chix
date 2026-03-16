@@ -259,6 +259,78 @@ func TestFailClosedSuccess_NilWriterDoesNotPanic(t *testing.T) {
 	failClosedSuccess(nil, http.StatusOK, "could not encode success response", errors.New("boom"))
 }
 
+func TestPublicResponseAPIs_NilWriterDoNotPanic(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	run := func(name string, fn func()) {
+		t.Helper()
+
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("did not expect panic, got %#v", recovered)
+				}
+			}()
+
+			fn()
+		})
+	}
+
+	run("success", func() {
+		Success(nil, map[string]any{"id": 1})
+	})
+	run("created", func() {
+		Created(nil, map[string]any{"id": 1})
+	})
+	run("no content", func() {
+		NoContent(nil)
+	})
+	run("problem", func() {
+		Problem(nil, req, reqx.BadRequest(reqx.Required(reqx.InQuery, "limit")))
+	})
+	run("error", func() {
+		Error(nil, req, errx.ErrUnauthorized, nil)
+	})
+}
+
+func TestWriteHelpers_TypedNilWriterDoesNotPanic(t *testing.T) {
+	var writer *errWriter
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("did not expect panic, got %#v", recovered)
+		}
+	}()
+
+	writeStatusOnly(writer, http.StatusNoContent)
+	writeJSONBody(writer, http.StatusOK, []byte(`{"code":0}`))
+}
+
+func TestWriteJSON_EncodeErrorWithNilWriterDoesNotPanic(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("did not expect panic, got %#v", recovered)
+		}
+	}()
+
+	writeJSON(nil, http.StatusOK, func() {})
+}
+
+func TestHasResponseWriter(t *testing.T) {
+	if hasResponseWriter(nil) {
+		t.Fatal("expected nil writer to be false")
+	}
+
+	var writer *errWriter
+	if hasResponseWriter(writer) {
+		t.Fatal("expected typed nil writer to be false")
+	}
+
+	if !hasResponseWriter(httptest.NewRecorder()) {
+		t.Fatal("expected recorder writer to be true")
+	}
+}
+
 func TestCreated(t *testing.T) {
 	rec := httptest.NewRecorder()
 	Created(rec, map[string]any{"id": 1})

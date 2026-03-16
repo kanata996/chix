@@ -8,6 +8,7 @@ import (
 	"github.com/kanata996/chix/reqx"
 	"log/slog"
 	"net/http"
+	"reflect"
 )
 
 type envelope struct {
@@ -46,6 +47,9 @@ func writeJSON(w http.ResponseWriter, statusCode int, payload any) {
 			"status_code", statusCode,
 			"error", err,
 		)
+		if !hasResponseWriter(w) {
+			return
+		}
 		writeStatusOnly(w, http.StatusInternalServerError)
 		return
 	}
@@ -85,6 +89,10 @@ func writeProblemEnvelope(w http.ResponseWriter, statusCode int, code int64, mes
 
 // writeStatusOnly 用于 fail-closed 场景或无 body 场景。
 func writeStatusOnly(w http.ResponseWriter, statusCode int) {
+	if !hasResponseWriter(w) {
+		slog.Error("response writer is nil", "status_code", statusCode)
+		return
+	}
 	w.Header().Del("Content-Type")
 	w.WriteHeader(statusCode)
 }
@@ -92,6 +100,10 @@ func writeStatusOnly(w http.ResponseWriter, statusCode int) {
 // writeJSONBody 假定 body 已经编码完成，只负责最终写回。
 // 若写回阶段发生 transport 错误，只做 best-effort 观测，不再改写响应。
 func writeJSONBody(w http.ResponseWriter, statusCode int, body []byte) {
+	if !hasResponseWriter(w) {
+		slog.Error("response writer is nil", "status_code", statusCode)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	if _, err := w.Write(body); err != nil {
@@ -114,4 +126,18 @@ func mustMapping(mapping errx.Mapping) errx.Mapping {
 		panic(fmt.Sprintf("resp: invalid mapping: %v", err))
 	}
 	return mapping
+}
+
+func hasResponseWriter(w http.ResponseWriter) bool {
+	if w == nil {
+		return false
+	}
+
+	value := reflect.ValueOf(w)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return !value.IsNil()
+	default:
+		return true
+	}
 }
