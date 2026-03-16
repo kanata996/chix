@@ -13,15 +13,32 @@ type Rule struct {
 	mapping Mapping
 }
 
-// Mapper 是轻量级的 error -> Mapping 函数。
-// NewMapper 返回配置完成的 Mapper；nil Mapper 视为没有 feature 级映射器。
-type Mapper func(error) Mapping
+// Mapper 是 feature 级 error -> Mapping 的不透明规则集。
+// 只能通过 NewMapper 构造；nil 或零值 Mapper 仅保留内建 Lookup 语义。
+type Mapper struct {
+	rules       []Rule
+	fallback    Mapping
+	hasFallback bool
+}
 
-func (m Mapper) Map(err error) Mapping {
-	if m == nil {
-		return Mapping{}
+func (m *Mapper) Map(err error) Mapping {
+	if m != nil {
+		for _, rule := range m.rules {
+			if errors.Is(err, rule.match) {
+				return rule.mapping
+			}
+		}
 	}
-	return m(err)
+
+	if mapping, ok := Lookup(err); ok {
+		return mapping
+	}
+
+	if m != nil && m.hasFallback {
+		return m.fallback
+	}
+
+	return Mapping{}
 }
 
 // Map 把 feature 本地错误绑定到一个已校验的 HTTP-facing Mapping。
@@ -41,7 +58,7 @@ func Map(match error, mapping Mapping) Rule {
 
 // NewMapper 构造 feature 本地 mapper。
 // 它会在构造期校验 fallback 与规则配置，避免把契约错误延迟到运行时。
-func NewMapper(fallbackCode int64, rules ...Rule) Mapper {
+func NewMapper(fallbackCode int64, rules ...Rule) *Mapper {
 	fallback := Internal(fallbackCode)
 	if err := fallback.Validate(); err != nil {
 		panic(fmt.Sprintf("errx: invalid fallback mapping: %v", err))
@@ -57,18 +74,10 @@ func NewMapper(fallbackCode int64, rules ...Rule) Mapper {
 		}
 	}
 
-	return func(err error) Mapping {
-		for _, rule := range clonedRules {
-			if errors.Is(err, rule.match) {
-				return rule.mapping
-			}
-		}
-
-		if mapping, ok := Lookup(err); ok {
-			return mapping
-		}
-
-		return fallback
+	return &Mapper{
+		rules:       clonedRules,
+		fallback:    fallback,
+		hasFallback: true,
 	}
 }
 

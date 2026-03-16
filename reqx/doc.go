@@ -37,7 +37,8 @@
 //   - ValidateBody / ValidateQuery / ValidatePath 只接受非 nil `*struct`。
 //     ValidateBody 对 body DTO 返回 422；ValidateQuery / ValidatePath 对 query/path
 //     DTO 返回 400。
-//   - Detail 只保留 in/field/code 三个稳定字段，不负责展示型 message。
+//   - Detail 只保留 in/field/code 三个稳定字段，不负责展示型 message；
+//     嵌套字段会使用稳定路径格式，例如 `items[0].name`、`billing.id`。
 //
 // 包间协作：
 //   - reqx 只负责“请求是怎么错的”。

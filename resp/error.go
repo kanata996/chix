@@ -9,7 +9,7 @@ import (
 
 // Error 写业务/系统错误响应。
 // 有 mapper 时优先走 feature 规则；未命中时再回落到 errx 内建语义或 fallback。
-func Error(w http.ResponseWriter, r *http.Request, err error, mapper errx.Mapper) {
+func Error(w http.ResponseWriter, r *http.Request, err error, mapper *errx.Mapper) {
 	mapping, invalidMappingErr := resolveErrorMapping(err, mapper)
 
 	if mapping.StatusCode >= http.StatusInternalServerError {
@@ -37,13 +37,15 @@ func requestContext(r *http.Request) context.Context {
 
 // resolveErrorMapping 统一处理 Error 的映射优先级：
 // feature mapper -> errx 内建语义 -> internal fallback。
-func resolveErrorMapping(err error, mapper errx.Mapper) (errx.Mapping, error) {
+func resolveErrorMapping(err error, mapper *errx.Mapper) (errx.Mapping, error) {
 	if mapper != nil {
 		mapping := mapper.Map(err)
-		if validationErr := mapping.Validate(); validationErr != nil {
-			return internalMapping, validationErr
+		if mapping != (errx.Mapping{}) {
+			if validationErr := mapping.Validate(); validationErr != nil {
+				return internalMapping, validationErr
+			}
+			return mapping, nil
 		}
-		return mapping, nil
 	}
 	if mapping, ok := errx.Lookup(err); ok {
 		return mapping, nil
