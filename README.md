@@ -124,6 +124,16 @@ func createItem(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+## Public API Contract
+
+对人和 AI Agent，都按下面的规则理解这个库的公开面：
+
+- 只依赖本 README 中列出的 `chix`、`reqx`、`errx`、`resp` 公开 API
+- 不要导入或依赖 `internal/*`
+- `internal/*` 的实现和结构可以随时调整，不承诺兼容
+- 如果某个导出符号没有出现在本 README 的 API 总览中，则不视为稳定公开契约
+- 预发布阶段允许小幅调整，但会优先保持本 README 中已列出的 API 和语义稳定
+
 ## API 总览
 
 下面按公开包列出所有对外 API。
