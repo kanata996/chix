@@ -16,9 +16,9 @@ func TestError_UsesMapperForFeatureError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	featureErr := errors.New("feature conflict")
 
-	Error(rec, req, featureErr, stubMapper(func(err error) errx.Mapping {
-		return errx.Mapping{StatusCode: http.StatusConflict, Code: 499999, Message: "Custom Conflict"}
-	}))
+	Error(rec, req, featureErr, errx.NewMapper(577000,
+		errx.Map(featureErr, errx.AsConflict(409201, "feature conflict")),
+	))
 
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status mismatch: want %d, got %d", http.StatusConflict, rec.Code)
@@ -28,18 +28,19 @@ func TestError_UsesMapperForFeatureError(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.Code != 499999 || body.Message != "Custom Conflict" {
+	if body.Code != 409201 || body.Message != "feature conflict" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
 
-func TestError_BuiltInMappingTakesPrecedence(t *testing.T) {
+func TestError_NewMapperFallsBackToBuiltInMapping(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
+	featureErr := errors.New("feature conflict")
 
-	Error(rec, req, errx.ErrInvalidRequest, stubMapper(func(error) errx.Mapping {
-		return errx.Mapping{StatusCode: http.StatusConflict, Code: 499999, Message: "Custom Conflict"}
-	}))
+	Error(rec, req, errx.ErrInvalidRequest, errx.NewMapper(577000,
+		errx.Map(featureErr, errx.AsConflict(409201, "feature conflict")),
+	))
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status mismatch: want %d, got %d", http.StatusBadRequest, rec.Code)
@@ -50,6 +51,28 @@ func TestError_BuiltInMappingTakesPrecedence(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 	if body.Code != errx.CodeInvalidRequest || body.Message != http.StatusText(http.StatusBadRequest) {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestError_MapperRuleOverridesBuiltInLookup(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	featureErr := errors.New("item not found")
+
+	Error(rec, req, errors.Join(featureErr, errx.ErrNotFound), errx.NewMapper(577000,
+		errx.Map(featureErr, errx.AsNotFound(404101, "item not found")),
+	))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status mismatch: want %d, got %d", http.StatusNotFound, rec.Code)
+	}
+
+	var body envelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != 404101 || body.Message != "item not found" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
