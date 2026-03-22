@@ -1,112 +1,61 @@
-package reqx
+package reqx_test
 
 import (
-	"errors"
 	"net/http"
 	"testing"
+
+	"github.com/kanata996/chix/reqx"
 )
 
-func TestProblemCopiesDetails(t *testing.T) {
-	details := []Detail{Required(InBody, "phone")}
-	problem := ValidationFailed(details...)
+func TestProblemNormalizesDefaults(t *testing.T) {
+	problem := reqx.NewProblem(200, "", "")
 
-	details[0].Field = "changed"
-	if problem.Details[0].Field != "phone" {
-		t.Fatalf("expected copied details, got %#v", problem.Details)
+	if got := problem.Status(); got != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", got, http.StatusBadRequest)
+	}
+	if got := problem.Code(); got != "request_error" {
+		t.Fatalf("code = %q, want request_error", got)
+	}
+	if got := problem.Message(); got != "request error" {
+		t.Fatalf("message = %q, want request error", got)
+	}
+	if got := problem.Error(); got != "request error" {
+		t.Fatalf("error = %q, want request error", got)
 	}
 }
 
-func TestAsProblem(t *testing.T) {
-	problem, ok := AsProblem(BadRequest(Required(InQuery, "limit")))
-	if !ok {
-		t.Fatal("expected problem")
+func TestProblemDetailsReturnsCopy(t *testing.T) {
+	problem := reqx.NewProblem(http.StatusBadRequest, "invalid_request", "invalid request", map[string]any{"field": "name"})
+
+	details := problem.Details()
+	if len(details) != 1 {
+		t.Fatalf("details len = %d, want 1", len(details))
 	}
-	if problem.StatusCode != http.StatusBadRequest {
-		t.Fatalf("unexpected status: %d", problem.StatusCode)
+
+	details[0] = "mutated"
+
+	again := problem.Details()
+	if got, ok := again[0].(map[string]any); !ok || got["field"] != "name" {
+		t.Fatalf("details should be copied, got %#v", again[0])
 	}
 }
 
-func TestAsProblem_NoMatch(t *testing.T) {
-	if _, ok := AsProblem(errors.New("plain error")); ok {
-		t.Fatal("expected no problem match")
+func TestNilProblemAccessorsUseRequestDefaults(t *testing.T) {
+	var problem *reqx.Problem
+
+	if got := problem.Status(); got != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", got, http.StatusBadRequest)
 	}
-}
-
-func TestProblemError(t *testing.T) {
-	t.Run("nil receiver", func(t *testing.T) {
-		var problem *Problem
-		if got := problem.Error(); got != "request problem" {
-			t.Fatalf("unexpected error string: %q", got)
-		}
-	})
-
-	t.Run("validation message", func(t *testing.T) {
-		problem := &Problem{StatusCode: http.StatusUnprocessableEntity}
-		if got := problem.Error(); got != "Validation Failed" {
-			t.Fatalf("unexpected error string: %q", got)
-		}
-	})
-
-	t.Run("status text", func(t *testing.T) {
-		problem := &Problem{StatusCode: http.StatusBadRequest}
-		if got := problem.Error(); got != "Bad Request" {
-			t.Fatalf("unexpected error string: %q", got)
-		}
-	})
-
-	t.Run("fallback", func(t *testing.T) {
-		problem := &Problem{}
-		if got := problem.Error(); got != "request problem" {
-			t.Fatalf("unexpected error string: %q", got)
-		}
-	})
-}
-
-func TestProblemConstructors(t *testing.T) {
-	t.Run("unsupported media type adds default detail", func(t *testing.T) {
-		problem := UnsupportedMediaType()
-		if problem.StatusCode != http.StatusUnsupportedMediaType {
-			t.Fatalf("unexpected status: %d", problem.StatusCode)
-		}
-		if len(problem.Details) != 1 || problem.Details[0].Code != DetailCodeUnsupportedMediaType {
-			t.Fatalf("unexpected details: %#v", problem.Details)
-		}
-	})
-
-	t.Run("payload too large adds default detail", func(t *testing.T) {
-		problem := PayloadTooLarge()
-		if problem.StatusCode != http.StatusRequestEntityTooLarge {
-			t.Fatalf("unexpected status: %d", problem.StatusCode)
-		}
-		if len(problem.Details) != 1 || problem.Details[0].Code != DetailCodePayloadTooLarge {
-			t.Fatalf("unexpected details: %#v", problem.Details)
-		}
-	})
-
-	t.Run("multiple values helper", func(t *testing.T) {
-		detail := MultipleValues(InQuery, "limit")
-		if detail.In != InQuery || detail.Field != "limit" || detail.Code != DetailCodeMultipleValues {
-			t.Fatalf("unexpected detail: %#v", detail)
-		}
-	})
-
-	t.Run("remaining detail helpers", func(t *testing.T) {
-		tests := []Detail{
-			InvalidUUID(InPath, "uuid"),
-			InvalidInteger(InQuery, "limit"),
-			InvalidValue(InBody, "name"),
-		}
-
-		want := []Detail{
-			{In: InPath, Field: "uuid", Code: DetailCodeInvalidUUID},
-			{In: InQuery, Field: "limit", Code: DetailCodeInvalidInteger},
-			{In: InBody, Field: "name", Code: DetailCodeInvalidValue},
-		}
-
-		for i := range tests {
-			if tests[i] != want[i] {
-				t.Fatalf("unexpected detail at %d: %#v", i, tests[i])
-			}
-		}
-	})
+	if got := problem.Code(); got != "request_error" {
+		t.Fatalf("code = %q, want request_error", got)
+	}
+	if got := problem.Message(); got != "request error" {
+		t.Fatalf("message = %q, want request error", got)
+	}
+	if got := problem.Error(); got != "" {
+		t.Fatalf("error = %q, want empty", got)
+	}
+	if got := problem.Details(); got != nil {
+		t.Fatalf("details = %#v, want nil", got)
+	}
 }
