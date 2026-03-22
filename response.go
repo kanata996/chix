@@ -6,11 +6,13 @@ import (
 )
 
 // Write writes a success envelope without meta.
+// The status must permit a response body.
 func Write(w http.ResponseWriter, status int, data any) error {
 	return core.WriteSuccess(w, status, data, nil, false)
 }
 
 // WriteMeta writes a success envelope with explicit meta.
+// The status must permit a response body.
 func WriteMeta(w http.ResponseWriter, status int, data any, meta any) error {
 	return core.WriteSuccess(w, status, data, meta, true)
 }

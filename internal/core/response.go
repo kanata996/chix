@@ -26,13 +26,8 @@ type ErrorPayload struct {
 	Details []any
 }
 
-type successEnvelope struct {
-	Data json.RawMessage `json:"data"`
-	Meta json.RawMessage `json:"meta,omitempty"`
-}
-
 func WriteSuccess(w http.ResponseWriter, status int, data any, meta any, includeMeta bool) error {
-	if err := ValidateSuccessStatus(status); err != nil {
+	if err := ValidateSuccessBodyStatus(status); err != nil {
 		return err
 	}
 
@@ -44,12 +39,10 @@ func WriteSuccess(w http.ResponseWriter, status int, data any, meta any, include
 		return fmt.Errorf("chix: data must exist and must not encode to null")
 	}
 
-	payload := successEnvelope{
-		Data: json.RawMessage(dataJSON),
-	}
+	var metaJSON []byte
 
 	if includeMeta {
-		metaJSON, err := json.Marshal(meta)
+		metaJSON, err = json.Marshal(meta)
 		if err != nil {
 			return err
 		}
@@ -57,15 +50,12 @@ func WriteSuccess(w http.ResponseWriter, status int, data any, meta any, include
 			if !isJSONObjectBytes(metaJSON) {
 				return fmt.Errorf("chix: meta must encode as a JSON object")
 			}
-			payload.Meta = json.RawMessage(metaJSON)
+		} else {
+			metaJSON = nil
 		}
 	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
+	body := buildSuccessBody(dataJSON, metaJSON)
 	return WriteJSONBytes(w, status, body)
 }
 
@@ -105,6 +95,20 @@ func normalizeDetails(details []any) []any {
 	return details
 }
 
+func ValidateSuccessBodyStatus(status int) error {
+	if err := ValidateSuccessStatus(status); err != nil {
+		return err
+	}
+	if status < http.StatusOK {
+		return fmt.Errorf("chix: success writers with a body cannot use informational status %d", status)
+	}
+	switch status {
+	case http.StatusNoContent, http.StatusResetContent, http.StatusNotModified:
+		return fmt.Errorf("chix: success writers with a body cannot use bodyless status %d", status)
+	}
+	return nil
+}
+
 func ValidateSuccessStatus(status int) error {
 	if status >= 400 {
 		return fmt.Errorf("chix: success writers cannot use error status %d", status)
@@ -113,6 +117,18 @@ func ValidateSuccessStatus(status int) error {
 		return fmt.Errorf("chix: invalid HTTP status %d", status)
 	}
 	return nil
+}
+
+func buildSuccessBody(dataJSON []byte, metaJSON []byte) []byte {
+	body := make([]byte, 0, len(dataJSON)+len(metaJSON)+24)
+	body = append(body, `{"data":`...)
+	body = append(body, dataJSON...)
+	if len(metaJSON) > 0 {
+		body = append(body, `,"meta":`...)
+		body = append(body, metaJSON...)
+	}
+	body = append(body, '}')
+	return body
 }
 
 func WriteJSONBytes(w http.ResponseWriter, status int, body []byte) error {

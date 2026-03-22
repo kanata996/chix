@@ -132,6 +132,24 @@ func TestWriteRejectsInvalidSuccessInputs(t *testing.T) {
 			},
 		},
 		{
+			name: "informational status",
+			fn: func() error {
+				return chix.Write(httptest.NewRecorder(), http.StatusContinue, map[string]any{"ok": true})
+			},
+		},
+		{
+			name: "no content status",
+			fn: func() error {
+				return chix.Write(httptest.NewRecorder(), http.StatusNoContent, map[string]any{"ok": true})
+			},
+		},
+		{
+			name: "not modified status",
+			fn: func() error {
+				return chix.WriteMeta(httptest.NewRecorder(), http.StatusNotModified, map[string]any{"ok": true}, map[string]any{"request_id": "req_1"})
+			},
+		},
+		{
 			name: "nil data",
 			fn: func() error {
 				return chix.Write(httptest.NewRecorder(), http.StatusOK, nil)

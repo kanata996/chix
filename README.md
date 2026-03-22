@@ -147,6 +147,8 @@ func WriteMeta(w http.ResponseWriter, status int, data any, meta any) error
 func WriteEmpty(w http.ResponseWriter, status int) error
 ```
 
+`Write` and `WriteMeta` reject statuses that do not permit a response body, such as `1xx`, `204`, `205`, and `304`. Use `WriteEmpty` for body-less responses.
+
 ### Error model
 
 ```go

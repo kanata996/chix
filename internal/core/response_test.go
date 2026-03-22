@@ -32,6 +32,33 @@ func (errorJSONValue) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("boom")
 }
 
+type failingResponseWriter struct {
+	header   http.Header
+	status   int
+	writeErr error
+	writes   int
+}
+
+func newFailingResponseWriter(err error) *failingResponseWriter {
+	return &failingResponseWriter{
+		header:   make(http.Header),
+		writeErr: err,
+	}
+}
+
+func (w *failingResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *failingResponseWriter) WriteHeader(status int) {
+	w.status = status
+}
+
+func (w *failingResponseWriter) Write(_ []byte) (int, error) {
+	w.writes++
+	return 0, w.writeErr
+}
+
 func newResponseRecorder() *httptest.ResponseRecorder {
 	return httptest.NewRecorder()
 }
@@ -115,6 +142,30 @@ func TestWriteSuccessRejectsInvalidInputs(t *testing.T) {
 			name: "error status",
 			fn: func() error {
 				return WriteSuccess(newResponseRecorder(), http.StatusBadRequest, map[string]any{"ok": true}, nil, false)
+			},
+		},
+		{
+			name: "informational status",
+			fn: func() error {
+				return WriteSuccess(newResponseRecorder(), http.StatusContinue, map[string]any{"ok": true}, nil, false)
+			},
+		},
+		{
+			name: "no content status",
+			fn: func() error {
+				return WriteSuccess(newResponseRecorder(), http.StatusNoContent, map[string]any{"ok": true}, nil, false)
+			},
+		},
+		{
+			name: "reset content status",
+			fn: func() error {
+				return WriteSuccess(newResponseRecorder(), http.StatusResetContent, map[string]any{"ok": true}, nil, false)
+			},
+		},
+		{
+			name: "not modified status",
+			fn: func() error {
+				return WriteSuccess(newResponseRecorder(), http.StatusNotModified, map[string]any{"ok": true}, nil, false)
 			},
 		},
 		{
@@ -226,6 +277,47 @@ func TestWriteErrorFallsBackWhenPayloadCannotBeMarshaled(t *testing.T) {
 	assertErrorResponse(t, rr, http.StatusInternalServerError, "internal_error", "internal server error")
 }
 
+func TestWriteErrorReturnsWhenFallbackWriteFails(t *testing.T) {
+	rw := newFailingResponseWriter(errors.New("write failed"))
+
+	WriteError(rw, ErrorPayload{
+		Status:  http.StatusBadRequest,
+		Code:    "bad_request",
+		Message: "bad request",
+		Details: []any{func() {}},
+	})
+
+	if rw.status != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rw.status, http.StatusInternalServerError)
+	}
+	if got := rw.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if rw.writes != 1 {
+		t.Fatalf("writes = %d, want 1", rw.writes)
+	}
+}
+
+func TestWriteErrorReturnsWhenPrimaryWriteFails(t *testing.T) {
+	rw := newFailingResponseWriter(errors.New("write failed"))
+
+	WriteError(rw, ErrorPayload{
+		Status:  http.StatusConflict,
+		Code:    "conflict",
+		Message: "conflict",
+	})
+
+	if rw.status != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rw.status, http.StatusConflict)
+	}
+	if got := rw.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if rw.writes != 1 {
+		t.Fatalf("writes = %d, want 1", rw.writes)
+	}
+}
+
 func TestWriteSuccessAcceptsMetaThatMarshalsToJSONObject(t *testing.T) {
 	rr := newResponseRecorder()
 
@@ -272,8 +364,29 @@ func TestWriteSuccessRejectsMetaMarshalFailure(t *testing.T) {
 	}
 }
 
+func TestValidateSuccessBodyStatus(t *testing.T) {
+	if err := ValidateSuccessBodyStatus(http.StatusOK); err != nil {
+		t.Fatalf("ValidateSuccessBodyStatus() unexpected error = %v", err)
+	}
+	for _, status := range []int{
+		http.StatusContinue,
+		http.StatusNoContent,
+		http.StatusResetContent,
+		http.StatusNotModified,
+		http.StatusBadRequest,
+		99,
+	} {
+		if err := ValidateSuccessBodyStatus(status); err == nil {
+			t.Fatalf("expected error for status %d", status)
+		}
+	}
+}
+
 func TestValidateSuccessStatus(t *testing.T) {
 	if err := ValidateSuccessStatus(http.StatusNoContent); err != nil {
+		t.Fatalf("ValidateSuccessStatus() unexpected error = %v", err)
+	}
+	if err := ValidateSuccessStatus(http.StatusNotModified); err != nil {
 		t.Fatalf("ValidateSuccessStatus() unexpected error = %v", err)
 	}
 	if err := ValidateSuccessStatus(http.StatusBadRequest); err == nil {
