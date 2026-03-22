@@ -19,10 +19,12 @@ help:
 	@echo "  make lint                      Run golangci-lint"
 	@echo "  make fmt-check                 Check gofmt status"
 	@echo "  make ci                        Run fmt-check, vet, test, lint"
-	@echo "  make release-tag VERSION=vX.Y.Z"
-	@echo "                                 Create and push an annotated tag from main (must be on main)"
-	@echo "  make release-gh VERSION=vX.Y.Z Create GitHub release notes for a tag"
-	@echo "  make release VERSION=vX.Y.Z    Run release-tag and release-gh"
+	@echo "  make release-tag VERSION=vX.Y.Z [MAIN_BRANCH=branch]"
+	@echo "                                 Create and push an annotated tag from MAIN_BRANCH"
+	@echo "                                 (must be on MAIN_BRANCH and synced with origin)"
+	@echo "  make release-gh VERSION=vX.Y.Z Create GitHub release notes for an existing tag"
+	@echo "  make release VERSION=vX.Y.Z [MAIN_BRANCH=branch]"
+	@echo "                                 Run release-tag and release-gh"
 
 fmt:
 	@$(GO) fmt ./...
@@ -92,7 +94,11 @@ release-tag:
 
 release-gh:
 	@test -n "$(VERSION)" || (echo "Usage: make release-gh VERSION=vX.Y.Z"; exit 1)
-	@gh release create "$(VERSION)" --generate-notes --target main
+	@if ! git ls-remote --tags --exit-code origin "refs/tags/$(VERSION)" >/dev/null 2>&1; then \
+		echo "Tag $(VERSION) does not exist on origin. Run: make release-tag VERSION=$(VERSION) MAIN_BRANCH=$(MAIN_BRANCH)"; \
+		exit 1; \
+	fi
+	@gh release create "$(VERSION)" --generate-notes --verify-tag
 	@echo "Created GitHub release $(VERSION)"
 
 release: release-tag release-gh
