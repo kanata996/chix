@@ -29,6 +29,34 @@ make test-race
 3. Ensure `make ci` passes before opening a PR.
 4. Update docs when API behavior changes.
 
+## Release flow
+
+1. Merge the release PR into `main`.
+2. Update your local release branch:
+
+```bash
+git checkout main
+git pull --ff-only origin main
+```
+
+3. Create and publish the tag plus GitHub release:
+
+```bash
+make release VERSION=vX.Y.Z
+```
+
+If you release from a branch other than `main`, override `MAIN_BRANCH`:
+
+```bash
+make release VERSION=vX.Y.Z MAIN_BRANCH=release-branch
+```
+
+If the tag already exists on `origin` and you only need the GitHub release entry:
+
+```bash
+make release-gh VERSION=vX.Y.Z
+```
+
 ## Code style
 
 - Follow standard Go formatting (`gofmt`).

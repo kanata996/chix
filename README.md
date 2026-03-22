@@ -1,505 +1,271 @@
 # chix
 
-`chix` 是一个基于 `chi` 的、强约束的 JSON API 边界内核。
+[![Go Reference](https://pkg.go.dev/badge/github.com/kanata996/chix.svg)](https://pkg.go.dev/github.com/kanata996/chix)
+[![CI](https://github.com/kanata996/chix/workflows/CI/badge.svg)](https://github.com/kanata996/chix/actions/workflows/ci.yml)
+[![Codecov](https://codecov.io/github/kanata996/chix/graph/badge.svg)](https://codecov.io/github/kanata996/chix)
 
-它不是新的 Web 框架，也不打算替代 `chi`。它做的是把 `chi` 项目里最容易重复、最容易失控的边界动作收紧成一组稳定约定：
+`chix` 是一个 `chi-first`、同时保持 `net/http` 兼容的轻量 HTTP boundary 层，用来把 JSON API 的公开行为收敛成一套稳定约定。
 
-- path/query/header 参数读取
-- JSON body 解码与 DTO 校验
-- 请求错误建模
-- 业务错误映射
-- 成功/错误响应写回
+它不替代 router，不引入新的 framework runtime，也不要求固定目录结构。默认推荐和 `chi` 一起使用；如果你继续使用原生 `net/http` 或其他 router，也可以把边界层统一到 `chix`。
 
-仓库与模块路径：
+## Why chix
 
-- `github.com/kanata996/chix`
+- 🧱 稳定的边界错误分层：`Request Error` / `Domain Error` / `Internal Error`
+- 🍃 `chi-first` 接入方式：文档与示例优先围绕 `chi.Router`
+- 📦 统一 success / error envelope，避免 handler 各写各的
+- 🔒 fail-closed 写回策略：响应一旦开始，就不再偷偷改写公开结果
+- 🧰 内置请求解码与校验 facade：通过 `chix.Decode*` / `chix.Validate` 直接使用
+- 🧯 可选 panic recovery middleware，与统一错误出口协同工作
+- 🧭 核心形状保持 `net/http` 兼容，不绑死在特定 router 上
 
-安装：
+## Install
 
 ```bash
-go get github.com/kanata996/chix
+go get github.com/kanata996/chix@latest
 ```
 
-## 设计边界
-
-做什么：
-
-- handler 只做解请求、调 service、写响应
-- path/query/header 和 body 分流，不做大而全 binding
-- 请求错误与业务错误分流，不混用
-- 边界自故障 fail-closed
-
-不做什么：
-
-- 不引入自己的 `Context` / `Engine` / `App`
-- 不做 path/query/header/body 混合自动绑定
-- 不做 ORM、配置、鉴权、OpenAPI 生成
-- 不把 `chi` 包成另一个大而全框架
-
-## 包结构
-
-- `chix`：推荐入口，暴露 path/query/header facade
-- `reqx`：JSON body 解码、DTO 校验、请求错误建模
-- `errx`：业务/系统错误语义、feature mapper、Mapping 校验
-- `resp`：统一成功/请求错误/业务错误响应写回
-
-内部实现：
-
-- `internal/paramx`：`chi` 下的 path/query/header 参数读取与基础解析，由根包 `chix` 对外转发
-
-## 最小调用链
-
-请求参数/请求体错误：
-
-```text
-handler -> chix/reqx -> resp.Problem
-```
-
-业务/系统错误：
-
-```text
-service/repo -> errx -> resp.Error
-```
-
-最小示例见 [`examples/basic/main.go`](./examples/basic/main.go)。
-
-## 快速示例
+## Quick Start
 
 ```go
 package main
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-
 	"github.com/kanata996/chix"
-	"github.com/kanata996/chix/errx"
-	"github.com/kanata996/chix/reqx"
-	"github.com/kanata996/chix/resp"
+	chixmiddleware "github.com/kanata996/chix/middleware"
 )
 
-type createItemRequest struct {
-	Name string `json:"name" validate:"required"`
+var errUserNotFound = errors.New("user not found")
+
+func mapUserError(err error) *chix.Error {
+	if errors.Is(err, errUserNotFound) {
+		return chix.DomainError(http.StatusNotFound, "user_not_found", "user not found")
+	}
+	return nil
 }
-
-var ErrItemNotFound = errors.New("item not found")
-
-var itemMapper = errx.NewMapper(500101,
-	errx.Map(ErrItemNotFound, errx.AsNotFound(404101, "item not found")),
-)
 
 func main() {
+	wrap := func(h chix.Handler) http.HandlerFunc {
+		return chix.Wrap(h, chix.WithErrorMapper(mapUserError))
+	}
+
 	r := chi.NewRouter()
-	r.Get("/items/{uuid}", getItem)
-	r.Post("/items", createItem)
+	r.Use(chixmiddleware.Recoverer())
 
-	_ = http.ListenAndServe(":8080", r)
-}
+	r.Get("/users", wrap(func(w http.ResponseWriter, r *http.Request) error {
+		var query struct {
+			ID string `query:"id"`
+		}
+		if err := chix.DecodeQuery(r, &query); err != nil {
+			return err
+		}
+		if query.ID == "missing" {
+			return errUserNotFound
+		}
 
-func getItem(w http.ResponseWriter, r *http.Request) {
-	itemUUID, err := chix.Path(r).UUID("uuid")
-	if err != nil {
-		resp.Problem(w, r, err)
-		return
-	}
+		return chix.Write(w, http.StatusOK, map[string]any{"id": query.ID})
+	}))
 
-	if itemUUID == "00000000-0000-0000-0000-000000000000" {
-		resp.Error(w, r, ErrItemNotFound, itemMapper)
-		return
-	}
-
-	resp.Success(w, map[string]any{"uuid": itemUUID})
-}
-
-func createItem(w http.ResponseWriter, r *http.Request) {
-	var body createItemRequest
-	if err := reqx.DecodeValidateJSON(w, r, &body); err != nil {
-		resp.Problem(w, r, err)
-		return
-	}
-
-	resp.Created(w, map[string]any{"name": body.Name})
+	log.Fatal(http.ListenAndServe(":8080", r))
 }
 ```
 
-## Public API Contract
+默认推荐直接看 `chi` 示例；如果你需要原生标准库接法，也有 `ServeMux` 版本：
 
-对人和 AI Agent，都按下面的规则理解这个库的公开面：
+- [`_examples/chi`](./_examples/chi)
+- [`_examples/nethttp`](./_examples/nethttp)
 
-- 只依赖本 README 中列出的 `chix`、`reqx`、`errx`、`resp` 公开 API
-- 不要导入或依赖 `internal/*`
-- `internal/*` 的实现和结构可以随时调整，不承诺兼容
-- 如果某个导出符号没有出现在本 README 的 API 总览中，则不视为稳定公开契约
-- 预发布阶段允许小幅调整，但会优先保持本 README 中已列出的 API 和语义稳定
+## What chix standardizes
 
-## API 总览
+- handler 采用 `func(http.ResponseWriter, *http.Request) error`
+- 成功路径只走 `Write` / `WriteMeta` / `WriteEmpty`
+- 失败路径统一返回 `error`，由 `Wrap` 或 `WriteError` 收口
+- router 级 `404/405`、middleware 级 auth / rate limit 拒绝，直接走 `WriteError`
+- 请求解码与输入校验通过 `chix.Decode*` / `chix.Validate` 完成
+- panic recovery 通过 `middleware.Recoverer(...)` 显式接入
 
-下面按公开包列出所有对外 API。
+## Response Contract
 
-### `chix`
+`chix` 对外只保留三种响应形态：
 
-职责：
+1. 带 body 的成功响应
+2. 带 body 的错误响应
+3. 不带 body 的空响应
 
-- 读取 path 参数
-- 读取 query 参数
-- 读取 header 参数
+成功响应：
 
-入口：
-
-```go
-type PathReader struct { /* opaque */ }
-type QueryReader struct { /* opaque */ }
-type HeaderReader struct { /* opaque */ }
-
-func Path(r *http.Request) PathReader
-func Query(r *http.Request) QueryReader
-func Header(r *http.Request) HeaderReader
-```
-
-`PathReader` 方法：
-
-```go
-func (PathReader) String(name string) (string, error)
-func (PathReader) UUID(name string) (string, error)
-func (PathReader) Int(name string) (int, error)
-```
-
-`QueryReader` 方法：
-
-```go
-func (QueryReader) String(name string) (string, bool, error)
-func (QueryReader) Strings(name string) ([]string, bool, error)
-func (QueryReader) RequiredString(name string) (string, error)
-func (QueryReader) RequiredStrings(name string) ([]string, error)
-func (QueryReader) Int(name string) (int, bool, error)
-func (QueryReader) RequiredInt(name string) (int, error)
-func (QueryReader) Int16(name string) (int16, bool, error)
-func (QueryReader) RequiredInt16(name string) (int16, error)
-func (QueryReader) UUID(name string) (string, bool, error)
-func (QueryReader) UUIDs(name string) ([]string, bool, error)
-func (QueryReader) RequiredUUID(name string) (string, error)
-func (QueryReader) RequiredUUIDs(name string) ([]string, error)
-func (QueryReader) Bool(name string) (bool, bool, error)
-func (QueryReader) RequiredBool(name string) (bool, error)
-```
-
-`HeaderReader` 方法：
-
-```go
-func (HeaderReader) String(name string) (string, bool, error)
-func (HeaderReader) Strings(name string) ([]string, bool, error)
-func (HeaderReader) RequiredString(name string) (string, error)
-func (HeaderReader) RequiredStrings(name string) ([]string, error)
-func (HeaderReader) Int(name string) (int, bool, error)
-func (HeaderReader) RequiredInt(name string) (int, error)
-func (HeaderReader) UUID(name string) (string, bool, error)
-func (HeaderReader) RequiredUUID(name string) (string, error)
-func (HeaderReader) Bool(name string) (bool, bool, error)
-func (HeaderReader) RequiredBool(name string) (bool, error)
-```
-
-稳定语义：
-
-- `Path(r).Xxx(...)` 默认是 required 语义，缺失或空值直接返回请求错误
-- `Query(r).Xxx(...)` 默认是 optional 语义，缺失时返回 `ok=false`
-- `Header(r).Xxx(...)` 默认是 optional 语义，缺失时返回 `ok=false`
-- optional query/header 参数如果“出现但无效”，仍然返回请求错误，不会偷偷按缺失处理
-- query/header 的标量参数重复出现时，统一返回 `multiple_values`
-- query 列表使用重复 key 形式读取，例如 `?tag=a&tag=b`
-- header 列表使用重复字段形式读取，不做 CSV 自动拆分
-- `bool` 只接受小写 `true` / `false`
-- `UUID` 解析成功后统一规范化为 canonical 字符串
-
-### `reqx`
-
-职责：
-
-- 解 JSON body
-- 校验 body/query/path DTO
-- 统一建模请求侧错误
-
-JSON 解码：
-
-```go
-const DefaultJSONMaxBytes int64 = 1 << 20
-
-type DecodeOptions struct {
-	MaxBytes             int64
-	AllowUnknownFields   bool
-	SkipContentTypeCheck bool
+```json
+{
+  "data": {},
+  "meta": {}
 }
-
-func DecodeJSON(w http.ResponseWriter, r *http.Request, target any) error
-func DecodeJSONWith(w http.ResponseWriter, r *http.Request, target any, options DecodeOptions) error
-func DecodeValidateJSON(w http.ResponseWriter, r *http.Request, target any) error
 ```
 
-校验：
+错误响应：
 
-```go
-type Normalizer interface {
-	Normalize()
+```json
+{
+  "error": {
+    "code": "invalid_request",
+    "message": "request contains invalid fields",
+    "details": []
+  }
 }
-
-func ValidateBody(target any) error
-func ValidateQuery(target any) error
-func ValidatePath(target any) error
 ```
 
-请求错误模型：
+关键约束：
+
+- `data` 必须存在，且不能编码成 `null`
+- `meta` 没内容时可省略；如果存在，必须是 JSON object
+- `error.code` 必须是稳定机器码
+- `error.message` 必须是可安全暴露的文案
+- `error.details` 始终存在；没有内容时输出 `[]`
+
+## Core Public API
+
+首页只展示 `chix` 直接暴露给调用方的核心公开面。请求解码与校验能力底层由 `reqx` 提供，但项目接入时通常直接使用 `chix` 根包提供的 facade。
+
+### Handler wiring
 
 ```go
-const (
-	InBody   = "body"
-	InHeader = "header"
-	InPath   = "path"
-	InQuery  = "query"
-)
+type Handler func(w http.ResponseWriter, r *http.Request) error
+type Option func(*config)
+
+func Wrap(h Handler, opts ...Option) http.HandlerFunc
+func WriteError(w http.ResponseWriter, r *http.Request, err error, opts ...Option)
+```
+
+### Success responses
+
+```go
+func Write(w http.ResponseWriter, status int, data any) error
+func WriteMeta(w http.ResponseWriter, status int, data any, meta any) error
+func WriteEmpty(w http.ResponseWriter, status int) error
+```
+
+`Write` and `WriteMeta` reject statuses that do not permit a response body, such as `1xx`, `204`, `205`, and `304`. Use `WriteEmpty` for body-less responses.
+
+### Error model
+
+```go
+type ErrorKind string
 
 const (
-	DetailCodeRequired             = "required"
-	DetailCodeMalformedJSON        = "malformed_json"
-	DetailCodeInvalidType          = "invalid_type"
-	DetailCodeUnknownField         = "unknown_field"
-	DetailCodeTrailingData         = "trailing_data"
-	DetailCodeMultipleValues       = "multiple_values"
-	DetailCodeUnsupportedMediaType = "unsupported_media_type"
-	DetailCodePayloadTooLarge      = "payload_too_large"
-	DetailCodeInvalidUUID          = "invalid_uuid"
-	DetailCodeInvalidInteger       = "invalid_integer"
-	DetailCodeOutOfRange           = "out_of_range"
-	DetailCodeInvalidValue         = "invalid_value"
+	KindRequest  ErrorKind = "request"
+	KindDomain   ErrorKind = "domain"
+	KindInternal ErrorKind = "internal"
 )
 
-type Detail struct {
-	In    string
-	Field string
-	Code  string
+type Error struct {
+	// unexported fields
 }
 
-type Problem struct {
-	StatusCode int
-	Details    []Detail
+func RequestError(status int, code, message string, details ...any) *Error
+func DomainError(status int, code, message string, details ...any) *Error
+func InternalError(status int, code, message string, details ...any) *Error
+
+func (e *Error) Error() string
+func (e *Error) Kind() ErrorKind
+func (e *Error) Status() int
+func (e *Error) Code() string
+func (e *Error) Message() string
+func (e *Error) Details() []any
+```
+
+### Error mapping
+
+```go
+type ErrorMapper func(err error) *Error
+
+func WithErrorMapper(mapper ErrorMapper) Option
+func WithErrorMappers(mappers ...ErrorMapper) Option
+func ChainMappers(mappers ...ErrorMapper) ErrorMapper
+```
+
+### Request decode and validation facade
+
+```go
+type DecodeOption = reqx.DecodeOption
+type QueryOption = reqx.QueryOption
+type Violation = reqx.Violation
+type ValidateFunc[T any] func(*T) []Violation
+
+func WithMaxBodyBytes(limit int64) DecodeOption
+func AllowUnknownFields() DecodeOption
+func AllowEmptyBody() DecodeOption
+func AllowUnknownQueryFields() QueryOption
+
+func DecodeJSON[T any](r *http.Request, dst *T, opts ...DecodeOption) error
+func DecodeAndValidateJSON[T any](r *http.Request, dst *T, fn ValidateFunc[T], opts ...DecodeOption) error
+func DecodeQuery[T any](r *http.Request, dst *T, opts ...QueryOption) error
+func DecodeAndValidateQuery[T any](r *http.Request, dst *T, fn ValidateFunc[T], opts ...QueryOption) error
+func Validate[T any](dst *T, fn ValidateFunc[T]) error
+```
+
+这些 API 的公开语义是 `chix` 的一部分：调用方只依赖 `chix`，请求形状错误会被自动适配进统一错误响应。
+
+### Optional middleware
+
+```go
+package middleware
+
+type Option func(*config)
+
+func Recoverer(opts ...Option) func(http.Handler) http.Handler
+func WithPanicReporter(reporter PanicReporter) Option
+
+type PanicReport struct {
+	Request         *http.Request
+	Panic           any
+	Stack           []byte
+	ResponseStarted bool
+	Upgrade         bool
 }
 
-func (*Problem) Error() string
-func AsProblem(err error) (*Problem, bool)
-func BadRequest(details ...Detail) *Problem
-func ValidationFailed(details ...Detail) *Problem
-func UnsupportedMediaType(details ...Detail) *Problem
-func PayloadTooLarge(details ...Detail) *Problem
+type PanicReporter func(PanicReport)
 ```
 
-`Detail` helper：
+`Recoverer` 的行为边界：
 
-```go
-func Required(in string, field string) Detail
-func InvalidType(in string, field string) Detail
-func UnknownField(field string) Detail
-func MalformedJSON() Detail
-func TrailingData() Detail
-func MultipleValues(in string, field string) Detail
-func InvalidUUID(in string, field string) Detail
-func InvalidInteger(in string, field string) Detail
-func OutOfRange(in string, field string) Detail
-func InvalidValue(in string, field string) Detail
-```
+- 捕获 panic 并记录请求信息与 stack
+- 如果响应尚未开始写回，则输出统一 JSON `500`
+- 如果响应已经开始，或请求已经 `Upgrade` / `Hijack`，则不再改写公开结果
+- `http.ErrAbortHandler` 会继续透传
 
-编程错误：
+## Recommended Usage Model
 
-```go
-var (
-	ErrNilResponseWriter   error
-	ErrNilRequest          error
-	ErrNilTarget           error
-	ErrInvalidDecodeTarget error
-	ErrInvalidValidateTarget error
-)
-```
+- 在 router setup 里组合 `ErrorMapper`
+- 定义本地 `wrap(...)` 和 `writeError(...)` 小封装
+- handler 只关注 decode、service 调用、success write 和返回 error
+- 默认按 `chi-first` 方式组织路由层，需要时再退回原生 `net/http`
+- 让 router / middleware / panic recovery 都走同一个公开错误出口
 
-稳定语义：
+## Non-goals
 
-- `DecodeJSON` 默认检查 `Content-Type`
-- 默认 body 大小上限是 `1 MiB`
-- 默认拒绝 unknown field
-- 拒绝 trailing data
-- 空 body 和 top-level `null` body 统一按缺失 payload 处理
-- `DecodeValidateJSON` 只是 `DecodeJSON + ValidateBody` 的组合 helper
-- `ValidateBody` 只接受非 nil `*struct`，校验失败返回 `422`
-- `ValidateQuery` / `ValidatePath` 只接受非 nil `*struct`，校验失败返回 `400`
-- 嵌套 DTO 的 `details.field` 使用稳定路径格式，例如 `items[0].name`、`billing.id`
-- DTO 若实现 `Normalizer`，会先执行 `Normalize()` 再校验
+`chix` 不试图做这些事：
 
-### `errx`
+- 替代现有 router 或 web framework
+- 引入全局 runtime object
+- 强制固定目录结构或 DDD 分层
+- 把所有 middleware 行为收编成一套自有框架协议
 
-职责：
+## Examples
 
-- 定义通用业务/系统错误语义
-- 提供 feature 级错误到 HTTP 响应语义的映射
-- 对 `Mapping` 和 mapper 配置做构造期校验
+- [`_examples/chi`](./_examples/chi)：`chi.Router` 集成
+- [`_examples/nethttp`](./_examples/nethttp)：原生 `ServeMux` 集成
 
-标准 code：
-
-```go
-const (
-	CodeInvalidRequest       int64 = 400000
-	CodeUnauthorized         int64 = 400001
-	CodeForbidden            int64 = 400003
-	CodeNotFound             int64 = 400004
-	CodeConflict             int64 = 400009
-	CodePayloadTooLarge      int64 = 400013
-	CodeUnsupportedMediaType int64 = 400015
-	CodeUnprocessableEntity  int64 = 400022
-	CodeTooManyRequests      int64 = 400029
-	CodeClientClosed         int64 = 499000
-	CodeInternal             int64 = 500000
-	CodeServiceUnavailable   int64 = 500003
-	CodeTimeout              int64 = 500004
-)
-```
-
-标准语义错误：
-
-```go
-var (
-	ErrInvalidRequest      error
-	ErrUnauthorized        error
-	ErrForbidden           error
-	ErrNotFound            error
-	ErrConflict            error
-	ErrUnprocessableEntity error
-	ErrTooManyRequests     error
-	ErrServiceUnavailable  error
-	ErrTimeout             error
-)
-```
-
-映射模型：
-
-```go
-type Mapping struct {
-	StatusCode int
-	Code       int64
-	Message    string
-}
-
-func (Mapping) Validate() error
-
-func Lookup(err error) (Mapping, bool)
-func Internal(code int64) Mapping
-func FormatChain(err error) string
-```
-
-feature rule：
-
-```go
-type Rule struct { /* opaque */ }
-type Mapper struct { /* opaque */ }
-
-func (*Mapper) Map(err error) Mapping
-func Map(match error, mapping Mapping) Rule
-func NewMapper(fallbackCode int64, rules ...Rule) *Mapper
-```
-
-状态预设 constructor：
-
-```go
-func AsUnauthorized(code int64, message string) Mapping
-func AsForbidden(code int64, message string) Mapping
-func AsNotFound(code int64, message string) Mapping
-func AsConflict(code int64, message string) Mapping
-func AsUnprocessable(code int64, message string) Mapping
-func AsTooManyRequests(code int64, message string) Mapping
-func AsServiceUnavailable(code int64, message string) Mapping
-func AsTimeout(code int64, message string) Mapping
-```
-
-稳定语义：
-
-- `Lookup(err)` 只处理内建标准语义和 transport 生命周期错误
-- `context.Canceled` 会映射到 `499 / CodeClientClosed`
-- `context.DeadlineExceeded` 会映射到 `504 / CodeTimeout`
-- `Map(match, mapping)` 会在构造期校验 `mapping`
-- `Mapper` 是不透明类型，只通过 `NewMapper(...)` 构造
-- `NewMapper(fallbackCode, rules...)` 的顺序是 `rules -> Lookup -> fallback`
-- `fallbackCode` 会通过 `Internal(code)` 构造，非法 code 会直接 panic
-- 预设 `AsXxx(...)` 固定 HTTP status，业务方提供自定义 `code` 和 `message`
-
-推荐模式：
-
-```go
-var (
-	ErrItemNotFound = errors.New("item not found")
-	ErrTagExists    = errors.New("tag exists")
-)
-
-var mapper = errx.NewMapper(500101,
-	errx.Map(ErrItemNotFound, errx.AsNotFound(404101, "item not found")),
-	errx.Map(ErrTagExists, errx.AsConflict(409201, "tag already exists")),
-)
-```
-
-### `resp`
-
-职责：
-
-- 写统一成功响应
-- 写请求错误响应
-- 写业务/系统错误响应
-
-公开 API：
-
-```go
-func Success(w http.ResponseWriter, data any)
-func Created(w http.ResponseWriter, data any)
-func NoContent(w http.ResponseWriter)
-
-func Problem(w http.ResponseWriter, r *http.Request, err error)
-func Error(w http.ResponseWriter, r *http.Request, err error, mapper *errx.Mapper)
-```
-
-稳定语义：
-
-- `Success` 写 `200`
-- `Created` 写 `201`
-- `NoContent` 写 `204`
-- `Success` / `Created` 要求 `data` 顶层编码后不能是 `null`
-- success 边界自身编码失败时，fail-closed 为裸 `500`
-- `Problem` 只接受 `reqx.Problem`
-- `Problem` 收到非 `reqx.Problem` 或非法请求状态码时，会回退到 internal 包络
-- `Error` 有 `mapper` 时优先走 feature 规则；未命中时再回落到 `errx` 内建语义或 fallback
-- `Error` 收到非法 `Mapping` 时，会回退到 internal 包络并记录原因
-- `Success` / `Created` / `NoContent` / `Problem` / `Error` 收到 `nil` writer 时只记录日志并放弃写回，不会 panic
-
-## 选型建议
-
-什么时候直接用标准 `errx`：
-
-- 只需要通用的 `401/403/404/409/422/429/503/504`
-- 不需要 feature 级业务 code
-
-什么时候用 `errx.NewMapper(...)`：
-
-- 同一个 HTTP status 下需要区分多个业务 code
-- 想给终端用户返回更明确的业务 message
-- feature 需要自己的 fallback internal code
-
-什么时候只用 `chix + reqx + resp.Problem`：
-
-- 业务层还没有稳定错误模型
-- 当前接口只涉及请求边界，不涉及业务错误分层
-
-## 本地质量检查
+这两个目录都是独立 Go module，可以直接运行：
 
 ```bash
-make ci
+cd _examples/chi
+go test ./...
+go run .
+
+cd ../nethttp
+go test ./...
+go run .
 ```
-
-## 社区与治理
-
-- 贡献指南：[`CONTRIBUTING.md`](./CONTRIBUTING.md)
-- 行为准则：[`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md)
-- 安全策略：[`SECURITY.md`](./SECURITY.md)
-- 许可证：[`LICENSE`](./LICENSE)
