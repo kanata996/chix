@@ -92,8 +92,7 @@ func TestWriteSuccessWritesEnvelope(t *testing.T) {
 		t.Fatalf("Content-Type = %q, want application/json", got)
 	}
 
-	var payload map[string]any
-	payload = decodePayload(t, rr)
+	payload := decodePayload(t, rr)
 
 	data, ok := payload["data"].(map[string]any)
 	if !ok {

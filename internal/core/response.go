@@ -87,11 +87,15 @@ func WriteError(w http.ResponseWriter, payload ErrorPayload) {
 		},
 	})
 	if err != nil {
-		WriteJSONBytes(w, http.StatusInternalServerError, FallbackErrorJSON)
+		if fallbackErr := WriteJSONBytes(w, http.StatusInternalServerError, FallbackErrorJSON); fallbackErr != nil {
+			return
+		}
 		return
 	}
 
-	WriteJSONBytes(w, payload.Status, body)
+	if writeErr := WriteJSONBytes(w, payload.Status, body); writeErr != nil {
+		return
+	}
 }
 
 func normalizeDetails(details []any) []any {
