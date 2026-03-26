@@ -27,6 +27,7 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 - Added minimal runtime response metadata alignment via `ResponseStatus() int`, `ResponseHeaders() http.Header`, and `(*HTTPError).WithHeader(...)` / `WithHeaders(...)`.
 - Added per-response `ContentType` support for OpenAPI generation, plus minimal runtime content-type alignment via `ResponseContentType() string` and `(*HTTPError).WithContentType(...)`.
 - Added `OperationResponse.OpenAPIModel` to override explicit success-response schemas in OpenAPI without changing the runtime handler contract.
+- Added field-level OpenAPI metadata from struct tags, including `doc`, `example`, and `deprecated` on parameters and request/response schemas.
 
 ## [v0.3.0] - 2026-03-26
 

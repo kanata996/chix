@@ -145,6 +145,82 @@ func TestOpenAPIDocumentSupportsPerResponseSuccessModelOverride(t *testing.T) {
 	}
 }
 
+func TestOpenAPIDocumentIncludesFieldExamplesAndDeprecation(t *testing.T) {
+	type createProfileInput struct {
+		Name     string `json:"name" doc:"Display name" example:"Ada"`
+		Age      int    `json:"age" example:"42"`
+		LegacyID string `query:"legacyID" doc:"Legacy identifier" example:"user-42" deprecated:"true"`
+	}
+
+	type createProfileOutput struct {
+		Status string `json:"status" doc:"Profile status" example:"active" deprecated:"true"`
+	}
+
+	app := New(Config{})
+	Register(app, Operation{
+		Method: http.MethodPost,
+		Path:   "/profiles",
+	}, func(_ context.Context, _ *createProfileInput) (*createProfileOutput, error) {
+		return &createProfileOutput{Status: "active"}, nil
+	})
+
+	doc := app.OpenAPIDocument()
+	path := doc.Paths["/profiles"]
+	if path.Post == nil {
+		t.Fatalf("expected POST operation in spec")
+	}
+
+	var legacyParam *Parameter
+	for i := range path.Post.Parameters {
+		if path.Post.Parameters[i].Name == "legacyID" {
+			legacyParam = &path.Post.Parameters[i]
+			break
+		}
+	}
+	if legacyParam == nil {
+		t.Fatalf("expected legacyID query parameter")
+	}
+	if !legacyParam.Deprecated {
+		t.Fatalf("expected legacyID parameter to be deprecated")
+	}
+	if legacyParam.Description != "Legacy identifier" {
+		t.Fatalf("expected legacyID description, got %+v", legacyParam)
+	}
+	if legacyParam.Schema == nil || len(legacyParam.Schema.Examples) != 1 || legacyParam.Schema.Examples[0] != "user-42" {
+		t.Fatalf("expected legacyID example, got %+v", legacyParam.Schema)
+	}
+
+	bodySchema := resolvedSchema(doc, path.Post.RequestBody.Content["application/json"].Schema)
+	name := bodySchema.Properties["name"]
+	if name.Description != "Display name" {
+		t.Fatalf("expected name description, got %+v", name)
+	}
+	if len(name.Examples) != 1 || name.Examples[0] != "Ada" {
+		t.Fatalf("expected name example, got %+v", name.Examples)
+	}
+
+	age := bodySchema.Properties["age"]
+	if len(age.Examples) != 1 {
+		t.Fatalf("expected age example, got %+v", age.Examples)
+	}
+	ageValue, ok := age.Examples[0].(float64)
+	if !ok || ageValue != 42 {
+		t.Fatalf("expected numeric age example, got %+v", age.Examples[0])
+	}
+
+	responseSchema := resolvedSchema(doc, path.Post.Responses["201"].Content["application/json"].Schema)
+	status := responseSchema.Properties["status"]
+	if !status.Deprecated {
+		t.Fatalf("expected response status field to be deprecated")
+	}
+	if status.Description != "Profile status" {
+		t.Fatalf("expected response status description, got %+v", status)
+	}
+	if len(status.Examples) != 1 || status.Examples[0] != "active" {
+		t.Fatalf("expected response status example, got %+v", status.Examples)
+	}
+}
+
 func TestOpenAPIDocumentSupportsMultipleResponsesAndResponseHeaders(t *testing.T) {
 	app := New(Config{})
 	Register(app, Operation{

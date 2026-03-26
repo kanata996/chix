@@ -1,6 +1,7 @@
 package openapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"mime"
 	"net/http"
@@ -260,6 +261,13 @@ type schemaBuilder struct {
 	visiting map[schemaKey]bool
 }
 
+type fieldOpenAPIMetadata struct {
+	description string
+	deprecated  bool
+	example     any
+	hasExample  bool
+}
+
 func (b *schemaBuilder) parametersFor(t reflect.Type) []Parameter {
 	t = reqmeta.IndirectType(t)
 	if t.Kind() != reflect.Struct {
@@ -274,12 +282,14 @@ func (b *schemaBuilder) parametersFor(t reflect.Type) []Parameter {
 		}
 		schema := b.requestSchemaFor(field.Type)
 		applyValidationConstraints(schema, field)
-		schema.Description = strings.TrimSpace(field.Tag.Get("doc"))
+		metadata := openAPIMetadataForField(field)
+		applyFieldOpenAPIMetadata(schema, metadata)
 		params = append(params, Parameter{
 			Name:        name,
 			In:          source,
 			Required:    source == "path" || parameterFieldRequired(field),
-			Description: strings.TrimSpace(field.Tag.Get("doc")),
+			Description: metadata.description,
+			Deprecated:  metadata.deprecated,
 			Schema:      schema,
 		})
 		return true
@@ -389,9 +399,7 @@ func (b *schemaBuilder) structSchema(t reflect.Type, requestBodyRoot bool, inclu
 		}
 
 		property := b.schemaFor(field.Type, includeValidation)
-		if desc := strings.TrimSpace(field.Tag.Get("doc")); desc != "" {
-			property.Description = desc
-		}
+		applyFieldOpenAPIMetadata(property, openAPIMetadataForField(field))
 		if includeValidation {
 			applyValidationConstraints(property, field)
 		}
@@ -412,6 +420,64 @@ func (b *schemaBuilder) structSchema(t reflect.Type, requestBodyRoot bool, inclu
 	}
 
 	return schema
+}
+
+func applyFieldOpenAPIMetadata(schema *Schema, metadata fieldOpenAPIMetadata) {
+	if schema == nil {
+		return
+	}
+	if metadata.description != "" {
+		schema.Description = metadata.description
+	}
+	if metadata.deprecated {
+		schema.Deprecated = true
+	}
+	if metadata.hasExample {
+		schema.Examples = []any{metadata.example}
+	}
+}
+
+func openAPIMetadataForField(field reflect.StructField) fieldOpenAPIMetadata {
+	metadata := fieldOpenAPIMetadata{
+		description: strings.TrimSpace(field.Tag.Get("doc")),
+		deprecated:  parseDeprecatedTag(field.Tag.Get("deprecated")),
+	}
+	if example, ok := parseExampleTag(field.Type, field.Tag.Get("example")); ok {
+		metadata.example = example
+		metadata.hasExample = true
+	}
+	return metadata
+}
+
+func parseDeprecatedTag(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	deprecated, err := strconv.ParseBool(value)
+	if err != nil {
+		return false
+	}
+	return deprecated
+}
+
+func parseExampleTag(fieldType reflect.Type, raw string) (any, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, false
+	}
+
+	fieldType = reqmeta.IndirectType(fieldType)
+	if fieldType == timeType || fieldType.Kind() == reflect.String {
+		return raw, true
+	}
+
+	var value any
+	if err := json.Unmarshal([]byte(raw), &value); err == nil {
+		return value, true
+	}
+
+	return nil, false
 }
 
 func shouldUseComponentSchema(t reflect.Type) bool {

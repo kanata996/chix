@@ -58,6 +58,7 @@ type Parameter struct {
 	In          string  `json:"in"`
 	Required    bool    `json:"required"`
 	Description string  `json:"description,omitempty"`
+	Deprecated  bool    `json:"deprecated,omitempty"`
 	Schema      *Schema `json:"schema,omitempty"`
 }
 
@@ -75,6 +76,7 @@ type ResponseDoc struct {
 type HeaderDoc struct {
 	Description string  `json:"description,omitempty"`
 	Required    bool    `json:"required,omitempty"`
+	Deprecated  bool    `json:"deprecated,omitempty"`
 	Schema      *Schema `json:"schema,omitempty"`
 }
 
@@ -91,6 +93,8 @@ type Schema struct {
 	Type                 string             `json:"type,omitempty"`
 	Format               string             `json:"format,omitempty"`
 	Description          string             `json:"description,omitempty"`
+	Deprecated           bool               `json:"deprecated,omitempty"`
+	Examples             []any              `json:"examples,omitempty"`
 	Pattern              string             `json:"pattern,omitempty"`
 	Nullable             bool               `json:"nullable,omitempty"`
 	Enum                 []any              `json:"enum,omitempty"`

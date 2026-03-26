@@ -118,6 +118,12 @@ type ListUsersInput struct {
 
 任意导出字段只要没有被标记为 `path`、`query` 或 `header`，就会被视为 JSON Body 的一部分。
 
+字段上的 OpenAPI 文档元数据目前支持：
+
+- ``doc:"..."`` 描述字段
+- ``example:"..."`` 声明示例值
+- ``deprecated:"true"`` 标记字段或参数已废弃
+
 你也可以直接使用 `validator/v10` 的 `validate` 标签定义请求校验规则：
 
 ```go
@@ -168,6 +174,7 @@ type CreateUserInput struct {
 - 显式错误响应文档，如 `404`、`409`
 - 响应头文档描述
 - 按响应维度控制 `content-type`，例如 `application/json`、`application/problem+json`、`text/plain`
+- 字段级文档元数据，如 `doc`、`example`、`deprecated`
 - 显式的请求错误响应文档，包括解码/绑定失败的 `400` 和校验失败的 `422`
 - JSON 成功响应 schema
 - 默认的 `application/problem+json` 错误响应

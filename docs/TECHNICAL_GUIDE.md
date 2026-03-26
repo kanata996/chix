@@ -188,6 +188,7 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 - 响应头文档描述
 - 按响应维度控制 `content-type`
 - 显式成功响应的 OpenAPI schema 覆盖
+- 字段级文档元数据，如 `doc`、`example`、`deprecated`
 
 当前限制同样很明显：
 
@@ -209,8 +210,8 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 
 下一阶段建议优先做这几件事：
 
-1. 为常见标签建立文档语义，如 `description`、`example`、`deprecated`。
-2. 给参数、请求体、响应体补更细粒度的内容类型和元数据扩展点。
+1. 给参数、请求体、响应体补更细粒度的内容类型和元数据扩展点。
+2. 为常见标签继续扩展文档语义，如更完整的 `example` / `examples`、`deprecated` 与 `doc` 规则。
 3. 为认证、分页、错误模型建立标准化描述。
 4. 在不引入过大运行时抽象的前提下，继续补运行时与文档的一致性缺口。
 
