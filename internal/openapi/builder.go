@@ -22,6 +22,14 @@ type OperationConfig struct {
 	Tags               []string
 	SuccessStatus      int
 	SuccessDescription string
+	Responses          []ResponseConfig
+}
+
+type ResponseConfig struct {
+	Status      int
+	Description string
+	Headers     map[string]HeaderDoc
+	NoBody      bool
 }
 
 type schemaKey struct {
@@ -64,15 +72,6 @@ func NewOperationDoc[In any, Out any](doc *Document, operation OperationConfig, 
 		status = defaultSuccessStatus(strings.ToUpper(operation.Method))
 	}
 
-	response := ResponseDoc{
-		Description: responseDescription(operation.SuccessDescription),
-	}
-	if status != http.StatusNoContent {
-		response.Content = map[string]MediaType{
-			"application/json": {Schema: collector.responseSchemaFor(outputType)},
-		}
-	}
-
 	operationDoc := &OperationDoc{
 		OperationID: operationID(operation),
 		Summary:     operation.Summary,
@@ -80,9 +79,11 @@ func NewOperationDoc[In any, Out any](doc *Document, operation OperationConfig, 
 		Tags:        operation.Tags,
 		Parameters:  parameters,
 		Responses: map[string]ResponseDoc{
-			strconv.Itoa(status): response,
-			"default":            problemResponseDoc("Unexpected error", problemSchema),
+			"default": problemResponseDoc("Unexpected error", problemSchema),
 		},
+	}
+	if !hasExplicitSuccessResponse(operation.Responses) {
+		operationDoc.Responses[strconv.Itoa(status)] = successResponseDoc(operation.SuccessDescription, status, collector.responseSchemaFor(outputType))
 	}
 
 	if hasRequestDecodeFailures(inputType) {
@@ -90,6 +91,9 @@ func NewOperationDoc[In any, Out any](doc *Document, operation OperationConfig, 
 	}
 	if hasValidationRules(inputType) {
 		operationDoc.Responses["422"] = problemResponseDoc("Request validation failed", problemSchema)
+	}
+	for _, response := range operation.Responses {
+		operationDoc.Responses[strconv.Itoa(response.Status)] = responseDoc(response, outputType, problemSchema, &collector)
 	}
 
 	if requestSchema != nil {
@@ -105,11 +109,58 @@ func NewOperationDoc[In any, Out any](doc *Document, operation OperationConfig, 
 	return operationDoc
 }
 
-func responseDescription(value string) string {
+func successResponseDoc(description string, status int, schema *Schema) ResponseDoc {
+	response := ResponseDoc{
+		Description: successResponseDescription(description),
+	}
+	if responseStatusAllowsBody(status) {
+		response.Content = map[string]MediaType{
+			"application/json": {Schema: schema},
+		}
+	}
+	return response
+}
+
+func responseDoc(config ResponseConfig, outputType reflect.Type, problemSchema *Schema, builder *schemaBuilder) ResponseDoc {
+	response := ResponseDoc{
+		Description: explicitResponseDescription(config.Status, config.Description),
+		Headers:     cloneHeaderDocs(config.Headers),
+	}
+	if config.NoBody || !responseStatusAllowsBody(config.Status) {
+		return response
+	}
+
+	contentType := "application/problem+json"
+	schema := problemSchema
+	if isSuccessStatus(config.Status) {
+		contentType = "application/json"
+		schema = builder.responseSchemaFor(outputType)
+	}
+
+	response.Content = map[string]MediaType{
+		contentType: {Schema: schema},
+	}
+	return response
+}
+
+func successResponseDescription(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return "Successful response"
 	}
 	return value
+}
+
+func explicitResponseDescription(status int, value string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	if isSuccessStatus(status) {
+		return "Successful response"
+	}
+	if text := http.StatusText(status); text != "" {
+		return text
+	}
+	return "Response"
 }
 
 func problemResponseDoc(description string, schema *Schema) ResponseDoc {
@@ -119,6 +170,37 @@ func problemResponseDoc(description string, schema *Schema) ResponseDoc {
 			"application/problem+json": {Schema: schema},
 		},
 	}
+}
+
+func cloneHeaderDocs(headers map[string]HeaderDoc) map[string]HeaderDoc {
+	if len(headers) == 0 {
+		return nil
+	}
+	cloned := make(map[string]HeaderDoc, len(headers))
+	for name, header := range headers {
+		cloned[name] = header
+	}
+	return cloned
+}
+
+func hasExplicitSuccessResponse(responses []ResponseConfig) bool {
+	for _, response := range responses {
+		if isSuccessStatus(response.Status) {
+			return true
+		}
+	}
+	return false
+}
+
+func responseStatusAllowsBody(status int) bool {
+	if status >= 100 && status < 200 {
+		return false
+	}
+	return status != http.StatusNoContent && status != http.StatusNotModified
+}
+
+func isSuccessStatus(status int) bool {
+	return status >= 200 && status < 300
 }
 
 func operationID(operation OperationConfig) string {

@@ -28,13 +28,13 @@
 - JSON 请求与响应处理
 - `/openapi.json` OpenAPI 文档输出
 - `/docs` Swagger UI 页面
+- 多响应与响应头的 OpenAPI 描述
 
 当前版本仍然是起步阶段，后续还会继续补强：
 
 - 更完整的 schema 生成能力
 - 更完整的校验规则到 OpenAPI 的映射
-- 响应头与多响应描述
-- 安全方案与 OpenAPI 自定义能力
+- 更丰富的响应内容类型与安全方案
 - 更丰富的 `chi` 中间件预设组合
 
 ## 安装
@@ -164,6 +164,9 @@ type CreateUserInput struct {
 - `path`、`query`、`header` 参数描述
 - JSON 请求体 schema
 - 常见 `validate` 规则映射出的请求约束，如 `required`、`min/max`、`len`、`oneof`、`email`、`uuid`
+- 多个响应码的描述，包括常见成功响应 `200` / `201` / `204`
+- 显式错误响应文档，如 `404`、`409`
+- 响应头文档描述
 - 显式的请求错误响应文档，包括解码/绑定失败的 `400` 和校验失败的 `422`
 - JSON 成功响应 schema
 - 默认的 `application/problem+json` 错误响应
@@ -171,6 +174,64 @@ type CreateUserInput struct {
 目前 `/docs` 页面通过 CDN 加载 Swagger UI 资源。
 
 如果你需要控制 `components/schemas` 的命名，可以通过 `chix.Config.OpenAPISchemaNamer` 自定义。命名函数会收到 `reflect.Type` 和 `Request` 标记；返回空字符串时会回退到默认命名策略。
+
+如果一个操作需要多个响应码或响应头文档，可以使用 `Operation.Responses`：
+
+```go
+type UpsertUserInput struct {
+	ID string `path:"id"`
+}
+
+type UpsertUserOutput struct {
+	ID      string `json:"id"`
+	Created bool   `json:"created"`
+}
+
+func (o *UpsertUserOutput) ResponseStatus() int {
+	if o.Created {
+		return http.StatusCreated
+	}
+	return http.StatusOK
+}
+
+func (o *UpsertUserOutput) ResponseHeaders() http.Header {
+	if !o.Created {
+		return nil
+	}
+	headers := http.Header{}
+	headers.Set("Location", "/users/"+o.ID)
+	return headers
+}
+
+chix.Register(app, chix.Operation{
+	Method: http.MethodPut,
+	Path:   "/users/{id}",
+	Responses: []chix.OperationResponse{
+		{Status: http.StatusOK, Description: "用户已更新"},
+		{
+			Status:      http.StatusCreated,
+			Description: "用户已创建",
+			Headers: map[string]chix.HeaderDoc{
+				"Location": {
+					Description: "新资源地址",
+					Schema:      &chix.Schema{Type: "string", Format: "uri"},
+				},
+			},
+		},
+		{Status: http.StatusConflict, Description: "用户名冲突"},
+	},
+}, func(ctx context.Context, input *UpsertUserInput) (*UpsertUserOutput, error) {
+	// ...
+})
+```
+
+说明：
+
+- 未声明成功响应时，仍沿用 `SuccessStatus` / `SuccessDescription` 与默认 `200` / `201` 行为。
+- 一旦在 `Responses` 里显式声明成功响应，OpenAPI 中的成功响应文档就由该列表控制。
+- 如果一个操作有多个成功响应，运行时状态码仍建议通过 `SuccessStatus` 或 `ResponseStatus() int` 明确给出。
+- `ResponseStatus() int` 和 `ResponseHeaders() http.Header` 是可选运行时对齐点，用来让实际成功响应更接近文档描述。
+- 错误响应如果需要附带响应头，可以在 `*HTTPError` 上调用 `WithHeader(...)` 或 `WithHeaders(...)`。
 
 ## 技术文档
 

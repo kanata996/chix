@@ -68,7 +68,14 @@ type RequestBody struct {
 
 type ResponseDoc struct {
 	Description string               `json:"description"`
+	Headers     map[string]HeaderDoc `json:"headers,omitempty"`
 	Content     map[string]MediaType `json:"content,omitempty"`
+}
+
+type HeaderDoc struct {
+	Description string  `json:"description,omitempty"`
+	Required    bool    `json:"required,omitempty"`
+	Schema      *Schema `json:"schema,omitempty"`
 }
 
 type MediaType struct {

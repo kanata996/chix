@@ -14,6 +14,7 @@ type OperationDoc = internalopenapi.OperationDoc
 type Parameter = internalopenapi.Parameter
 type RequestBody = internalopenapi.RequestBody
 type ResponseDoc = internalopenapi.ResponseDoc
+type HeaderDoc = internalopenapi.HeaderDoc
 type MediaType = internalopenapi.MediaType
 type Components = internalopenapi.Components
 type Schema = internalopenapi.Schema
@@ -36,6 +37,16 @@ func newDocument(config Config) *Document {
 
 func newOperationDoc[In any, Out any](doc *Document, operation Operation) *OperationDoc {
 	method := strings.ToUpper(operation.Method)
+	responses := make([]internalopenapi.ResponseConfig, 0, len(operation.Responses))
+	for _, response := range operation.Responses {
+		responses = append(responses, internalopenapi.ResponseConfig{
+			Status:      response.Status,
+			Description: response.Description,
+			Headers:     response.Headers,
+			NoBody:      response.NoBody,
+		})
+	}
+
 	return internalopenapi.NewOperationDoc[In, Out](doc, internalopenapi.OperationConfig{
 		Method:             method,
 		Path:               operation.Path,
@@ -43,8 +54,9 @@ func newOperationDoc[In any, Out any](doc *Document, operation Operation) *Opera
 		Summary:            operation.Summary,
 		Description:        operation.Description,
 		Tags:               operation.Tags,
-		SuccessStatus:      successStatus(method, operation.SuccessStatus),
+		SuccessStatus:      successStatus(method, operation.SuccessStatus, operation.Responses),
 		SuccessDescription: operation.SuccessDescription,
+		Responses:          responses,
 	}, reflect.TypeOf(Problem{}))
 }
 

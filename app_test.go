@@ -9,6 +9,199 @@ import (
 	"testing"
 )
 
+type upsertWidgetInput struct {
+	ID      string `path:"id"`
+	Created bool   `query:"created"`
+}
+
+type upsertWidgetOutput struct {
+	ID      string `json:"id"`
+	Created bool   `json:"created"`
+}
+
+func (o *upsertWidgetOutput) ResponseStatus() int {
+	if o != nil && o.Created {
+		return http.StatusCreated
+	}
+	return http.StatusOK
+}
+
+func (o *upsertWidgetOutput) ResponseHeaders() http.Header {
+	if o == nil || !o.Created {
+		return nil
+	}
+	headers := http.Header{}
+	headers.Set("Location", "/widgets/"+o.ID)
+	return headers
+}
+
+func TestOpenAPIDocumentSupportsMultipleResponsesAndResponseHeaders(t *testing.T) {
+	app := New(Config{})
+	Register(app, Operation{
+		Method: http.MethodPut,
+		Path:   "/widgets/{id}",
+		Responses: []OperationResponse{
+			{Status: http.StatusOK, Description: "Widget updated"},
+			{
+				Status:      http.StatusCreated,
+				Description: "Widget created",
+				Headers: map[string]HeaderDoc{
+					"Location": {
+						Description: "Created resource URL",
+						Schema:      &Schema{Type: "string", Format: "uri"},
+					},
+				},
+			},
+		},
+	}, func(_ context.Context, input *upsertWidgetInput) (*upsertWidgetOutput, error) {
+		return &upsertWidgetOutput{
+			ID:      input.ID,
+			Created: input.Created,
+		}, nil
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/widgets/42?created=true", nil)
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec.Code)
+	}
+	if rec.Header().Get("Location") != "/widgets/42" {
+		t.Fatalf("expected Location header, got %q", rec.Header().Get("Location"))
+	}
+
+	var got upsertWidgetOutput
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.ID != "42" || !got.Created {
+		t.Fatalf("unexpected response body: %+v", got)
+	}
+
+	doc := app.OpenAPIDocument()
+	path := doc.Paths["/widgets/{id}"]
+	if path.Put == nil {
+		t.Fatalf("expected PUT operation in spec")
+	}
+	if path.Put.Responses["200"].Description != "Widget updated" {
+		t.Fatalf("expected 200 response doc, got %+v", path.Put.Responses["200"])
+	}
+	created := path.Put.Responses["201"]
+	if created.Description != "Widget created" {
+		t.Fatalf("expected 201 response doc, got %+v", created)
+	}
+	location := created.Headers["Location"]
+	if location.Description != "Created resource URL" {
+		t.Fatalf("expected Location header description, got %+v", location)
+	}
+	if location.Schema == nil || location.Schema.Type != "string" || location.Schema.Format != "uri" {
+		t.Fatalf("expected Location header schema, got %+v", location.Schema)
+	}
+	responseSchema := resolvedSchema(doc, created.Content["application/json"].Schema)
+	if responseSchema.Properties["id"] == nil {
+		t.Fatalf("expected success response schema, got %+v", responseSchema)
+	}
+}
+
+func TestRegisterSupportsExplicitNoContentResponse(t *testing.T) {
+	type deleteWidgetInput struct {
+		ID string `path:"id"`
+	}
+
+	app := New(Config{})
+	Register(app, Operation{
+		Method: http.MethodDelete,
+		Path:   "/widgets/{id}",
+		Responses: []OperationResponse{
+			{Status: http.StatusNoContent, Description: "Widget deleted", NoBody: true},
+		},
+	}, func(_ context.Context, _ *deleteWidgetInput) (*struct{}, error) {
+		return nil, nil
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/widgets/42", nil)
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", rec.Code)
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("expected empty body, got %q", rec.Body.String())
+	}
+
+	doc := app.OpenAPIDocument()
+	path := doc.Paths["/widgets/{id}"]
+	if path.Delete == nil {
+		t.Fatalf("expected DELETE operation in spec")
+	}
+	if _, ok := path.Delete.Responses["200"]; ok {
+		t.Fatalf("did not expect legacy 200 response when explicit 204 is configured")
+	}
+	if path.Delete.Responses["204"].Content != nil {
+		t.Fatalf("did not expect 204 response content, got %+v", path.Delete.Responses["204"])
+	}
+}
+
+func TestOpenAPIDocumentSupportsExplicitErrorResponses(t *testing.T) {
+	type createLockInput struct {
+		ID string `path:"id"`
+	}
+
+	app := New(Config{})
+	Register(app, Operation{
+		Method: http.MethodPost,
+		Path:   "/locks/{id}",
+		Responses: []OperationResponse{
+			{
+				Status:      http.StatusConflict,
+				Description: "Lock version conflict",
+				Headers: map[string]HeaderDoc{
+					"Retry-After": {
+						Description: "Seconds to wait before retrying",
+						Schema:      &Schema{Type: "integer"},
+					},
+				},
+			},
+		},
+	}, func(_ context.Context, _ *createLockInput) (*struct{}, error) {
+		return nil, StatusError(http.StatusConflict, "lock version conflict").WithHeader("Retry-After", "120")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/locks/42", nil)
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", rec.Code)
+	}
+	if rec.Header().Get("Retry-After") != "120" {
+		t.Fatalf("expected Retry-After header, got %q", rec.Header().Get("Retry-After"))
+	}
+
+	doc := app.OpenAPIDocument()
+	path := doc.Paths["/locks/{id}"]
+	if path.Post == nil {
+		t.Fatalf("expected POST operation in spec")
+	}
+	conflict := path.Post.Responses["409"]
+	if conflict.Description != "Lock version conflict" {
+		t.Fatalf("expected explicit 409 response doc, got %+v", conflict)
+	}
+	retryAfter := conflict.Headers["Retry-After"]
+	if retryAfter.Description != "Seconds to wait before retrying" {
+		t.Fatalf("expected Retry-After header description, got %+v", retryAfter)
+	}
+	if retryAfter.Schema == nil || retryAfter.Schema.Type != "integer" {
+		t.Fatalf("expected Retry-After header schema, got %+v", retryAfter.Schema)
+	}
+	problem := resolvedSchema(doc, conflict.Content["application/problem+json"].Schema)
+	if problem.Properties["status"] == nil {
+		t.Fatalf("expected explicit error response to use problem schema, got %+v", problem)
+	}
+}
+
 func TestRegisterBindsInputAndWritesJSON(t *testing.T) {
 	type createUserInput struct {
 		ID      string `path:"id" doc:"User identifier"`

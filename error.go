@@ -23,6 +23,7 @@ type HTTPError struct {
 	Status     int
 	Title      string
 	Detail     string
+	Headers    http.Header
 	Violations []reqx.Violation
 	Cause      error
 }
@@ -54,6 +55,29 @@ func (e *HTTPError) WithViolations(violations []reqx.Violation) *HTTPError {
 	return e
 }
 
+func (e *HTTPError) WithHeader(name, value string) *HTTPError {
+	if e.Headers == nil {
+		e.Headers = http.Header{}
+	}
+	e.Headers.Add(name, value)
+	return e
+}
+
+func (e *HTTPError) WithHeaders(headers http.Header) *HTTPError {
+	if e.Headers == nil {
+		e.Headers = http.Header{}
+	}
+	applyResponseHeaders(e.Headers, headers)
+	return e
+}
+
+func (e *HTTPError) ResponseHeaders() http.Header {
+	if e == nil {
+		return nil
+	}
+	return e.Headers
+}
+
 func StatusError(status int, detail string) *HTTPError {
 	return &HTTPError{
 		Status: status,
@@ -72,6 +96,10 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	var httpErr *HTTPError
 	if !errors.As(err, &httpErr) {
 		httpErr = StatusError(http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError)).WithCause(err)
+	}
+	var headersProvider ResponseHeadersProvider
+	if errors.As(err, &headersProvider) {
+		applyResponseHeaders(w.Header(), headersProvider.ResponseHeaders())
 	}
 
 	problem := Problem{

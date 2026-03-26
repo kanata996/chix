@@ -88,7 +88,8 @@
 - 摘要与描述
 - tags
 - 路由级中间件
-- 成功状态码及描述
+- 兼容用的单成功响应状态码及描述
+- 可选的显式响应列表 `Responses`，用于描述多个成功响应、显式错误响应和响应头
 
 泛型处理函数签名：
 
@@ -101,6 +102,11 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 - 输入输出类型可以直接用于运行时绑定与文档推导
 - 处理函数层不需要再手动解析 `http.Request`
 - 保持足够轻量，没有引入复杂上下文对象
+
+当前这一层新增了两个约束明确的扩展点：
+
+- `Operation.Responses` 是响应文档的主扩展面。它不会破坏现有 `Register(...)` 调用方式，也不会强行引入新的 handler 结果类型。
+- 运行时只补最小对齐能力：成功返回值可选实现 `ResponseStatus() int` 与 `ResponseHeaders() http.Header`；错误路径可通过 `(*HTTPError).WithHeader(...)` / `WithHeaders(...)` 附带响应头。
 
 后续扩展建议：
 
@@ -159,6 +165,7 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 - 增加错误类型码，而不只依赖 `status/title/detail`
 - 为校验错误定义更稳定的错误结构
 - 为业务错误预留统一扩展点
+- 继续谨慎扩展错误响应头能力，避免把 `HTTPError` 膨胀成通用响应容器
 
 ## 8. OpenAPI 生成策略
 
@@ -175,22 +182,32 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 - 参数与 body 的拆分
 - 请求模型上常见 `validate` 规则到 schema 约束的映射
 - 显式的 `400` / `422` problem 响应文档生成
+- 多响应描述，包括 `200` / `201` / `204` 成功响应
+- 显式错误响应文档，如 `404`、`409`
+- 响应头文档描述
 
 当前限制同样很明显：
 
-- 还没有多响应、多内容类型、响应头描述
+- 还没有多内容类型与每个响应独立模型的完整表达
 - 还没有 security schemes
 - 对递归类型与复杂泛型结构的表达还比较保守
 - 当前只映射稳定子集的 `validate` 规则，复杂组合规则和自定义 validator 仍不会自动进入 OpenAPI
 
 当前已经提供一个显式的组件命名定制点：`chix.Config.OpenAPISchemaNamer`。它适合解决跨包同名类型、请求/响应希望使用不同组件名等问题；如果未提供，则回退到默认自动命名与冲突避让规则。
 
+当前响应文档装配规则是：
+
+- 若 `Operation.Responses` 没有显式成功响应，则继续从 `SuccessStatus` / `SuccessDescription` 与默认 method 规则推导单成功响应。
+- 若 `Operation.Responses` 显式声明了成功响应，则成功响应文档改由该列表完全表达。
+- 显式错误响应默认使用 `application/problem+json` 和 `Problem` schema；显式成功响应默认使用输出类型的 JSON schema。
+- `400` / `422` 的自动请求错误响应和 `default` problem 响应仍会保留；若显式声明了相同状态码，则以显式定义覆盖。
+
 下一阶段建议优先做这几件事：
 
-1. 引入 `components/schemas`，减少重复 schema。
-2. 为常见标签建立文档语义，如 `description`、`example`、`deprecated`。
-3. 给参数、请求体、响应体增加更明确的元数据扩展点。
-4. 为认证、分页、错误模型建立标准化描述。
+1. 为常见标签建立文档语义，如 `description`、`example`、`deprecated`。
+2. 给参数、请求体、响应体补更细粒度的内容类型和元数据扩展点。
+3. 为认证、分页、错误模型建立标准化描述。
+4. 在不引入过大运行时抽象的前提下，继续补运行时与文档的一致性缺口。
 
 这里最重要的原则是：OpenAPI 不是附属品，必须和运行时行为保持一致。不能出现文档能表达但运行时不支持，或运行时行为存在但文档缺失的长期分裂。
 
@@ -237,8 +254,8 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 2. OpenAPI schema 强化
 原因：当前已经有自动文档，接下来需要把文档质量做实。
 
-3. 响应模型扩展
-原因：实际 API 很快就会需要多状态码、多错误响应、Header 描述。
+3. 响应内容类型与更细粒度运行时元数据
+原因：多状态码和响应头已经有了基本支撑，下一步需要把内容协商和更复杂的运行时对齐补实。
 
 4. 路由分组与模块化注册
 原因：服务一旦长大，单点注册会开始失控。
