@@ -25,6 +25,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 - Added `chix.Operation.Responses` for multiple response descriptions, explicit error responses, and response-header documentation.
 - Added OpenAPI response-header objects and explicit no-body response handling for status codes such as `204`.
 - Added minimal runtime response metadata alignment via `ResponseStatus() int`, `ResponseHeaders() http.Header`, and `(*HTTPError).WithHeader(...)` / `WithHeaders(...)`.
+- Added per-response `ContentType` support for OpenAPI generation, plus minimal runtime content-type alignment via `ResponseContentType() string` and `(*HTTPError).WithContentType(...)`.
+- Added `OperationResponse.OpenAPIModel` to override explicit success-response schemas in OpenAPI without changing the runtime handler contract.
 
 ## [v0.3.0] - 2026-03-26
 

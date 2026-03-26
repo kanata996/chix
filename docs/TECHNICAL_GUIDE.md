@@ -106,7 +106,8 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 当前这一层新增了两个约束明确的扩展点：
 
 - `Operation.Responses` 是响应文档的主扩展面。它不会破坏现有 `Register(...)` 调用方式，也不会强行引入新的 handler 结果类型。
-- 运行时只补最小对齐能力：成功返回值可选实现 `ResponseStatus() int` 与 `ResponseHeaders() http.Header`；错误路径可通过 `(*HTTPError).WithHeader(...)` / `WithHeaders(...)` 附带响应头。
+- `OperationResponse.OpenAPIModel` 只用于显式成功响应的文档 schema 覆盖，不改变运行时实际返回值。
+- 运行时只补最小对齐能力：成功返回值可选实现 `ResponseStatus() int`、`ResponseHeaders() http.Header` 与 `ResponseContentType() string`；错误路径可通过 `(*HTTPError).WithHeader(...)` / `WithHeaders(...)` 和 `WithContentType(...)` 附带最小响应元数据。
 
 后续扩展建议：
 
@@ -185,10 +186,12 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 - 多响应描述，包括 `200` / `201` / `204` 成功响应
 - 显式错误响应文档，如 `404`、`409`
 - 响应头文档描述
+- 按响应维度控制 `content-type`
+- 显式成功响应的 OpenAPI schema 覆盖
 
 当前限制同样很明显：
 
-- 还没有多内容类型与每个响应独立模型的完整表达
+- 还没有每个响应独立模型的完整运行时表达
 - 还没有 security schemes
 - 对递归类型与复杂泛型结构的表达还比较保守
 - 当前只映射稳定子集的 `validate` 规则，复杂组合规则和自定义 validator 仍不会自动进入 OpenAPI
@@ -199,7 +202,9 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 
 - 若 `Operation.Responses` 没有显式成功响应，则继续从 `SuccessStatus` / `SuccessDescription` 与默认 method 规则推导单成功响应。
 - 若 `Operation.Responses` 显式声明了成功响应，则成功响应文档改由该列表完全表达。
-- 显式错误响应默认使用 `application/problem+json` 和 `Problem` schema；显式成功响应默认使用输出类型的 JSON schema。
+- 显式响应可单独声明 `ContentType`；未声明时，成功响应默认使用 `application/json`，错误响应默认使用 `application/problem+json`。
+- 显式成功响应可通过 `OpenAPIModel` 覆盖文档 schema；未覆盖时默认使用输出类型的 schema。
+- 显式错误响应当前仍固定使用 `Problem` schema。
 - `400` / `422` 的自动请求错误响应和 `default` problem 响应仍会保留；若显式声明了相同状态码，则以显式定义覆盖。
 
 下一阶段建议优先做这几件事：

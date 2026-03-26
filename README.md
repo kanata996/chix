@@ -28,7 +28,7 @@
 - JSON 请求与响应处理
 - `/openapi.json` OpenAPI 文档输出
 - `/docs` Swagger UI 页面
-- 多响应与响应头的 OpenAPI 描述
+- 多响应、响应头与按响应内容类型的 OpenAPI 描述
 
 当前版本仍然是起步阶段，后续还会继续补强：
 
@@ -167,6 +167,7 @@ type CreateUserInput struct {
 - 多个响应码的描述，包括常见成功响应 `200` / `201` / `204`
 - 显式错误响应文档，如 `404`、`409`
 - 响应头文档描述
+- 按响应维度控制 `content-type`，例如 `application/json`、`application/problem+json`、`text/plain`
 - 显式的请求错误响应文档，包括解码/绑定失败的 `400` 和校验失败的 `422`
 - JSON 成功响应 schema
 - 默认的 `application/problem+json` 错误响应
@@ -203,14 +204,22 @@ func (o *UpsertUserOutput) ResponseHeaders() http.Header {
 	return headers
 }
 
+func (o *UpsertUserOutput) ResponseContentType() string {
+	return "application/json"
+}
+
 chix.Register(app, chix.Operation{
 	Method: http.MethodPut,
 	Path:   "/users/{id}",
 	Responses: []chix.OperationResponse{
-		{Status: http.StatusOK, Description: "用户已更新"},
+		{Status: http.StatusOK, Description: "用户已更新", ContentType: "application/json"},
 		{
 			Status:      http.StatusCreated,
 			Description: "用户已创建",
+			ContentType: "application/json",
+			OpenAPIModel: (*struct {
+				ID string `json:"id"`
+			})(nil),
 			Headers: map[string]chix.HeaderDoc{
 				"Location": {
 					Description: "新资源地址",
@@ -230,8 +239,11 @@ chix.Register(app, chix.Operation{
 - 未声明成功响应时，仍沿用 `SuccessStatus` / `SuccessDescription` 与默认 `200` / `201` 行为。
 - 一旦在 `Responses` 里显式声明成功响应，OpenAPI 中的成功响应文档就由该列表控制。
 - 如果一个操作有多个成功响应，运行时状态码仍建议通过 `SuccessStatus` 或 `ResponseStatus() int` 明确给出。
-- `ResponseStatus() int` 和 `ResponseHeaders() http.Header` 是可选运行时对齐点，用来让实际成功响应更接近文档描述。
+- `OperationResponse.ContentType` 用来声明该响应的文档 media type；`NoBody` 仍然表示这个响应不输出 body。
+- `OperationResponse.OpenAPIModel` 可以为显式成功响应指定单独的 OpenAPI schema；它只影响文档，不改变运行时实际写出的 body。
+- `ResponseStatus() int`、`ResponseHeaders() http.Header` 和 `ResponseContentType() string` 是可选运行时对齐点，用来让实际成功响应更接近文档描述。
 - 错误响应如果需要附带响应头，可以在 `*HTTPError` 上调用 `WithHeader(...)` 或 `WithHeaders(...)`。
+- 错误响应如果需要调整运行时 `Content-Type`，可以在 `*HTTPError` 上调用 `WithContentType(...)`；当前仍建议保持 JSON/problem JSON 语义一致。
 
 ## 技术文档
 

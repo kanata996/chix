@@ -1,10 +1,9 @@
 package chix
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5/middleware"
 
@@ -20,12 +19,13 @@ type Problem struct {
 }
 
 type HTTPError struct {
-	Status     int
-	Title      string
-	Detail     string
-	Headers    http.Header
-	Violations []reqx.Violation
-	Cause      error
+	Status      int
+	Title       string
+	Detail      string
+	Headers     http.Header
+	ContentType string
+	Violations  []reqx.Violation
+	Cause       error
 }
 
 func (e *HTTPError) Error() string {
@@ -78,18 +78,24 @@ func (e *HTTPError) ResponseHeaders() http.Header {
 	return e.Headers
 }
 
+func (e *HTTPError) WithContentType(contentType string) *HTTPError {
+	e.ContentType = strings.TrimSpace(contentType)
+	return e
+}
+
+func (e *HTTPError) ResponseContentType() string {
+	if e == nil {
+		return ""
+	}
+	return e.ContentType
+}
+
 func StatusError(status int, detail string) *HTTPError {
 	return &HTTPError{
 		Status: status,
 		Title:  http.StatusText(status),
 		Detail: detail,
 	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) error {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	return json.NewEncoder(w).Encode(value)
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
@@ -109,11 +115,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		RequestID:  middleware.GetReqID(r.Context()),
 		Violations: httpErr.Violations,
 	}
-
-	w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
-	w.WriteHeader(httpErr.Status)
-	if encodeErr := json.NewEncoder(w).Encode(problem); encodeErr != nil {
-		http.Error(w, fmt.Sprintf(`{"status":500,"title":"%s"}`, http.StatusText(http.StatusInternalServerError)), http.StatusInternalServerError)
+	if writeErr := writeProblem(w, httpErr.Status, responseContentType(err, httpErr.ResponseContentType()), problem); writeErr != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	}
 }
 

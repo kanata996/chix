@@ -22,10 +22,12 @@ type Operation struct {
 }
 
 type OperationResponse struct {
-	Status      int
-	Description string
-	Headers     map[string]HeaderDoc
-	NoBody      bool
+	Status       int
+	Description  string
+	Headers      map[string]HeaderDoc
+	ContentType  string
+	OpenAPIModel any
+	NoBody       bool
 }
 
 type ResponseStatusProvider interface {
@@ -34,6 +36,10 @@ type ResponseStatusProvider interface {
 
 type ResponseHeadersProvider interface {
 	ResponseHeaders() http.Header
+}
+
+type ResponseContentTypeProvider interface {
+	ResponseContentType() string
 }
 
 type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
@@ -74,12 +80,16 @@ func Register[In any, Out any](app *App, operation Operation, handler Handler[In
 			status = responseStatus(output, status)
 			applyResponseHeaders(w.Header(), responseHeaders(output))
 		}
+		contentType := operationResponseContentType(status, operation.Responses)
+		if output != nil {
+			contentType = responseContentType(output, contentType)
+		}
 		if status == http.StatusNoContent || output == nil {
 			w.WriteHeader(status)
 			return
 		}
 
-		if err := writeJSON(w, status, output); err != nil {
+		if err := writeResponse(w, status, contentType, output); err != nil {
 			writeError(w, r, err)
 		}
 	}))
@@ -137,6 +147,27 @@ func responseHeaders(value any) http.Header {
 		return nil
 	}
 	return provider.ResponseHeaders()
+}
+
+func responseContentType(value any, fallback string) string {
+	provider, ok := value.(ResponseContentTypeProvider)
+	if !ok {
+		return fallback
+	}
+	contentType := strings.TrimSpace(provider.ResponseContentType())
+	if contentType == "" {
+		return fallback
+	}
+	return contentType
+}
+
+func operationResponseContentType(status int, responses []OperationResponse) string {
+	for _, response := range responses {
+		if response.Status == status {
+			return strings.TrimSpace(response.ContentType)
+		}
+	}
+	return ""
 }
 
 func applyResponseHeaders(dst, src http.Header) {

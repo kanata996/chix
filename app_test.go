@@ -35,6 +35,116 @@ func (o *upsertWidgetOutput) ResponseHeaders() http.Header {
 	return headers
 }
 
+type taskStatusOutput string
+
+func (o *taskStatusOutput) ResponseContentType() string {
+	return "text/plain"
+}
+
+func TestRegisterSupportsAcceptedTextResponse(t *testing.T) {
+	type taskStatusInput struct {
+		ID string `path:"id"`
+	}
+
+	app := New(Config{})
+	Register(app, Operation{
+		Method: http.MethodGet,
+		Path:   "/tasks/{id}/status",
+		Responses: []OperationResponse{
+			{
+				Status:      http.StatusAccepted,
+				Description: "Task is still processing",
+				ContentType: "text/plain; charset=utf-8",
+			},
+		},
+	}, func(_ context.Context, _ *taskStatusInput) (*taskStatusOutput, error) {
+		output := taskStatusOutput("pending")
+		return &output, nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/42/status", nil)
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+	if rec.Header().Get("Content-Type") != "text/plain" {
+		t.Fatalf("expected text/plain content type, got %q", rec.Header().Get("Content-Type"))
+	}
+	if rec.Body.String() != "pending" {
+		t.Fatalf("expected plain text response, got %q", rec.Body.String())
+	}
+
+	doc := app.OpenAPIDocument()
+	path := doc.Paths["/tasks/{id}/status"]
+	if path.Get == nil {
+		t.Fatalf("expected GET operation in spec")
+	}
+	if _, ok := path.Get.Responses["200"]; ok {
+		t.Fatalf("did not expect legacy 200 response when explicit 202 is configured")
+	}
+	accepted := path.Get.Responses["202"]
+	if accepted.Description != "Task is still processing" {
+		t.Fatalf("expected 202 response doc, got %+v", accepted)
+	}
+	if _, ok := accepted.Content["application/json"]; ok {
+		t.Fatalf("did not expect application/json content for text response, got %+v", accepted.Content)
+	}
+	textSchema := accepted.Content["text/plain"].Schema
+	if textSchema == nil || textSchema.Type != "string" {
+		t.Fatalf("expected text/plain schema, got %+v", textSchema)
+	}
+}
+
+func TestOpenAPIDocumentSupportsPerResponseSuccessModelOverride(t *testing.T) {
+	type createJobInput struct {
+		Name string `json:"name"`
+	}
+
+	type createJobOutput struct {
+		ID            string `json:"id"`
+		InternalToken string `json:"internalToken"`
+	}
+
+	type acceptedJobDoc struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+
+	app := New(Config{})
+	Register(app, Operation{
+		Method: http.MethodPost,
+		Path:   "/jobs",
+		Responses: []OperationResponse{
+			{
+				Status:       http.StatusAccepted,
+				Description:  "Job accepted",
+				OpenAPIModel: (*acceptedJobDoc)(nil),
+			},
+		},
+	}, func(_ context.Context, _ *createJobInput) (*createJobOutput, error) {
+		return &createJobOutput{
+			ID:            "job-1",
+			InternalToken: "secret",
+		}, nil
+	})
+
+	doc := app.OpenAPIDocument()
+	path := doc.Paths["/jobs"]
+	if path.Post == nil {
+		t.Fatalf("expected POST operation in spec")
+	}
+
+	accepted := resolvedSchema(doc, path.Post.Responses["202"].Content["application/json"].Schema)
+	if accepted.Properties["status"] == nil {
+		t.Fatalf("expected response override schema, got %+v", accepted)
+	}
+	if accepted.Properties["internalToken"] != nil {
+		t.Fatalf("did not expect default output schema when OpenAPIModel is provided, got %+v", accepted)
+	}
+}
+
 func TestOpenAPIDocumentSupportsMultipleResponsesAndResponseHeaders(t *testing.T) {
 	app := New(Config{})
 	Register(app, Operation{
@@ -149,14 +259,20 @@ func TestOpenAPIDocumentSupportsExplicitErrorResponses(t *testing.T) {
 		ID string `path:"id"`
 	}
 
+	type conflictDoc struct {
+		Code string `json:"code"`
+	}
+
 	app := New(Config{})
 	Register(app, Operation{
 		Method: http.MethodPost,
 		Path:   "/locks/{id}",
 		Responses: []OperationResponse{
 			{
-				Status:      http.StatusConflict,
-				Description: "Lock version conflict",
+				Status:       http.StatusConflict,
+				Description:  "Lock version conflict",
+				ContentType:  "application/json; charset=utf-8",
+				OpenAPIModel: (*conflictDoc)(nil),
 				Headers: map[string]HeaderDoc{
 					"Retry-After": {
 						Description: "Seconds to wait before retrying",
@@ -166,7 +282,9 @@ func TestOpenAPIDocumentSupportsExplicitErrorResponses(t *testing.T) {
 			},
 		},
 	}, func(_ context.Context, _ *createLockInput) (*struct{}, error) {
-		return nil, StatusError(http.StatusConflict, "lock version conflict").WithHeader("Retry-After", "120")
+		return nil, StatusError(http.StatusConflict, "lock version conflict").
+			WithHeader("Retry-After", "120").
+			WithContentType("application/json")
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/locks/42", nil)
@@ -178,6 +296,9 @@ func TestOpenAPIDocumentSupportsExplicitErrorResponses(t *testing.T) {
 	}
 	if rec.Header().Get("Retry-After") != "120" {
 		t.Fatalf("expected Retry-After header, got %q", rec.Header().Get("Retry-After"))
+	}
+	if rec.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("expected application/json error content type, got %q", rec.Header().Get("Content-Type"))
 	}
 
 	doc := app.OpenAPIDocument()
@@ -196,9 +317,12 @@ func TestOpenAPIDocumentSupportsExplicitErrorResponses(t *testing.T) {
 	if retryAfter.Schema == nil || retryAfter.Schema.Type != "integer" {
 		t.Fatalf("expected Retry-After header schema, got %+v", retryAfter.Schema)
 	}
-	problem := resolvedSchema(doc, conflict.Content["application/problem+json"].Schema)
+	problem := resolvedSchema(doc, conflict.Content["application/json"].Schema)
 	if problem.Properties["status"] == nil {
 		t.Fatalf("expected explicit error response to use problem schema, got %+v", problem)
+	}
+	if problem.Properties["code"] != nil {
+		t.Fatalf("did not expect OpenAPIModel override on error response, got %+v", problem)
 	}
 }
 

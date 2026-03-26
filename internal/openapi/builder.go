@@ -2,6 +2,7 @@ package openapi
 
 import (
 	"fmt"
+	"mime"
 	"net/http"
 	"reflect"
 	"regexp"
@@ -29,6 +30,8 @@ type ResponseConfig struct {
 	Status      int
 	Description string
 	Headers     map[string]HeaderDoc
+	ContentType string
+	ModelType   reflect.Type
 	NoBody      bool
 }
 
@@ -114,8 +117,9 @@ func successResponseDoc(description string, status int, schema *Schema) Response
 		Description: successResponseDescription(description),
 	}
 	if responseStatusAllowsBody(status) {
+		contentType := responseContentTypeForDoc("", "application/json")
 		response.Content = map[string]MediaType{
-			"application/json": {Schema: schema},
+			contentType: {Schema: schema},
 		}
 	}
 	return response
@@ -130,12 +134,16 @@ func responseDoc(config ResponseConfig, outputType reflect.Type, problemSchema *
 		return response
 	}
 
-	contentType := "application/problem+json"
+	contentType := defaultResponseContentType(config.Status)
 	schema := problemSchema
 	if isSuccessStatus(config.Status) {
-		contentType = "application/json"
-		schema = builder.responseSchemaFor(outputType)
+		schemaType := outputType
+		if config.ModelType != nil {
+			schemaType = config.ModelType
+		}
+		schema = builder.responseSchemaFor(schemaType)
 	}
+	contentType = responseContentTypeForDoc(config.ContentType, contentType)
 
 	response.Content = map[string]MediaType{
 		contentType: {Schema: schema},
@@ -164,12 +172,39 @@ func explicitResponseDescription(status int, value string) string {
 }
 
 func problemResponseDoc(description string, schema *Schema) ResponseDoc {
+	contentType := responseContentTypeForDoc("", "application/problem+json")
 	return ResponseDoc{
 		Description: description,
 		Content: map[string]MediaType{
-			"application/problem+json": {Schema: schema},
+			contentType: {Schema: schema},
 		},
 	}
+}
+
+func defaultResponseContentType(status int) string {
+	if isSuccessStatus(status) {
+		return "application/json"
+	}
+	return "application/problem+json"
+}
+
+func responseContentTypeForDoc(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err == nil && strings.TrimSpace(mediaType) != "" {
+		return strings.ToLower(mediaType)
+	}
+	if index := strings.Index(value, ";"); index >= 0 {
+		value = value[:index]
+	}
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func cloneHeaderDocs(headers map[string]HeaderDoc) map[string]HeaderDoc {

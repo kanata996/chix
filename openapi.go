@@ -43,6 +43,8 @@ func newOperationDoc[In any, Out any](doc *Document, operation Operation) *Opera
 			Status:      response.Status,
 			Description: response.Description,
 			Headers:     response.Headers,
+			ContentType: response.ContentType,
+			ModelType:   openAPIModelType(response.OpenAPIModel),
 			NoBody:      response.NoBody,
 		})
 	}
@@ -75,4 +77,14 @@ func adaptOpenAPISchemaNamer(namer OpenAPISchemaNamer) internalopenapi.SchemaNam
 			Request: ctx.Request,
 		})
 	}
+}
+
+func openAPIModelType(value any) reflect.Type {
+	if value == nil {
+		return nil
+	}
+	if typ, ok := value.(reflect.Type); ok {
+		return typ
+	}
+	return reflect.TypeOf(value)
 }
