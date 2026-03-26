@@ -18,6 +18,7 @@ type Config struct {
 	Description              string
 	DocsPath                 string
 	OpenAPIPath              string
+	OpenAPISchemaNamer       OpenAPISchemaNamer
 	RequestDecoder           *reqx.Decoder
 	DisableDefaultMiddleware bool
 	Middlewares              []func(http.Handler) http.Handler
@@ -100,7 +101,7 @@ func (a *App) OpenAPIDocument() Document {
 
 func (a *App) registerOperation(method, path string, handler http.Handler, operation *OperationDoc) {
 	a.mu.Lock()
-	a.doc.addOperation(method, path, operation)
+	addOperation(a.doc, method, path, operation)
 	a.mu.Unlock()
 
 	a.router.Method(method, path, handler)

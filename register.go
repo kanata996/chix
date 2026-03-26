@@ -63,7 +63,7 @@ func Register[In any, Out any](app *App, operation Operation, handler Handler[In
 		runtimeHandler = chi.Chain(operation.Middlewares...).Handler(runtimeHandler)
 	}
 
-	app.registerOperation(method, operation.Path, runtimeHandler, newOperationDoc[In, Out](operation))
+	app.registerOperation(method, operation.Path, runtimeHandler, newOperationDoc[In, Out](app.doc, operation))
 }
 
 func successStatus(method string, explicit int) int {

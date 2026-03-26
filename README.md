@@ -160,12 +160,17 @@ type CreateUserInput struct {
 当前会生成的内容包括：
 
 - 操作元数据，如 `operationId`、`summary`、`description`、`tags`
+- `components/schemas` 与 `$ref` 复用
 - `path`、`query`、`header` 参数描述
 - JSON 请求体 schema
+- 常见 `validate` 规则映射出的请求约束，如 `required`、`min/max`、`len`、`oneof`、`email`、`uuid`
+- 显式的请求错误响应文档，包括解码/绑定失败的 `400` 和校验失败的 `422`
 - JSON 成功响应 schema
 - 默认的 `application/problem+json` 错误响应
 
 目前 `/docs` 页面通过 CDN 加载 Swagger UI 资源。
+
+如果你需要控制 `components/schemas` 的命名，可以通过 `chix.Config.OpenAPISchemaNamer` 自定义。命名函数会收到 `reflect.Type` 和 `Request` 标记；返回空字符串时会回退到默认命名策略。
 
 ## 技术文档
 

@@ -111,10 +111,288 @@ func TestOpenAPIDocumentIncludesParametersAndBody(t *testing.T) {
 	if path.Get.RequestBody != nil {
 		t.Fatalf("did not expect request body for parameter-only input")
 	}
+	if path.Get.Responses["400"].Description != "Invalid request" {
+		t.Fatalf("expected explicit 400 response, got %+v", path.Get.Responses)
+	}
+	if _, ok := path.Get.Responses["422"]; ok {
+		t.Fatalf("did not expect 422 response for input without validate rules")
+	}
 
 	response := path.Get.Responses["200"]
-	if response.Content["application/json"].Schema.Properties["items"].Items.Properties["id"] == nil {
+	responseSchema := resolvedSchema(doc, response.Content["application/json"].Schema)
+	itemsSchema := resolvedSchema(doc, responseSchema.Properties["items"].Items)
+	if itemsSchema.Properties["id"] == nil {
 		t.Fatalf("expected nested response schema in OpenAPI")
+	}
+}
+
+func TestOpenAPIDocumentIncludesValidationConstraints(t *testing.T) {
+	type profileInput struct {
+		ZIP string `json:"zip" validate:"len=6"`
+	}
+
+	type createUserInput struct {
+		Role    string        `query:"role" validate:"required,oneof=admin member"`
+		Email   string        `json:"email,omitempty" validate:"required,email"`
+		Name    string        `json:"name" validate:"min=3,max=20"`
+		Code    string        `json:"code,omitempty" validate:"len=8"`
+		Tags    []string      `json:"tags,omitempty" validate:"max=3"`
+		Profile *profileInput `json:"profile,omitempty"`
+	}
+
+	type createUserOutput struct {
+		Status string `json:"status" validate:"oneof=ok fail"`
+	}
+
+	app := New(Config{})
+	Register(app, Operation{
+		Method: http.MethodPost,
+		Path:   "/users",
+	}, func(_ context.Context, input *createUserInput) (*createUserOutput, error) {
+		return &createUserOutput{}, nil
+	})
+
+	doc := app.OpenAPIDocument()
+	path := doc.Paths["/users"]
+	if path.Post == nil {
+		t.Fatalf("expected POST operation in spec")
+	}
+
+	if path.Post.RequestBody == nil || !path.Post.RequestBody.Required {
+		t.Fatalf("expected request body to be marked required")
+	}
+	if path.Post.Responses["400"].Description != "Invalid request" {
+		t.Fatalf("expected explicit 400 response, got %+v", path.Post.Responses)
+	}
+	if path.Post.Responses["422"].Description != "Request validation failed" {
+		t.Fatalf("expected explicit 422 response, got %+v", path.Post.Responses)
+	}
+	validationProblem := resolvedSchema(doc, path.Post.Responses["422"].Content["application/problem+json"].Schema)
+	if validationProblem.Properties["violations"] == nil {
+		t.Fatalf("expected 422 problem schema to expose violations")
+	}
+
+	var roleParam *Parameter
+	for i := range path.Post.Parameters {
+		if path.Post.Parameters[i].Name == "role" {
+			roleParam = &path.Post.Parameters[i]
+			break
+		}
+	}
+	if roleParam == nil {
+		t.Fatalf("expected role query parameter")
+	}
+	if !roleParam.Required {
+		t.Fatalf("expected role parameter to be required")
+	}
+	if len(roleParam.Schema.Enum) != 2 || roleParam.Schema.Enum[0] != "admin" || roleParam.Schema.Enum[1] != "member" {
+		t.Fatalf("expected role enum, got %+v", roleParam.Schema.Enum)
+	}
+
+	bodySchema := resolvedSchema(doc, path.Post.RequestBody.Content["application/json"].Schema)
+	required := map[string]bool{}
+	for _, name := range bodySchema.Required {
+		required[name] = true
+	}
+	if !required["email"] || !required["name"] {
+		t.Fatalf("expected required body fields, got %+v", bodySchema.Required)
+	}
+
+	email := bodySchema.Properties["email"]
+	if email.Format != "email" {
+		t.Fatalf("expected email format, got %+v", email)
+	}
+
+	name := bodySchema.Properties["name"]
+	if name.MinLength == nil || *name.MinLength != 3 {
+		t.Fatalf("expected name minLength=3, got %+v", name)
+	}
+	if name.MaxLength == nil || *name.MaxLength != 20 {
+		t.Fatalf("expected name maxLength=20, got %+v", name)
+	}
+
+	code := bodySchema.Properties["code"]
+	if code.MinLength == nil || *code.MinLength != 8 || code.MaxLength == nil || *code.MaxLength != 8 {
+		t.Fatalf("expected code len=8, got %+v", code)
+	}
+
+	tags := bodySchema.Properties["tags"]
+	if tags.MaxItems == nil || *tags.MaxItems != 3 {
+		t.Fatalf("expected tags maxItems=3, got %+v", tags)
+	}
+
+	profile := bodySchema.Properties["profile"]
+	if !profile.Nullable {
+		t.Fatalf("expected profile to remain nullable")
+	}
+	zip := resolvedSchema(doc, profile).Properties["zip"]
+	if zip.MinLength == nil || *zip.MinLength != 6 || zip.MaxLength == nil || *zip.MaxLength != 6 {
+		t.Fatalf("expected nested zip len=6, got %+v", zip)
+	}
+
+	responseStatus := resolvedSchema(doc, path.Post.Responses["201"].Content["application/json"].Schema).Properties["status"]
+	if len(responseStatus.Enum) != 0 {
+		t.Fatalf("did not expect response schema validation enum, got %+v", responseStatus.Enum)
+	}
+}
+
+func TestOpenAPIDocumentUsesComponentsAndRefs(t *testing.T) {
+	type user struct {
+		ID string `json:"id"`
+	}
+
+	type getUserOutput struct {
+		Item user `json:"item"`
+	}
+
+	type listUsersOutput struct {
+		Items []user `json:"items"`
+	}
+
+	app := New(Config{})
+	Register(app, Operation{
+		Method: http.MethodGet,
+		Path:   "/user",
+	}, func(_ context.Context, _ *struct{}) (*getUserOutput, error) {
+		return &getUserOutput{}, nil
+	})
+	Register(app, Operation{
+		Method: http.MethodGet,
+		Path:   "/users",
+	}, func(_ context.Context, _ *struct{}) (*listUsersOutput, error) {
+		return &listUsersOutput{}, nil
+	})
+
+	doc := app.OpenAPIDocument()
+	if doc.Components == nil || len(doc.Components.Schemas) == 0 {
+		t.Fatalf("expected OpenAPI components to be populated")
+	}
+
+	getSchema := resolvedSchema(doc, doc.Paths["/user"].Get.Responses["200"].Content["application/json"].Schema)
+	listSchema := resolvedSchema(doc, doc.Paths["/users"].Get.Responses["200"].Content["application/json"].Schema)
+
+	itemSchema := getSchema.Properties["item"]
+	itemsSchema := listSchema.Properties["items"]
+	if itemSchema.Ref == "" {
+		t.Fatalf("expected object property to use $ref")
+	}
+	if itemsSchema.Items == nil || itemsSchema.Items.Ref == "" {
+		t.Fatalf("expected array items to use $ref")
+	}
+	if itemSchema.Ref != itemsSchema.Items.Ref {
+		t.Fatalf("expected repeated user schema to reuse one component, got %q and %q", itemSchema.Ref, itemsSchema.Items.Ref)
+	}
+}
+
+func TestOpenAPIDocumentSupportsCustomSchemaNames(t *testing.T) {
+	type profileInput struct {
+		ID string `json:"id"`
+	}
+
+	type user struct {
+		ID string `json:"id"`
+	}
+
+	type team struct {
+		ID string `json:"id"`
+	}
+
+	type createUserInput struct {
+		Profile profileInput `json:"profile"`
+	}
+
+	type createUserOutput struct {
+		User user `json:"user"`
+	}
+
+	type getTeamOutput struct {
+		Team team `json:"team"`
+	}
+
+	app := New(Config{
+		OpenAPISchemaNamer: func(ctx OpenAPISchemaNameContext) string {
+			switch ctx.Type.Name() {
+			case "profileInput":
+				if ctx.Request {
+					return "ProfilePayload"
+				}
+			case "createUserOutput":
+				return "CreateUserView"
+			case "user", "team":
+				return "Actor"
+			}
+			return ""
+		},
+	})
+
+	Register(app, Operation{
+		Method: http.MethodPost,
+		Path:   "/users",
+	}, func(_ context.Context, _ *createUserInput) (*createUserOutput, error) {
+		return &createUserOutput{}, nil
+	})
+	Register(app, Operation{
+		Method: http.MethodGet,
+		Path:   "/teams/current",
+	}, func(_ context.Context, _ *struct{}) (*getTeamOutput, error) {
+		return &getTeamOutput{}, nil
+	})
+
+	doc := app.OpenAPIDocument()
+	if doc.Components == nil || doc.Components.Schemas == nil {
+		t.Fatalf("expected components schemas")
+	}
+	if doc.Components.Schemas["ProfilePayload"] == nil {
+		t.Fatalf("expected custom request schema name")
+	}
+	if doc.Components.Schemas["CreateUserView"] == nil {
+		t.Fatalf("expected custom response schema name")
+	}
+	if doc.Components.Schemas["Actor"] == nil || doc.Components.Schemas["Actor2"] == nil {
+		t.Fatalf("expected colliding custom names to be deduplicated, got %+v", doc.Components.Schemas)
+	}
+
+	post := doc.Paths["/users"].Post
+	if post == nil {
+		t.Fatalf("expected POST operation")
+	}
+	bodySchema := resolvedSchema(doc, post.RequestBody.Content["application/json"].Schema)
+	if bodySchema.Properties["profile"].Ref != "#/components/schemas/ProfilePayload" {
+		t.Fatalf("expected nested request schema to use custom name, got %+v", bodySchema.Properties["profile"])
+	}
+	if post.Responses["201"].Content["application/json"].Schema.Ref != "#/components/schemas/CreateUserView" {
+		t.Fatalf("expected response root schema to use custom name, got %+v", post.Responses["201"].Content["application/json"].Schema)
+	}
+
+	teamResponse := resolvedSchema(doc, doc.Paths["/teams/current"].Get.Responses["200"].Content["application/json"].Schema)
+	if teamResponse.Properties["team"].Ref != "#/components/schemas/Actor2" {
+		t.Fatalf("expected colliding custom schema name to be suffixed, got %+v", teamResponse.Properties["team"])
+	}
+}
+
+func TestOpenAPIDocumentOmitsRequestErrorResponsesForEmptyInput(t *testing.T) {
+	app := New(Config{})
+	Register(app, Operation{
+		Method: http.MethodGet,
+		Path:   "/health",
+	}, func(_ context.Context, _ *struct{}) (*struct {
+		OK bool `json:"ok"`
+	}, error) {
+		return &struct {
+			OK bool `json:"ok"`
+		}{OK: true}, nil
+	})
+
+	doc := app.OpenAPIDocument()
+	path := doc.Paths["/health"]
+	if path.Get == nil {
+		t.Fatalf("expected GET operation in spec")
+	}
+	if _, ok := path.Get.Responses["400"]; ok {
+		t.Fatalf("did not expect 400 response for empty input")
+	}
+	if _, ok := path.Get.Responses["422"]; ok {
+		t.Fatalf("did not expect 422 response for empty input")
 	}
 }
 
@@ -230,4 +508,19 @@ func TestDocsRouteServesSwaggerUI(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "SwaggerUIBundle") {
 		t.Fatalf("expected swagger ui page, got %q", rec.Body.String())
 	}
+}
+
+func resolvedSchema(doc Document, schema *Schema) *Schema {
+	if schema == nil {
+		return nil
+	}
+	if schema.Ref == "" {
+		return schema
+	}
+	const prefix = "#/components/schemas/"
+	name := strings.TrimPrefix(schema.Ref, prefix)
+	if doc.Components == nil || doc.Components.Schemas == nil {
+		return nil
+	}
+	return doc.Components.Schemas[name]
 }

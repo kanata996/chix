@@ -33,7 +33,8 @@
 - [register.go](../register.go)：声明式操作注册与处理函数桥接
 - [reqx/](../reqx)：请求解码、参数绑定与 `validator/v10` 校验
 - [error.go](../error.go)：统一错误模型与 Problem Details 输出
-- [openapi.go](../openapi.go)：OpenAPI 文档模型与 schema 推导
+- [openapi.go](../openapi.go)：根包的 OpenAPI 兼容入口与公开类型别名
+- [internal/openapi](../internal/openapi)：OpenAPI 文档模型、schema 推导与文档装配
 - [internal/reqmeta](../internal/reqmeta)：请求字段标签与反射规则的共享元数据层
 - [app_test.go](../app_test.go)：当前 MVP 的行为测试
 
@@ -161,7 +162,7 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 
 ## 8. OpenAPI 生成策略
 
-[openapi.go](../openapi.go) 当前通过反射从输入输出类型推导 schema。
+当前 OpenAPI 能力由根包的 [openapi.go](../openapi.go) 作为兼容入口，对外继续暴露 `Document`、`Schema` 等类型；实际的模型和 builder 已经下沉到 [internal/openapi](../internal/openapi)。
 
 目前已经覆盖：
 
@@ -170,15 +171,19 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 - map
 - 结构体
 - `time.Time`
+- `components/schemas` 与 `$ref` 去重
 - 参数与 body 的拆分
+- 请求模型上常见 `validate` 规则到 schema 约束的映射
+- 显式的 `400` / `422` problem 响应文档生成
 
 当前限制同样很明显：
 
-- 还没有 `components/schemas`
-- 还没有 `$ref` 去重
 - 还没有多响应、多内容类型、响应头描述
 - 还没有 security schemes
 - 对递归类型与复杂泛型结构的表达还比较保守
+- 当前只映射稳定子集的 `validate` 规则，复杂组合规则和自定义 validator 仍不会自动进入 OpenAPI
+
+当前已经提供一个显式的组件命名定制点：`chix.Config.OpenAPISchemaNamer`。它适合解决跨包同名类型、请求/响应希望使用不同组件名等问题；如果未提供，则回退到默认自动命名与冲突避让规则。
 
 下一阶段建议优先做这几件事：
 

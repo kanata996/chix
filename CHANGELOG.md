@@ -16,7 +16,12 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 ### Added
 
 - Added the `reqx` subpackage as the home for request decoding, parameter binding, and `validator/v10`-based request validation.
+- Moved the OpenAPI document model and builder implementation into `internal/openapi` while keeping the root package entry points stable.
 - Added `422 Unprocessable Entity` responses for validation failures, including field-level `violations` in the default problem response.
+- Added OpenAPI `components/schemas` generation with `$ref` reuse for named structs across operations.
+- Added `chix.Config.OpenAPISchemaNamer` to override generated OpenAPI component schema names with collision-safe fallback behavior.
+- Added OpenAPI request-schema mapping for a stable subset of `validate` rules, including `required`, `min/max`, `len`, `oneof`, `email`, and `uuid`.
+- Added explicit OpenAPI `400` and `422` problem responses for request decode/bind failures and validation failures.
 
 ## [v0.3.0] - 2026-03-26
 
