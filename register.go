@@ -37,8 +37,8 @@ func Register[In any, Out any](app *App, operation Operation, handler Handler[In
 
 	runtimeHandler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var input In
-		if err := bindInput(r, &input); err != nil {
-			writeError(w, r, err)
+		if err := app.reqDecoder.Decode(r, &input); err != nil {
+			writeError(w, r, requestDecodeError(err))
 			return
 		}
 

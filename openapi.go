@@ -7,6 +7,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/kanata996/chix/internal/reqmeta"
 )
 
 type Document struct {
@@ -71,6 +74,8 @@ type Schema struct {
 	Required             []string           `json:"required,omitempty"`
 	AdditionalProperties *Schema            `json:"additionalProperties,omitempty"`
 }
+
+var timeType = reflect.TypeOf(time.Time{})
 
 func newDocument(config Config) *Document {
 	title := strings.TrimSpace(config.Title)
@@ -147,7 +152,7 @@ func newOperationDoc[In any, Out any](operation Operation) *OperationDoc {
 	}
 
 	if requestSchema != nil {
-		_, bodyRequired := bodyInfo(inputType)
+		_, bodyRequired := reqmeta.BodyInfo(inputType)
 		doc.RequestBody = &RequestBody{
 			Required: bodyRequired,
 			Content: map[string]MediaType{
@@ -180,14 +185,14 @@ type schemaBuilder struct {
 }
 
 func (b *schemaBuilder) parametersFor(t reflect.Type) []Parameter {
-	t = indirectType(t)
+	t = reqmeta.IndirectType(t)
 	if t.Kind() != reflect.Struct {
 		return nil
 	}
 
 	var params []Parameter
-	walkStructFields(t, func(field reflect.StructField, _ []int) bool {
-		source, name, ok := parameterSource(field)
+	reqmeta.WalkStructFields(t, func(field reflect.StructField, _ []int) bool {
+		source, name, ok := reqmeta.ParameterSource(field)
 		if !ok {
 			return true
 		}
@@ -217,7 +222,7 @@ func (b *schemaBuilder) parametersFor(t reflect.Type) []Parameter {
 }
 
 func (b *schemaBuilder) requestBodySchema(t reflect.Type) *Schema {
-	t = indirectType(t)
+	t = reqmeta.IndirectType(t)
 	if t.Kind() != reflect.Struct {
 		return b.schemaFor(t)
 	}
@@ -230,7 +235,7 @@ func (b *schemaBuilder) requestBodySchema(t reflect.Type) *Schema {
 }
 
 func (b *schemaBuilder) schemaFor(t reflect.Type) *Schema {
-	t = indirectType(t)
+	t = reqmeta.IndirectType(t)
 
 	if t == timeType {
 		return &Schema{Type: "string", Format: "date-time"}
@@ -268,7 +273,7 @@ func (b *schemaBuilder) schemaFor(t reflect.Type) *Schema {
 
 func (b *schemaBuilder) structSchema(t reflect.Type, requestBodyRoot bool) *Schema {
 	original := t
-	t = indirectType(t)
+	t = reqmeta.IndirectType(t)
 
 	if b.visiting[original] {
 		return &Schema{Type: "object"}
@@ -281,15 +286,15 @@ func (b *schemaBuilder) structSchema(t reflect.Type, requestBodyRoot bool) *Sche
 		Properties: map[string]*Schema{},
 	}
 
-	walkStructFields(t, func(field reflect.StructField, _ []int) bool {
+	reqmeta.WalkStructFields(t, func(field reflect.StructField, _ []int) bool {
 		if field.PkgPath != "" && !field.Anonymous {
 			return true
 		}
-		if requestBodyRoot && isParameterField(field) {
+		if requestBodyRoot && reqmeta.IsParameterField(field) {
 			return true
 		}
 
-		name, omitempty, skip := jsonFieldName(field)
+		name, omitempty, skip := reqmeta.JSONFieldName(field)
 		if skip || name == "" {
 			return true
 		}

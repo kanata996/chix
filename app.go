@@ -8,6 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/kanata996/chix/reqx"
 )
 
 type Config struct {
@@ -16,6 +18,7 @@ type Config struct {
 	Description              string
 	DocsPath                 string
 	OpenAPIPath              string
+	RequestDecoder           *reqx.Decoder
 	DisableDefaultMiddleware bool
 	Middlewares              []func(http.Handler) http.Handler
 }
@@ -24,6 +27,7 @@ type App struct {
 	router      chi.Router
 	docsPath    string
 	openAPIPath string
+	reqDecoder  *reqx.Decoder
 
 	mu  sync.RWMutex
 	doc *Document
@@ -57,11 +61,19 @@ func New(config Config) *App {
 		router:      router,
 		docsPath:    docsPath,
 		openAPIPath: openAPIPath,
+		reqDecoder:  requestDecoder(config.RequestDecoder),
 		doc:         newDocument(config),
 	}
 	app.installInternalRoutes()
 
 	return app
+}
+
+func requestDecoder(decoder *reqx.Decoder) *reqx.Decoder {
+	if decoder != nil {
+		return decoder
+	}
+	return reqx.New()
 }
 
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {

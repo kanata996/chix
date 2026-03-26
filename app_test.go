@@ -169,6 +169,54 @@ func TestMissingRequiredBodyReturnsBadRequest(t *testing.T) {
 	}
 }
 
+func TestValidationFailureReturnsProblemDocument(t *testing.T) {
+	type createUserInput struct {
+		Role  string `query:"role" validate:"oneof=admin member"`
+		Email string `json:"email" validate:"required,email"`
+	}
+
+	app := New(Config{})
+	Register(app, Operation{
+		Method: http.MethodPost,
+		Path:   "/users",
+	}, func(_ context.Context, input *createUserInput) (*struct{}, error) {
+		return &struct{}{}, nil
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/users?role=guest", strings.NewReader(`{"email":"nope"}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d", rec.Code)
+	}
+
+	var problem Problem
+	if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
+		t.Fatalf("decode problem: %v", err)
+	}
+	if problem.Detail != "request validation failed" {
+		t.Fatalf("unexpected problem detail: %+v", problem)
+	}
+	if len(problem.Violations) != 2 {
+		t.Fatalf("expected 2 violations, got %d", len(problem.Violations))
+	}
+
+	got := map[string]string{}
+	for _, violation := range problem.Violations {
+		got[violation.Source+":"+violation.Field] = violation.Rule
+	}
+
+	if got["query:role"] != "oneof" {
+		t.Fatalf("expected query role violation, got %+v", problem.Violations)
+	}
+	if got["body:email"] != "email" {
+		t.Fatalf("expected body email violation, got %+v", problem.Violations)
+	}
+}
+
 func TestDocsRouteServesSwaggerUI(t *testing.T) {
 	app := New(Config{})
 

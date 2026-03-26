@@ -10,6 +10,7 @@
 
 - 声明式操作注册
 - 类型化请求绑定，支持 `path`、`query`、`header` 和 JSON Body
+- 基于 `validator/v10` 的声明式请求校验
 - 自动生成 OpenAPI 3.1 文档
 - 内建 Swagger UI 文档页
 - 统一输出 `application/problem+json` 错误响应
@@ -23,6 +24,7 @@
 
 - 基于 `chi` 的 `App`
 - 通过泛型注册类型化处理函数
+- `reqx` 子包承接请求解码与校验
 - JSON 请求与响应处理
 - `/openapi.json` OpenAPI 文档输出
 - `/docs` Swagger UI 页面
@@ -30,7 +32,7 @@
 当前版本仍然是起步阶段，后续还会继续补强：
 
 - 更完整的 schema 生成能力
-- 更清晰的校验机制
+- 更完整的校验规则到 OpenAPI 的映射
 - 响应头与多响应描述
 - 安全方案与 OpenAPI 自定义能力
 - 更丰富的 `chi` 中间件预设组合
@@ -115,6 +117,30 @@ type ListUsersInput struct {
 ```
 
 任意导出字段只要没有被标记为 `path`、`query` 或 `header`，就会被视为 JSON Body 的一部分。
+
+你也可以直接使用 `validator/v10` 的 `validate` 标签定义请求校验规则：
+
+```go
+type CreateUserInput struct {
+	ID    string `path:"id" validate:"required,uuid4"`
+	Role  string `query:"role" validate:"oneof=admin member"`
+	Email string `json:"email" validate:"required,email"`
+	Name  string `json:"name" validate:"required,min=3,max=50"`
+}
+```
+
+当前 `Register(...)` 的默认请求链路会先解码，再统一执行校验。
+
+## 请求校验
+
+请求语义分成两层：
+
+- 解码或绑定失败返回 `400 Bad Request`
+- `validate` 规则失败返回 `422 Unprocessable Entity`
+
+校验失败时，框架会继续输出 `application/problem+json`，并在响应体中附带 `violations` 字段，包含字段来源、字段名和失败规则。
+
+如果你需要自定义 `validator` 实例，可以在 `chix.Config.RequestDecoder` 中注入 `reqx.New(reqx.WithValidator(v))`。
 
 ## 默认行为
 

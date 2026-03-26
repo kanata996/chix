@@ -7,20 +7,24 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/kanata996/chix/reqx"
 )
 
 type Problem struct {
-	Status    int    `json:"status"`
-	Title     string `json:"title"`
-	Detail    string `json:"detail,omitempty"`
-	RequestID string `json:"requestID,omitempty"`
+	Status     int              `json:"status"`
+	Title      string           `json:"title"`
+	Detail     string           `json:"detail,omitempty"`
+	RequestID  string           `json:"requestID,omitempty"`
+	Violations []reqx.Violation `json:"violations,omitempty"`
 }
 
 type HTTPError struct {
-	Status int
-	Title  string
-	Detail string
-	Cause  error
+	Status     int
+	Title      string
+	Detail     string
+	Violations []reqx.Violation
+	Cause      error
 }
 
 func (e *HTTPError) Error() string {
@@ -45,6 +49,11 @@ func (e *HTTPError) WithCause(err error) *HTTPError {
 	return e
 }
 
+func (e *HTTPError) WithViolations(violations []reqx.Violation) *HTTPError {
+	e.Violations = violations
+	return e
+}
+
 func StatusError(status int, detail string) *HTTPError {
 	return &HTTPError{
 		Status: status,
@@ -66,10 +75,11 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 
 	problem := Problem{
-		Status:    httpErr.Status,
-		Title:     titleOrStatus(httpErr.Title, httpErr.Status),
-		Detail:    httpErr.Detail,
-		RequestID: middleware.GetReqID(r.Context()),
+		Status:     httpErr.Status,
+		Title:      titleOrStatus(httpErr.Title, httpErr.Status),
+		Detail:     httpErr.Detail,
+		RequestID:  middleware.GetReqID(r.Context()),
+		Violations: httpErr.Violations,
 	}
 
 	w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")

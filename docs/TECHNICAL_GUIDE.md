@@ -31,9 +31,10 @@
 
 - [app.go](../app.go)：应用入口、默认中间件、内建文档路由
 - [register.go](../register.go)：声明式操作注册与处理函数桥接
-- [bind.go](../bind.go)：请求参数与 JSON Body 绑定
+- [reqx/](../reqx)：请求解码、参数绑定与 `validator/v10` 校验
 - [error.go](../error.go)：统一错误模型与 Problem Details 输出
 - [openapi.go](../openapi.go)：OpenAPI 文档模型与 schema 推导
+- [internal/reqmeta](../internal/reqmeta)：请求字段标签与反射规则的共享元数据层
 - [app_test.go](../app_test.go)：当前 MVP 的行为测试
 
 ## 3. 核心运行流程
@@ -43,9 +44,10 @@
 1. 调用 `Register(app, operation, handler)` 注册一个操作。
 2. `Register` 根据泛型输入输出类型构造运行时处理器。
 3. 注册时同步生成对应的 OpenAPI 操作文档并写入内存中的 `Document`。
-4. 请求进入时，运行时处理器调用 `bindInput` 把路径、查询、请求头和 JSON Body 绑定到输入结构体。
-5. 用户处理函数返回输出对象或错误。
-6. 成功时统一写出 JSON 响应；失败时统一写出 `application/problem+json`。
+4. 请求进入时，运行时处理器调用 `reqx.Decode(...)` 完成路径、查询、请求头和 JSON Body 绑定。
+5. `reqx` 在绑定完成后统一执行 `validator/v10` 校验。
+6. 用户处理函数返回输出对象或错误。
+7. 成功时统一写出 JSON 响应；失败时统一写出 `application/problem+json`。
 
 这个流程的关键点是：
 
@@ -63,6 +65,7 @@
 - 安装默认中间件
 - 注册 `/openapi.json`
 - 注册 `/docs`
+- 保存请求解码器，如 `reqx.Decoder`
 - 保存已注册操作对应的 OpenAPI `Document`
 
 这里有两个原则不要轻易破坏：
@@ -104,9 +107,9 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 - 如果要增加能力，优先通过 `Operation` 元数据或可选 hook 扩展
 - 保证最基础的 handler 签名长期稳定
 
-## 6. 绑定机制
+## 6. 请求解码与校验
 
-[bind.go](../bind.go) 负责输入绑定。
+[`reqx`](../reqx) 负责输入解码与校验。
 
 当前支持：
 
@@ -114,6 +117,7 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 - `query`
 - `header`
 - JSON Body
+- `validate` 标签驱动的 `validator/v10` 校验
 
 当前规则：
 
@@ -121,19 +125,22 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 - 其他导出字段默认视为 JSON Body 字段
 - JSON Body 使用 `encoding/json` 解码，并启用 `DisallowUnknownFields`
 - 若请求体 schema 中存在非 `omitempty` 且非指针字段，则无请求体时返回 `400`
+- 解码、缺参、非法参数等请求格式问题返回 `400`
+- `validate` 规则失败返回 `422`
 
-这个实现是实用型 MVP，但还不够完整。后续需要重点演进的方向：
+当前的职责分层应当保持清晰：
+
+- `reqx` 负责“提取、转换、校验”
+- `chix` 根包负责把 `reqx` 的 typed error 映射为 HTTP 错误响应
+- `internal/reqmeta` 负责让运行时和 OpenAPI 共用同一套字段判定规则
+
+这个实现仍然是实用型 MVP。后续需要重点演进的方向：
 
 - 参数校验规则，如最小值、最大长度、枚举、正则
 - 更细粒度的 body 可选/必填控制
 - 对 `multipart/form-data`、`application/x-www-form-urlencoded` 的支持
 - 更稳定的匿名字段、嵌套结构处理规则
 - 更清晰的 tag 设计，避免未来 tag 语义冲突
-
-建议不要把所有校验逻辑继续塞进 `bind.go`。更合理的方向是：
-
-- `bind.go` 继续负责“提取与基本类型转换”
-- 校验能力放到单独的验证层或 hook 层
 
 ## 7. 错误模型
 
@@ -144,11 +151,11 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 - 让框架层错误总能稳定映射为 HTTP 状态码
 - 输出格式固定，便于 API 使用者消费
 - 默认把 `chi` 的 Request ID 回写到错误响应中
+- 对校验失败输出稳定的字段级 `violations`
 
 后续建议：
 
 - 增加错误类型码，而不只依赖 `status/title/detail`
-- 支持字段级错误详情
 - 为校验错误定义更稳定的错误结构
 - 为业务错误预留统一扩展点
 
@@ -205,13 +212,13 @@ type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
 
 ## 10. 推荐的后续模块拆分
 
-随着功能增长，建议考虑把当前单包逐步拆成更清晰的内部模块，例如：
+随着功能增长，建议在当前边界上继续细化，而不是回到“大根包”：
 
+- `reqx`：请求解码、绑定、校验
+- `resp`：成功响应输出
+- `errx`：错误模型与错误码
 - `internal/schema`：schema 推导
 - `internal/openapi`：文档装配
-- `internal/binding`：参数提取与类型转换
-- `internal/render`：响应输出
-- `internal/problems`：错误模型
 
 但现阶段不建议为了“看起来整洁”过早拆得太碎。当前代码量仍然适合在根包快速迭代。
 

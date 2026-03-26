@@ -13,6 +13,11 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+### Added
+
+- Added the `reqx` subpackage as the home for request decoding, parameter binding, and `validator/v10`-based request validation.
+- Added `422 Unprocessable Entity` responses for validation failures, including field-level `violations` in the default problem response.
+
 ## [v0.3.0] - 2026-03-26
 
 ### Highlights
