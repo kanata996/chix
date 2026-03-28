@@ -1,5 +1,5 @@
-// 本文件职责：定义 runtime 的公开类型和内部配置骨架。
-// 定位：作为 v1 runtime 的类型入口，只承载结构定义，不放执行流程细节。
+// 本文件职责：定义 runtime 的公开类型。
+// 定位：作为 v1 runtime 的类型入口，不承载内部配置与执行期骨架。
 package runtime
 
 import (
@@ -10,28 +10,6 @@ import (
 type Runtime struct {
 	parent *Runtime
 	local  scopeConfig
-}
-
-type scopeConfig struct {
-	errorMappers     []ErrorMapper
-	observer         Observer
-	hasObserver      bool
-	extractor        Extractor
-	hasExtractor     bool
-	successStatus    int
-	hasSuccessStatus bool
-}
-
-type executionConfig struct {
-	errorMappers  []ErrorMapper
-	observer      Observer
-	extractor     Extractor
-	successStatus int
-}
-
-type resolvedFailure struct {
-	raw    error
-	public *HTTPError
 }
 
 type Operation[I any, O any] struct {
