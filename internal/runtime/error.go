@@ -1,4 +1,6 @@
-package chix
+// 本文件职责：定义公开错误载体、runtime 自产错误以及 JSON envelope 编码辅助。
+// 定位：作为 runtime failure 模型的基础层，被 failure 执行路径直接消费。
+package runtime
 
 import (
 	"encoding/json"
