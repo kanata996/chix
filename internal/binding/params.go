@@ -9,55 +9,34 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/kanata996/chix/internal/inputschema"
 )
 
 var timeType = reflect.TypeOf(time.Time{})
 
-func bindParameterFields(r *http.Request, value reflect.Value) error {
-	var bindErr error
-
-	walkStructFields(value.Type(), func(field reflect.StructField, index []int) bool {
-		if bindErr != nil {
-			return false
-		}
-		if field.PkgPath != "" && !field.Anonymous {
-			return true
-		}
-
-		source, name, ok, err := parameterSource(field)
-		if err != nil {
-			bindErr = err
-			return false
-		}
-		if !ok {
-			return true
-		}
-
-		values, exists := parameterValues(r, source, name)
+func bindParameterFields(r *http.Request, value reflect.Value, schema *inputschema.Schema) error {
+	for _, field := range schema.ParameterFields {
+		values, exists := parameterValues(r, field.Source, field.Name)
 		if !exists || len(values) == 0 {
-			return true
+			continue
 		}
 
-		target, err := fieldByIndexAlloc(value, index)
+		target, err := fieldByIndexAlloc(value, field.Index)
 		if err != nil {
-			bindErr = err
-			return false
+			return err
 		}
 
 		if len(values) > 1 && target.Kind() != reflect.Slice {
-			bindErr = newRequestShapeError(fmt.Errorf("duplicate %s parameter %q", source, name))
-			return false
+			return newRequestShapeError(fmt.Errorf("duplicate %s parameter %q", field.Source, field.Name))
 		}
 
 		if err := assignValues(target, values); err != nil {
-			bindErr = newRequestShapeError(fmt.Errorf("invalid %s parameter %q: %w", source, name, err))
-			return false
+			return newRequestShapeError(fmt.Errorf("invalid %s parameter %q: %w", field.Source, field.Name, err))
 		}
+	}
 
-		return true
-	})
-
-	return bindErr
+	return nil
 }
 
 func parameterValues(r *http.Request, source string, name string) ([]string, bool) {

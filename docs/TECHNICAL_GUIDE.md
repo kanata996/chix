@@ -133,6 +133,7 @@ runtime 不承担：
 - path / query 绑定必须显式声明来源标签
 - JSON body 字段使用标准 `json` tag；未声明绑定来源的导出字段不应被隐式视为 body 字段
 - 同一个字段最多只能声明一个输入来源
+- 无效的输入 schema 属于配置错误，应在 runtime 挂载或 validator adapter 构造阶段尽早暴露，而不是等到请求期再降级成普通请求错误
 - path / query 缺失值只保留 Go 零值；required 语义属于 validation，而不是 binding
 - query 绑定到标量字段时，如果同名参数出现多次，应视为请求形状错误
 - body 非空且 `Content-Type` 不是 `application/json` 或 `application/*+json` 时，应返回 `415 unsupported_media_type`

@@ -99,6 +99,7 @@ type GetUserInput struct {
 - body 字段使用标准 `json` tag
 - 未声明来源的导出字段不应隐式进入 body
 - 同一个字段最多只能声明一个输入来源
+- 无效 input schema 属于配置错误，应在 `Handle(...)` 挂载或 validator adapter 构造时尽早暴露
 - path / query 缺失值只保留 Go 零值，required 语义交给 validation
 - query 绑定到标量字段时，如果同名参数出现多次，应视为 `400 bad_request`
 - body 非空且 `Content-Type` 不是 `application/json` 或 `application/*+json` 时，应返回 `415 unsupported_media_type`

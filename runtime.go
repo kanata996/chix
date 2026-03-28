@@ -4,9 +4,12 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/kanata996/chix/internal/inputschema"
 )
 
 type Runtime struct {
@@ -100,8 +103,13 @@ func Handle[I any, O any](rt *Runtime, op Operation[I, O], h Handler[I, O]) http
 		panic("chix: handler must not be nil")
 	}
 
+	inputSchema, err := inputschema.Load(reflect.TypeOf((*I)(nil)).Elem())
+	if err != nil {
+		panic(err)
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		execute(rt, w, r, op, h)
+		execute(rt, w, r, op, h, inputSchema)
 	})
 }
 
@@ -181,11 +189,18 @@ func applyOptions(cfg *scopeConfig, opts []Option) {
 	}
 }
 
-func execute[I any, O any](rt *Runtime, w http.ResponseWriter, r *http.Request, op Operation[I, O], h Handler[I, O]) {
+func execute[I any, O any](
+	rt *Runtime,
+	w http.ResponseWriter,
+	r *http.Request,
+	op Operation[I, O],
+	h Handler[I, O],
+	inputSchema *inputschema.Schema,
+) {
 	requestContext := rt.extractRequestContext(r)
 
 	var input I
-	if err := bindInput(r, &input); err != nil {
+	if err := bindInputWithSchema(r, &input, inputSchema); err != nil {
 		rt.writeFailure(w, requestContext, err, op.ErrorMappers)
 		return
 	}

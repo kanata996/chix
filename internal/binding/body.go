@@ -1,6 +1,7 @@
 package binding
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,29 +9,17 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+
+	"github.com/kanata996/chix/internal/inputschema"
 )
 
-type bodyField struct {
-	name  string
-	index []int
-}
-
-func bindBodyFields(r *http.Request, value reflect.Value) error {
-	fields, err := collectBodyFields(value.Type())
-	if err != nil {
-		return err
-	}
+func bindBodyFields(r *http.Request, value reflect.Value, schema *inputschema.Schema) error {
 	if !requestHasBody(r) {
 		return nil
 	}
 
 	if !isJSONContentType(r.Header.Get("Content-Type")) {
 		return newUnsupportedMediaTypeError(fmt.Errorf("unsupported content type %q", r.Header.Get("Content-Type")))
-	}
-
-	allowed := make(map[string]bodyField, len(fields))
-	for _, field := range fields {
-		allowed[field.name] = field
 	}
 
 	var raw map[string]json.RawMessage
@@ -48,14 +37,14 @@ func bindBodyFields(r *http.Request, value reflect.Value) error {
 	}
 
 	for name := range raw {
-		if _, ok := allowed[name]; !ok {
+		if _, ok := schema.LookupBodyField(name); !ok {
 			return newRequestShapeError(fmt.Errorf("unknown body field %q", name))
 		}
 	}
 
 	for name, rawValue := range raw {
-		field := allowed[name]
-		target, err := fieldByIndexAlloc(value, field.index)
+		field, _ := schema.LookupBodyField(name)
+		target, err := fieldByIndexAlloc(value, field.Index)
 		if err != nil {
 			return err
 		}
@@ -86,52 +75,22 @@ func isJSONContentType(raw string) bool {
 	return mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")
 }
 
-func collectBodyFields(t reflect.Type) ([]bodyField, error) {
-	seen := map[string]struct{}{}
-	var fields []bodyField
-	var collectErr error
-
-	walkStructFields(t, func(field reflect.StructField, index []int) bool {
-		if collectErr != nil {
-			return false
-		}
-		if field.PkgPath != "" && !field.Anonymous {
-			return true
-		}
-
-		source, _, ok, err := parameterSource(field)
-		if err != nil {
-			collectErr = err
-			return false
-		}
-		if ok {
-			if explicitBodyTag(field) {
-				collectErr = fmt.Errorf("chix: field %q must declare a single input source, found %s and json", field.Name, source)
-				return false
-			}
-			return true
-		}
-
-		name, ok := bodyFieldName(field)
-		if !ok {
-			return true
-		}
-		if _, exists := seen[name]; exists {
-			collectErr = fmt.Errorf("chix: duplicate body field %q", name)
-			return false
-		}
-
-		seen[name] = struct{}{}
-		fields = append(fields, bodyField{name: name, index: index})
-		return true
-	})
-
-	return fields, collectErr
-}
-
 func unmarshalBodyField(target reflect.Value, raw json.RawMessage) error {
-	if target.CanAddr() {
-		return json.Unmarshal(raw, target.Addr().Interface())
+	if !target.CanAddr() {
+		return fmt.Errorf("field is not addressable")
 	}
-	return fmt.Errorf("field is not addressable")
+
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(target.Addr().Interface()); err != nil {
+		return err
+	}
+
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return fmt.Errorf("body field must contain a single JSON value")
+	}
+
+	return nil
 }

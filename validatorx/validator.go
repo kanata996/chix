@@ -6,18 +6,22 @@ import (
 	"fmt"
 	"reflect"
 
-	playgroundvalidator "github.com/go-playground/validator/v10"
+	"github.com/go-playground/validator/v10"
 
 	"github.com/kanata996/chix"
-	"github.com/kanata996/chix/internal/binding"
+	"github.com/kanata996/chix/internal/inputschema"
 )
 
-func Adapter[I any](v *playgroundvalidator.Validate) chix.Validator[I] {
+func Adapter[I any](v *validator.Validate) chix.Validator[I] {
 	if v == nil {
-		v = playgroundvalidator.New(playgroundvalidator.WithRequiredStructEnabled())
+		v = validator.New(validator.WithRequiredStructEnabled())
 	}
 
 	inputType := reflect.TypeOf((*I)(nil)).Elem()
+	schema, err := inputschema.Load(inputType)
+	if err != nil {
+		panic(err)
+	}
 
 	return func(_ context.Context, input *I) []chix.Violation {
 		if input == nil {
@@ -29,12 +33,12 @@ func Adapter[I any](v *playgroundvalidator.Validate) chix.Validator[I] {
 			return nil
 		}
 
-		var validationErrs playgroundvalidator.ValidationErrors
+		var validationErrs validator.ValidationErrors
 		if errors.As(err, &validationErrs) {
-			return violations(inputType, validationErrs)
+			return violations(schema, validationErrs)
 		}
 
-		var invalidErr *playgroundvalidator.InvalidValidationError
+		var invalidErr *validator.InvalidValidationError
 		if errors.As(err, &invalidErr) {
 			panic(invalidErr)
 		}
@@ -43,12 +47,15 @@ func Adapter[I any](v *playgroundvalidator.Validate) chix.Validator[I] {
 	}
 }
 
-func violations(inputType reflect.Type, validationErrs playgroundvalidator.ValidationErrors) []chix.Violation {
+func violations(schema *inputschema.Schema, validationErrs validator.ValidationErrors) []chix.Violation {
 	result := make([]chix.Violation, 0, len(validationErrs))
 	for _, fieldErr := range validationErrs {
-		location, ok := binding.LookupFieldLocation(inputType, fieldErr.StructNamespace())
+		location, ok := inputschema.Location{}, false
+		if schema != nil {
+			location, ok = schema.LookupLocation(fieldErr.StructNamespace())
+		}
 		if !ok {
-			location = binding.FieldLocation{
+			location = inputschema.Location{
 				Source: "body",
 				Field:  fieldErr.Field(),
 			}
@@ -64,7 +71,7 @@ func violations(inputType reflect.Type, validationErrs playgroundvalidator.Valid
 	return result
 }
 
-func message(field string, fieldErr playgroundvalidator.FieldError) string {
+func message(field string, fieldErr validator.FieldError) string {
 	if field == "" {
 		field = fieldErr.Field()
 	}

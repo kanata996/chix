@@ -61,6 +61,80 @@ func TestHandleBindsInputAndWritesSuccessEnvelope(t *testing.T) {
 	}
 }
 
+func TestHandlePanicsOnInvalidInputSchema(t *testing.T) {
+	type profile struct {
+		Name string
+	}
+	type input struct {
+		Profile profile `json:"profile"`
+	}
+
+	defer func() {
+		if recovered := recover(); recovered == nil {
+			t.Fatal("expected panic for invalid input schema")
+		}
+	}()
+
+	_ = Handle(New(), Operation[input, struct{}]{}, func(_ context.Context, _ *input) (*struct{}, error) {
+		return &struct{}{}, nil
+	})
+}
+
+func TestHandleBindsAnonymousEmbeddedInputFields(t *testing.T) {
+	type route struct {
+		ID string `path:"id"`
+	}
+	type filters struct {
+		Verbose bool `query:"verbose"`
+	}
+	type payload struct {
+		Name string `json:"name"`
+	}
+	type input struct {
+		route
+		filters
+		payload
+	}
+	type output struct {
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Verbose bool   `json:"verbose"`
+	}
+
+	rt := New()
+	router := chi.NewRouter()
+	router.Method(http.MethodPost, "/users/{id}", Handle(rt, Operation[input, output]{
+		Method: http.MethodPost,
+	}, func(_ context.Context, in *input) (*output, error) {
+		return &output{
+			ID:      in.ID,
+			Name:    in.Name,
+			Verbose: in.Verbose,
+		}, nil
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/users/u_1?verbose=true", strings.NewReader(`{"name":"Ada"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec.Code)
+	}
+
+	var envelope struct {
+		Data output `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if envelope.Data.ID != "u_1" || envelope.Data.Name != "Ada" || !envelope.Data.Verbose {
+		t.Fatalf("unexpected envelope: %+v", envelope)
+	}
+}
+
 func TestHandleDoesNotImplicitlyBindUntaggedBodyFields(t *testing.T) {
 	type input struct {
 		Name string
@@ -76,6 +150,32 @@ func TestHandleDoesNotImplicitlyBindUntaggedBodyFields(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{"name":"Ada"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assertErrorEnvelopeCode(t, rec, http.StatusBadRequest, "bad_request")
+}
+
+func TestHandleRejectsNestedUnknownBodyFields(t *testing.T) {
+	type profile struct {
+		Name string `json:"name"`
+	}
+	type input struct {
+		Profile profile `json:"profile"`
+	}
+
+	rt := New()
+	router := chi.NewRouter()
+	router.Method(http.MethodPost, "/users", Handle(rt, Operation[input, struct{}]{
+		Method: http.MethodPost,
+	}, func(_ context.Context, _ *input) (*struct{}, error) {
+		t.Fatal("handler should not run")
+		return nil, nil
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{"profile":{"name":"Ada","extra":"x"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
