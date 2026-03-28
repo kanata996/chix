@@ -205,13 +205,20 @@ func TestHandleRejectsUnsupportedMediaType(t *testing.T) {
 		return nil, nil
 	}))
 
-	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`name=Ada`))
-	req.Header.Set("Content-Type", "text/plain")
-	rec := httptest.NewRecorder()
+	for _, contentType := range []string{
+		"text/plain",
+		"text/foo+json",
+	} {
+		t.Run(contentType, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`name=Ada`))
+			req.Header.Set("Content-Type", contentType)
+			rec := httptest.NewRecorder()
 
-	router.ServeHTTP(rec, req)
+			router.ServeHTTP(rec, req)
 
-	assertErrorEnvelopeCode(t, rec, http.StatusUnsupportedMediaType, "unsupported_media_type")
+			assertErrorEnvelopeCode(t, rec, http.StatusUnsupportedMediaType, "unsupported_media_type")
+		})
+	}
 }
 
 func TestHandleRejectsDuplicateScalarQueryValues(t *testing.T) {

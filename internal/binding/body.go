@@ -72,7 +72,8 @@ func isJSONContentType(raw string) bool {
 	if err != nil {
 		return false
 	}
-	return mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")
+	return mediaType == "application/json" ||
+		(strings.HasPrefix(mediaType, "application/") && strings.HasSuffix(mediaType, "+json"))
 }
 
 func unmarshalBodyField(target reflect.Value, raw json.RawMessage) error {
