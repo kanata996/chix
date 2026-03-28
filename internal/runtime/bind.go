@@ -9,10 +9,12 @@ import (
 	"github.com/kanata996/chix/internal/schema"
 )
 
+// bindInputWithSchema 使用给定 schema 执行输入绑定，并将 binding 子系统返回的错误归一化为 runtime 错误模型。
 func bindInputWithSchema(r *http.Request, dst any, schema *schema.Schema) error {
 	return normalizeBindError(binding.BindWithSchema(r, dst, schema))
 }
 
+// normalizeBindError 将已分类的 binding 错误映射为对应的 runtime 错误；未识别的错误保持原样返回。
 func normalizeBindError(err error) error {
 	switch binding.KindOf(err) {
 	case binding.ErrorKindRequestShape:

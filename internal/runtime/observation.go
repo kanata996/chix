@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
+// DefaultExtractor 从 HTTP 请求中提取默认的观测上下文；请求为空时返回零值。
 func DefaultExtractor(r *http.Request) RequestContext {
 	if r == nil {
 		return RequestContext{}
@@ -22,6 +23,7 @@ func DefaultExtractor(r *http.Request) RequestContext {
 	}
 }
 
+// DefaultLogger 返回将失败事件写入 slog 的默认观察器；传入 logger 为 nil 时使用 slog.Default，并记录归一化后的公开错误字段与请求上下文。
 func DefaultLogger(logger *slog.Logger) Observer {
 	if logger == nil {
 		logger = slog.Default()
@@ -42,6 +44,7 @@ func DefaultLogger(logger *slog.Logger) Observer {
 	}
 }
 
+// extractRequestContext 调用执行期配置中的请求上下文提取器；未配置时返回零值。
 func (cfg executionConfig) extractRequestContext(r *http.Request) RequestContext {
 	if cfg.extractor == nil {
 		return RequestContext{}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 )
 
+// marshalSuccessEnvelope 将业务返回值包装为 data envelope 并序列化为 JSON。
 func marshalSuccessEnvelope(value any) ([]byte, error) {
 	return json.Marshal(struct {
 		Data any `json:"data"`
@@ -15,6 +16,7 @@ func marshalSuccessEnvelope(value any) ([]byte, error) {
 	})
 }
 
+// marshalErrorEnvelope 将公开错误归一化后包装为 error envelope 并序列化为 JSON。
 func marshalErrorEnvelope(public *HTTPError) ([]byte, error) {
 	return json.Marshal(struct {
 		Error *HTTPError `json:"error"`
@@ -23,6 +25,7 @@ func marshalErrorEnvelope(public *HTTPError) ([]byte, error) {
 	})
 }
 
+// writeJSONResponse 按给定状态码写回 JSON 负载，并固定设置 UTF-8 的 JSON Content-Type。
 func writeJSONResponse(w http.ResponseWriter, status int, payload []byte) error {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
