@@ -91,18 +91,20 @@ func TestLoadRejectsNestedParameterSourceInsideBody(t *testing.T) {
 }
 
 func TestLoadRejectsDuplicateBodyFields(t *testing.T) {
-	type left struct {
-		Name string `json:"name"`
-	}
-	type right struct {
-		Name string `json:"name"`
-	}
-	type input struct {
-		left
-		right
-	}
+	inputType := reflect.StructOf([]reflect.StructField{
+		{
+			Name: "Left",
+			Type: reflect.TypeOf(""),
+			Tag:  `json:"name"`,
+		},
+		{
+			Name: "Right",
+			Type: reflect.TypeOf(""),
+			Tag:  `json:"name"`,
+		},
+	})
 
-	_, err := Load(reflect.TypeOf(input{}))
+	_, err := Load(inputType)
 	if err == nil {
 		t.Fatal("expected duplicate body field error")
 	}

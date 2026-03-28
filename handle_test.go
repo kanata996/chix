@@ -221,6 +221,43 @@ func TestHandleRejectsUnsupportedMediaType(t *testing.T) {
 	}
 }
 
+func TestHandleAcceptsApplicationVendorJSONMediaType(t *testing.T) {
+	type input struct {
+		Name string `json:"name"`
+	}
+	type output struct {
+		Name string `json:"name"`
+	}
+
+	rt := New()
+	router := chi.NewRouter()
+	router.Method(http.MethodPost, "/users", Handle(rt, Operation[input, output]{
+		Method: http.MethodPost,
+	}, func(_ context.Context, in *input) (*output, error) {
+		return &output{Name: in.Name}, nil
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{"name":"Ada"}`))
+	req.Header.Set("Content-Type", "application/vnd.api+json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec.Code)
+	}
+
+	var envelope struct {
+		Data output `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if envelope.Data.Name != "Ada" {
+		t.Fatalf("unexpected response: %+v", envelope)
+	}
+}
+
 func TestHandleRejectsDuplicateScalarQueryValues(t *testing.T) {
 	type input struct {
 		Limit int `query:"limit"`
