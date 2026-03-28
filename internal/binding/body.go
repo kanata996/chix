@@ -10,10 +10,10 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/kanata996/chix/internal/inputschema"
+	"github.com/kanata996/chix/internal/schema"
 )
 
-func bindBodyFields(r *http.Request, value reflect.Value, schema *inputschema.Schema) error {
+func bindBodyFields(r *http.Request, value reflect.Value, schema *schema.Schema) error {
 	if !requestHasBody(r) {
 		return nil
 	}

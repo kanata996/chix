@@ -31,7 +31,7 @@ type unsupportedMediaTypeError struct {
 }
 
 type invalidRequestError struct {
-	violations []Violation
+	details []any
 }
 
 func (e *HTTPError) Error() string {
@@ -88,15 +88,11 @@ func (e *invalidRequestError) Error() string {
 }
 
 func (e *invalidRequestError) publicError() *HTTPError {
-	details := make([]any, 0, len(e.violations))
-	for _, violation := range e.violations {
-		details = append(details, violation)
-	}
 	return &HTTPError{
 		Status:  http.StatusUnprocessableEntity,
 		Code:    "invalid_request",
 		Message: "invalid request",
-		Details: details,
+		Details: append([]any(nil), e.details...),
 	}
 }
 
@@ -108,9 +104,8 @@ func newUnsupportedMediaTypeError(cause error) error {
 	return &unsupportedMediaTypeError{cause: cause}
 }
 
-func newInvalidRequestError(violations []Violation) error {
-	cloned := append([]Violation(nil), violations...)
-	return &invalidRequestError{violations: cloned}
+func newInvalidRequestError(details []any) error {
+	return &invalidRequestError{details: append([]any(nil), details...)}
 }
 
 func publicErrorFromRuntime(err error) *HTTPError {

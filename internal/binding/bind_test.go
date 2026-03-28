@@ -94,6 +94,26 @@ func TestBindClassifiesNestedUnknownBodyFieldErrors(t *testing.T) {
 	}
 }
 
+func TestBindClassifiesValidationErrors(t *testing.T) {
+	type input struct {
+		Name string `json:"name" validate:"required"`
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	var dst input
+	err := Bind(req, &dst)
+	if KindOf(err) != ErrorKindInvalidRequest {
+		t.Fatalf("expected invalid request error, got %v", err)
+	}
+
+	details := DetailsOf(err)
+	if len(details) != 1 {
+		t.Fatalf("expected validation details, got %+v", details)
+	}
+}
+
 func TestBindAllowsNestedExplicitlyIgnoredBodyFields(t *testing.T) {
 	type profile struct {
 		Name   string `json:"name"`

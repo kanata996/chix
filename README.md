@@ -25,7 +25,7 @@
 - `ErrorMapper`
 - `Observer`
 - `path` / `query` / JSON body 输入绑定
-- `Validator` 与 `validatorx.Adapter(...)`
+- 内置 `validator/v10` 输入校验
 
 当前明确不做：
 
@@ -63,7 +63,7 @@ var errUserExists = errors.New("user already exists")
 type CreateUserInput struct {
 	ID      string `path:"id"`
 	Verbose bool   `query:"verbose"`
-	Name    string `json:"name"`
+	Name    string `json:"name" validate:"required"`
 }
 
 type CreateUserOutput struct {
@@ -96,17 +96,6 @@ func main() {
 
 	r.Method(http.MethodPost, "/users/{id}", chix.Handle(users, chix.Operation[CreateUserInput, CreateUserOutput]{
 		Method: http.MethodPost,
-		Validate: func(_ context.Context, in *CreateUserInput) []chix.Violation {
-			if in.Name == "" {
-				return []chix.Violation{{
-					Source:  "body",
-					Field:   "name",
-					Code:    "required",
-					Message: "name is required",
-				}}
-			}
-			return nil
-		},
 	}, func(_ context.Context, in *CreateUserInput) (*CreateUserOutput, error) {
 		if in.Name == "taken" {
 			return nil, errUserExists
@@ -147,7 +136,7 @@ func main() {
         "source": "body",
         "field": "name",
         "code": "required",
-        "message": "name is required"
+        "message": "name failed required validation"
       }
     ]
   }
@@ -214,12 +203,12 @@ runtime 自己直接产出的公开 4xx 错误固定为：
 }
 ```
 
-如果你使用 `go-playground/validator`，推荐通过 `validatorx.Adapter(...)` 接到 `Operation.Validate`：
+runtime 内置 `go-playground/validator/v10`，会在 bind 成功后自动根据 `validate` tag 执行校验：
 
 ```go
-op := chix.Operation[CreateUserInput, CreateUserOutput]{
-	Method:   http.MethodPost,
-	Validate: validatorx.Adapter[CreateUserInput](validator.New(validator.WithRequiredStructEnabled())),
+type CreateUserInput struct {
+	ID   string `path:"id" validate:"min=4"`
+	Name string `json:"name" validate:"required"`
 }
 ```
 

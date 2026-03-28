@@ -73,7 +73,6 @@ type Operation[I any, O any] struct {
 	Method        string
 	Pattern       string
 	SuccessStatus int
-	Validate      Validator[I]
 	ErrorMappers  []ErrorMapper
 }
 
@@ -92,7 +91,7 @@ func Handle[I any, O any](rt *Runtime, op Operation[I, O], h Handler[I, O]) http
 `Operation` 应只承载 runtime 执行真正需要的 route-local 策略。
 这意味着：
 
-- 可以放 success status、operation-level validation hook、operation-level error mappers
+- 可以放 success status、operation-level error mappers
 - 不应重新塞回 summary/tags/openapi/middleware 之类文档或 ingress 元数据
 
 ## 6. 输入模型
@@ -104,7 +103,7 @@ runtime 直接支持：
 - path binding
 - query binding
 - JSON body binding
-- validation hook / adapter point
+- 基于 `validate` tag 的内置 validator/v10 校验
 
 runtime 不承担：
 
@@ -133,31 +132,27 @@ runtime 不承担：
 - path / query 绑定必须显式声明来源标签
 - JSON body 字段使用标准 `json` tag；未声明绑定来源的导出字段不应被隐式视为 body 字段
 - 同一个字段最多只能声明一个输入来源
-- 无效的输入 schema 属于配置错误，应在 runtime 挂载或 validator adapter 构造阶段尽早暴露，而不是等到请求期再降级成普通请求错误
+- 无效的输入 schema 属于配置错误，应在 runtime 挂载阶段尽早暴露，而不是等到请求期再降级成普通请求错误
 - path / query 缺失值只保留 Go 零值；required 语义属于 validation，而不是 binding
 - query 绑定到标量字段时，如果同名参数出现多次，应视为请求形状错误
 - body 非空且 `Content-Type` 不是 `application/json` 或 `application/*+json` 时，应返回 `415 unsupported_media_type`
 - malformed JSON、JSON 类型不匹配、unknown field 都应视为请求形状错误
 
-校验契约应固定为最小集合：
+校验行为应保持收敛：
 
 ```go
-type Violation struct {
-	Source  string `json:"source"`
-	Field   string `json:"field"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
+type CreateUserInput struct {
+	ID   string `path:"id" validate:"min=4"`
+	Name string `json:"name" validate:"required"`
 }
-
-type Validator[I any] func(context.Context, *I) []Violation
 ```
 
 其中：
 
-- `Source` 只允许 `path`、`query`、`body`
-- 至少要支持 operation-level validation hook
-- 如果后续补 adapter-style 校验集成，也必须先归一化成相同的 `[]Violation` 契约，再交给 runtime
-- 如果提供现成 adapter，也应只是 `Validator[I]` 的薄适配层；例如可在独立子包中提供 `go-playground/validator` 到 `[]Violation` 的归一化 helper，但不应把 validator 直接塞进 binding 阶段
+- runtime 在 bind 成功后自动执行 validator/v10
+- `422 invalid_request.details` 仍然输出 `source`、`field`、`code`、`message`
+- 这些 detail 是 wire contract，不需要作为根包公开类型暴露
+- 当前不再提供 operation-level validation hook 或独立 validator adapter 入口
 
 runtime 自己直接产出的公开错误也应保持收敛：
 

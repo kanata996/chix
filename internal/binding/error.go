@@ -8,11 +8,13 @@ const (
 	ErrorKindUnknown ErrorKind = iota
 	ErrorKindRequestShape
 	ErrorKindUnsupportedMediaType
+	ErrorKindInvalidRequest
 )
 
 type bindError struct {
 	kind  ErrorKind
 	cause error
+	details []any
 }
 
 func (e *bindError) Error() string {
@@ -28,6 +30,8 @@ func (e *bindError) Error() string {
 		return "bad request"
 	case ErrorKindUnsupportedMediaType:
 		return "unsupported media type"
+	case ErrorKindInvalidRequest:
+		return "invalid request"
 	default:
 		return "binding error"
 	}
@@ -48,6 +52,15 @@ func KindOf(err error) ErrorKind {
 	return ErrorKindUnknown
 }
 
+func DetailsOf(err error) []any {
+	var bindErr *bindError
+	if !errors.As(err, &bindErr) || len(bindErr.details) == 0 {
+		return nil
+	}
+
+	return append([]any(nil), bindErr.details...)
+}
+
 func newRequestShapeError(cause error) error {
 	return &bindError{
 		kind:  ErrorKindRequestShape,
@@ -59,5 +72,12 @@ func newUnsupportedMediaTypeError(cause error) error {
 	return &bindError{
 		kind:  ErrorKindUnsupportedMediaType,
 		cause: cause,
+	}
+}
+
+func newInvalidRequestError(details []any) error {
+	return &bindError{
+		kind:    ErrorKindInvalidRequest,
+		details: append([]any(nil), details...),
 	}
 }

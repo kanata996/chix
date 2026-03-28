@@ -6,10 +6,10 @@ import (
 	"net/http"
 
 	"github.com/kanata996/chix/internal/binding"
-	"github.com/kanata996/chix/internal/inputschema"
+	"github.com/kanata996/chix/internal/schema"
 )
 
-func bindInputWithSchema(r *http.Request, dst any, schema *inputschema.Schema) error {
+func bindInputWithSchema(r *http.Request, dst any, schema *schema.Schema) error {
 	return normalizeBindError(binding.BindWithSchema(r, dst, schema))
 }
 
@@ -19,6 +19,8 @@ func normalizeBindError(err error) error {
 		return newRequestShapeError(err)
 	case binding.ErrorKindUnsupportedMediaType:
 		return newUnsupportedMediaTypeError(err)
+	case binding.ErrorKindInvalidRequest:
+		return newInvalidRequestError(binding.DetailsOf(err))
 	default:
 		return err
 	}

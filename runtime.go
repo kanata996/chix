@@ -14,9 +14,6 @@ type Runtime = runtime.Runtime
 type Operation[I any, O any] = runtime.Operation[I, O]
 type Handler[I any, O any] = runtime.Handler[I, O]
 
-type Violation = runtime.Violation
-type Validator[I any] = runtime.Validator[I]
-
 type Event = runtime.Event
 type Observer = runtime.Observer
 type Extractor = runtime.Extractor

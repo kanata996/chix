@@ -14,6 +14,13 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
+type validationDetail struct {
+	Source  string `json:"source"`
+	Field   string `json:"field"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 func TestHandleBindsInputAndWritesSuccessEnvelope(t *testing.T) {
 	type createUserInput struct {
 		ID      string `path:"id"`
@@ -229,24 +236,13 @@ func TestHandleRejectsDuplicateScalarQueryValues(t *testing.T) {
 
 func TestHandleValidationWrites422(t *testing.T) {
 	type input struct {
-		Name string `json:"name"`
+		Name string `json:"name" validate:"required"`
 	}
 
 	rt := New()
 	router := chi.NewRouter()
 	router.Method(http.MethodPost, "/users", Handle(rt, Operation[input, struct{}]{
 		Method: http.MethodPost,
-		Validate: func(_ context.Context, in *input) []Violation {
-			if in.Name == "" {
-				return []Violation{{
-					Source:  "body",
-					Field:   "name",
-					Code:    "required",
-					Message: "name is required",
-				}}
-			}
-			return nil
-		},
 	}, func(_ context.Context, _ *input) (*struct{}, error) {
 		t.Fatal("handler should not run")
 		return nil, nil
@@ -264,9 +260,9 @@ func TestHandleValidationWrites422(t *testing.T) {
 
 	var envelope struct {
 		Error struct {
-			Code    string      `json:"code"`
-			Message string      `json:"message"`
-			Details []Violation `json:"details"`
+			Code    string             `json:"code"`
+			Message string             `json:"message"`
+			Details []validationDetail `json:"details"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
@@ -275,6 +271,9 @@ func TestHandleValidationWrites422(t *testing.T) {
 
 	if envelope.Error.Code != "invalid_request" || len(envelope.Error.Details) != 1 {
 		t.Fatalf("unexpected validation envelope: %+v", envelope)
+	}
+	if detail := envelope.Error.Details[0]; detail.Source != "body" || detail.Field != "name" || detail.Code != "required" {
+		t.Fatalf("unexpected validation detail: %+v", detail)
 	}
 }
 
@@ -475,7 +474,7 @@ func TestHandleWrappedHTTPErrorBypassesMappers(t *testing.T) {
 func TestHandleRuntimePublicErrorsBypassMappers(t *testing.T) {
 	type input struct {
 		Limit int    `query:"limit"`
-		Name  string `json:"name"`
+		Name  string `json:"name" validate:"required"`
 	}
 
 	cases := []struct {
@@ -512,17 +511,6 @@ func TestHandleRuntimePublicErrorsBypassMappers(t *testing.T) {
 			name: "422 invalid request",
 			operation: Operation[input, struct{}]{
 				Method: http.MethodPost,
-				Validate: func(_ context.Context, in *input) []Violation {
-					if in.Name == "" {
-						return []Violation{{
-							Source:  "body",
-							Field:   "name",
-							Code:    "required",
-							Message: "name is required",
-						}}
-					}
-					return nil
-				},
 			},
 			request: func() *http.Request {
 				req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{}`))

@@ -53,24 +53,13 @@ func ExampleHandle() {
 
 func ExampleHandle_validationFailure() {
 	type createUserInput struct {
-		Name string `json:"name"`
+		Name string `json:"name" validate:"required"`
 	}
 
 	rt := chix.New()
 	router := chi.NewRouter()
 	router.Method(http.MethodPost, "/users", chix.Handle(rt, chix.Operation[createUserInput, struct{}]{
 		Method: http.MethodPost,
-		Validate: func(_ context.Context, input *createUserInput) []chix.Violation {
-			if input.Name == "" {
-				return []chix.Violation{{
-					Source:  "body",
-					Field:   "name",
-					Code:    "required",
-					Message: "name is required",
-				}}
-			}
-			return nil
-		},
 	}, func(_ context.Context, _ *createUserInput) (*struct{}, error) {
 		return &struct{}{}, nil
 	}))
@@ -85,7 +74,7 @@ func ExampleHandle_validationFailure() {
 	fmt.Println(strings.TrimSpace(rec.Body.String()))
 	// Output:
 	// 422
-	// {"error":{"code":"invalid_request","message":"invalid request","details":[{"source":"body","field":"name","code":"required","message":"name is required"}]}}
+	// {"error":{"code":"invalid_request","message":"invalid request","details":[{"source":"body","field":"name","code":"required","message":"name failed required validation"}]}}
 }
 
 func ExampleHandle_errorMapper() {

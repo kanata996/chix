@@ -1,4 +1,4 @@
-package inputschema
+package schema
 
 import (
 	"encoding"

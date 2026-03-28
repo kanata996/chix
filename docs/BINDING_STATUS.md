@@ -12,7 +12,7 @@
 本轮 review 的结论是：
 
 - 对 v1 目标来说，`binding` 当前已经形成一个相对清晰的内部闭环
-- `binding` / `inputschema` / `validatorx` 之间的元数据分工已经稳定
+- `binding` / `inputschema` 之间的元数据分工已经稳定
 - 当前没有发现需要继续扩抽象层才能解决的结构性问题
 
 本轮 review 后，仍然建议保持克制：
@@ -29,8 +29,9 @@
 
 - 把请求输入绑定到 endpoint input struct
 - 支持 `path` / `query` / JSON body 三种来源
+- 在 bind 成功后执行内置 validator/v10 校验
 - 把请求形状错误归类为 runtime 可消费的内部错误
-- 为 `validatorx` 提供可复用的字段来源和路径元数据
+- 产出 runtime 可归一化的 `422 invalid_request` detail
 
 它不负责：
 
@@ -60,7 +61,7 @@
 - input schema 合法性检查
 - `reflect.Type -> schema` 内部缓存
 
-这个包是 `binding` 和 `validatorx` 共享的最小内部元数据层。
+这个包是 `binding` 内部绑定与校验阶段共享的最小元数据层。
 
 ### `internal/binding`
 
@@ -95,7 +96,7 @@
 - `json:"-"` 视为显式忽略
 - body 内部不能再混入 `path` / `query` source
 - 不合法 input schema 属于配置错误
-- 不合法 input schema 会在 `Handle(...)` 或 `validatorx.Adapter(...)` 构造阶段尽早暴露
+- 不合法 input schema 会在 `Handle(...)` 构造阶段尽早暴露
 
 ### parameter 绑定规则
 
@@ -141,7 +142,7 @@
 
 这里不是为了抽象而抽象。
 
-`binding` 和 `validatorx` 都依赖同一类事实：
+绑定和内置校验都依赖同一类事实：
 
 - 字段来自哪里
 - 公开字段名是什么
@@ -177,7 +178,6 @@ v1 阶段，`binding` 已经足够支撑 runtime core。
 
 - 不恢复旧的 `App` / `Register` / `OpenAPI` 入口
 - 不给 `binding` 增加公开 API
-- 不把 validation 塞回 binding 阶段
 - 不在 `binding` 内引入 middleware 风格扩展点
 - 不为了“未来可能支持更多 transport”而提前泛化当前实现
 
@@ -200,7 +200,7 @@ v1 阶段，`binding` 已经足够支撑 runtime core。
 
 - runtime 负责执行顺序和公开错误输出
 - `binding` 负责把请求绑定到 typed input
+- `binding` 负责在 bind 后执行内置 validator/v10 校验
 - `inputschema` 负责共享输入元数据
-- `validatorx` 负责把 validator 错误归一化成 runtime violation
 
 这个边界已经足够支撑下一阶段继续开发 runtime 的其他核心能力。

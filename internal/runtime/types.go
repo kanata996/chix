@@ -39,20 +39,10 @@ type Operation[I any, O any] struct {
 	Method        string
 	Pattern       string
 	SuccessStatus int
-	Validate      Validator[I]
 	ErrorMappers  []ErrorMapper
 }
 
 type Handler[I any, O any] func(context.Context, *I) (*O, error)
-
-type Violation struct {
-	Source  string `json:"source"`
-	Field   string `json:"field"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-type Validator[I any] func(context.Context, *I) []Violation
 
 type Event struct {
 	Error      error

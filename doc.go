@@ -10,7 +10,7 @@
 //   - Handle(rt, op, h)
 //   - HTTPError / ErrorMapper
 //   - Observer / Extractor
-//   - Validator / Violation
+//   - 内置输入校验（validator/v10）
 //
 // 当前 runtime 只面向普通 JSON API，直接支持 path、query 和 JSON body 输入绑定。
 // 它不是 router，也不是通用 web framework；OpenAPI、router DSL、framework-level middleware

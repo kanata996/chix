@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/kanata996/chix/internal/inputschema"
+	"github.com/kanata996/chix/internal/schema"
 )
 
 func Handle[I any, O any](rt *Runtime, op Operation[I, O], h Handler[I, O]) http.Handler {
@@ -18,7 +18,7 @@ func Handle[I any, O any](rt *Runtime, op Operation[I, O], h Handler[I, O]) http
 		panic("chix: handler must not be nil")
 	}
 
-	inputSchema, err := inputschema.Load(reflect.TypeOf((*I)(nil)).Elem())
+	inputSchema, err := schema.Load(reflect.TypeOf((*I)(nil)).Elem())
 	if err != nil {
 		panic(err)
 	}
@@ -37,7 +37,7 @@ func execute[I any, O any](
 	r *http.Request,
 	op Operation[I, O],
 	h Handler[I, O],
-	inputSchema *inputschema.Schema,
+	inputSchema *schema.Schema,
 ) {
 	requestContext := cfg.extractRequestContext(r)
 
@@ -45,13 +45,6 @@ func execute[I any, O any](
 	if err := bindInputWithSchema(r, &input, inputSchema); err != nil {
 		cfg.writeFailure(w, requestContext, err, op.ErrorMappers)
 		return
-	}
-
-	if op.Validate != nil {
-		if violations := op.Validate(r.Context(), &input); len(violations) > 0 {
-			cfg.writeFailure(w, requestContext, newInvalidRequestError(violations), op.ErrorMappers)
-			return
-		}
 	}
 
 	output, err := h(r.Context(), &input)

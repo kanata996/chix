@@ -5,18 +5,18 @@ import (
 	"net/http"
 	"reflect"
 
-	"github.com/kanata996/chix/internal/inputschema"
+	"github.com/kanata996/chix/internal/schema"
 )
 
 func Bind(r *http.Request, dst any) error {
 	return bind(r, dst, nil)
 }
 
-func BindWithSchema(r *http.Request, dst any, schema *inputschema.Schema) error {
-	return bind(r, dst, schema)
+func BindWithSchema(r *http.Request, dst any, sch *schema.Schema) error {
+	return bind(r, dst, sch)
 }
 
-func bind(r *http.Request, dst any, schema *inputschema.Schema) error {
+func bind(r *http.Request, dst any, sch *schema.Schema) error {
 	if dst == nil {
 		return nil
 	}
@@ -31,18 +31,21 @@ func bind(r *http.Request, dst any, schema *inputschema.Schema) error {
 		return fmt.Errorf("chix: input destination must point to a struct")
 	}
 
-	if schema == nil {
+	if sch == nil {
 		var err error
-		schema, err = inputschema.Load(target.Type())
+		sch, err = schema.Load(target.Type())
 		if err != nil {
 			return err
 		}
 	}
 
-	if err := bindParameterFields(r, target, schema); err != nil {
+	if err := bindParameterFields(r, target, sch); err != nil {
 		return err
 	}
-	if err := bindBodyFields(r, target, schema); err != nil {
+	if err := bindBodyFields(r, target, sch); err != nil {
+		return err
+	}
+	if err := validateStruct(dst, sch); err != nil {
 		return err
 	}
 

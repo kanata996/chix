@@ -81,11 +81,11 @@ func TestMarshalErrorEnvelopeAlwaysWritesDetailsArray(t *testing.T) {
 
 func TestPublicErrorExtractorsHandleWrappedValues(t *testing.T) {
 	public := &HTTPError{Status: http.StatusConflict, Code: "conflict", Message: "conflict"}
-	runtimeErr := newInvalidRequestError([]Violation{{
-		Source:  "body",
-		Field:   "name",
-		Code:    "required",
-		Message: "name is required",
+	runtimeErr := newInvalidRequestError([]any{map[string]any{
+		"source":  "body",
+		"field":   "name",
+		"code":    "required",
+		"message": "name is required",
 	}})
 
 	gotValue := publicErrorFromValue(fmt.Errorf("wrapped value: %w", public))

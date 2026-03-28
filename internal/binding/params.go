@@ -10,12 +10,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/kanata996/chix/internal/inputschema"
+	"github.com/kanata996/chix/internal/schema"
 )
 
 var timeType = reflect.TypeOf(time.Time{})
 
-func bindParameterFields(r *http.Request, value reflect.Value, schema *inputschema.Schema) error {
+func bindParameterFields(r *http.Request, value reflect.Value, schema *schema.Schema) error {
 	for _, field := range schema.ParameterFields {
 		values, exists := parameterValues(r, field.Source, field.Name)
 		if !exists || len(values) == 0 {

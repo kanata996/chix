@@ -26,7 +26,6 @@ type Operation[I any, O any] struct {
 	Method        string
 	Pattern       string
 	SuccessStatus int
-	Validate      Validator[I]
 	ErrorMappers  []ErrorMapper
 }
 
@@ -34,8 +33,8 @@ type Handler[I any, O any] func(context.Context, *I) (*O, error)
 ```
 
 `Operation` 应保持收敛，只包含 runtime 行为和排障真正需要的字段。
-operation-level validation hook 与 operation-level error mappers 都应直接挂在
-`Operation` 上，而不是重新回到 middleware 风格。
+operation-level error mappers 应直接挂在 `Operation` 上，而不是重新回到
+middleware 风格。
 
 ## 3. 构造与作用域
 
@@ -92,6 +91,7 @@ type GetUserInput struct {
 - path
 - query
 - json body
+- 基于 `validate` tag 的内置 validator/v10 校验
 
 绑定规则应固定为：
 
@@ -99,7 +99,7 @@ type GetUserInput struct {
 - body 字段使用标准 `json` tag
 - 未声明来源的导出字段不应隐式进入 body
 - 同一个字段最多只能声明一个输入来源
-- 无效 input schema 属于配置错误，应在 `Handle(...)` 挂载或 validator adapter 构造时尽早暴露
+- 无效 input schema 属于配置错误，应在 `Handle(...)` 挂载时尽早暴露
 - path / query 缺失值只保留 Go 零值，required 语义交给 validation
 - query 绑定到标量字段时，如果同名参数出现多次，应视为 `400 bad_request`
 - body 非空且 `Content-Type` 不是 `application/json` 或 `application/*+json` 时，应返回 `415 unsupported_media_type`
@@ -115,33 +115,18 @@ type GetUserInput struct {
 `422 invalid_request`。这类 runtime 自己产出的公开错误不再重新进入
 `ErrorMapper` 链。
 
-最小校验契约：
+最小校验用法：
 
 ```go
-type Violation struct {
-	Source  string `json:"source"`
-	Field   string `json:"field"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
+type CreateUserInput struct {
+	ID   string `path:"id" validate:"min=4"`
+	Name string `json:"name" validate:"required"`
 }
-
-type Validator[I any] func(context.Context, *I) []Violation
 ```
 
-其中 `Source` 只允许 `path`、`query`、`body`。至少要支持
-operation-level validation hook；如果后续提供 adapter-style 集成，也必须先被
-归一化成相同的 `[]Violation` 契约。
-
-如果使用 `go-playground/validator`，可以通过独立子包提供一个薄 adapter：
-
-```go
-op.Validate = validatorx.Adapter[CreateUserInput](
-	validator.New(validator.WithRequiredStructEnabled()),
-)
-```
-
-它仍然只是给 `Operation.Validate` 赋值，不改变 runtime 的执行顺序：
-先 bind，再 validate，再调用业务 handler。
+runtime 在 bind 成功后自动执行 validator/v10。`422 invalid_request` 的
+`details` 仍然输出 `source`、`field`、`code`、`message`，但这些 detail
+只作为 wire contract，不作为根包公开类型暴露。
 
 ## 6. 成功输出
 
