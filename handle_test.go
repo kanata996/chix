@@ -771,7 +771,6 @@ func assertErrorEnvelopePayload(t *testing.T, gotStatus int, body []byte, wantSt
 		Error struct {
 			Code       string          `json:"code"`
 			Message    string          `json:"message"`
-			Details    []any           `json:"details"`
 			DetailsRaw json.RawMessage `json:"details"`
 		} `json:"error"`
 	}
