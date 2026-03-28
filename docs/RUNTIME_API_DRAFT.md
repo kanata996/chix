@@ -55,7 +55,7 @@ func (rt *Runtime) Scope(opts ...Option) *Runtime
 ## 4. 挂到 Chi
 
 ```go
-func (rt *Runtime) Handle[I any, O any](op Operation[I, O], h Handler[I, O]) http.Handler
+func Handle[I any, O any](rt *Runtime, op Operation[I, O], h Handler[I, O]) http.Handler
 ```
 
 示例：
@@ -74,7 +74,7 @@ users := rt.Scope(
 	chix.WithErrorMapper(mapUserError),
 )
 
-r.Method("GET", "/users/{id}", users.Handle(GetUser, HandleGetUser))
+r.Method("GET", "/users/{id}", chix.Handle(users, GetUser, HandleGetUser))
 ```
 
 ## 5. 输入绑定
@@ -130,6 +130,17 @@ type Validator[I any] func(context.Context, *I) []Violation
 其中 `Source` 只允许 `path`、`query`、`body`。至少要支持
 operation-level validation hook；如果后续提供 adapter-style 集成，也必须先被
 归一化成相同的 `[]Violation` 契约。
+
+如果使用 `go-playground/validator`，可以通过独立子包提供一个薄 adapter：
+
+```go
+op.Validate = validatorx.Adapter[CreateUserInput](
+	validator.New(validator.WithRequiredStructEnabled()),
+)
+```
+
+它仍然只是给 `Operation.Validate` 赋值，不改变 runtime 的执行顺序：
+先 bind，再 validate，再调用业务 handler。
 
 ## 6. 成功输出
 

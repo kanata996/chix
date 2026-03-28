@@ -83,7 +83,7 @@ type Handler[I any, O any] func(context.Context, *I) (*O, error)
 通过 runtime 挂载：
 
 ```go
-func (rt *Runtime) Handle[I any, O any](op Operation[I, O], h Handler[I, O]) http.Handler
+func Handle[I any, O any](rt *Runtime, op Operation[I, O], h Handler[I, O]) http.Handler
 ```
 
 这是最关键的设计决策。没有 runtime-owned handler 模型，`chix` 就无法形成
@@ -156,6 +156,7 @@ type Validator[I any] func(context.Context, *I) []Violation
 - `Source` 只允许 `path`、`query`、`body`
 - 至少要支持 operation-level validation hook
 - 如果后续补 adapter-style 校验集成，也必须先归一化成相同的 `[]Violation` 契约，再交给 runtime
+- 如果提供现成 adapter，也应只是 `Validator[I]` 的薄适配层；例如可在独立子包中提供 `go-playground/validator` 到 `[]Violation` 的归一化 helper，但不应把 validator 直接塞进 binding 阶段
 
 runtime 自己直接产出的公开错误也应保持收敛：
 
