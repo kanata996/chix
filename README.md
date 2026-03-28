@@ -135,11 +135,9 @@ curl -i \
 
 ```json
 {
-  "data": {
-    "id": "u_1",
-    "name": "Ada",
-    "verbose": true
-  }
+  "id": "u_1",
+  "name": "Ada",
+  "verbose": true
 }
 ```
 
@@ -231,8 +229,8 @@ r.Method(http.MethodGet, "/users/{id}", chix.Handle(rt, chix.Operation[GetUserIn
 - 挂载时就会解析输入 schema；schema 非法会直接 panic，而不是拖到请求期
 - 成功状态码默认是 `POST -> 201`，其他方法 `-> 200`
 - `Operation.SuccessStatus` 可以覆盖默认值
-- `204 No Content` 是唯一会跳过 success envelope 的成功响应
-- 非 `204` 成功响应即使 handler 返回 `nil`，也会写成 `{"data": null}`
+- `204 No Content` 是唯一会跳过 success body 的成功响应
+- 非 `204` 成功响应即使 handler 返回 `nil`，也会写成 `null`
 
 删除接口通常这样写：
 
@@ -325,7 +323,7 @@ r.Route("/admin", func(r chi.Router) {
 
 响应 wire contract：
 
-- 成功响应固定为 `{"data": ...}`
+- 成功响应直接写业务 body
 - 错误响应固定为 `{"error": {...}}`
 - 错误 `details` 在 wire 上始终是数组
 - 没有 mapper 命中的业务错误会回退到固定的内部错误：
@@ -347,7 +345,7 @@ r.Route("/admin", func(r chi.Router) {
 1. 绑定输入
 2. 执行 validation
 3. 调用业务 handler
-4. 写 success envelope
+4. 写 success body
 5. 把内部错误映射成公开 `HTTPError`
 6. 写 error envelope
 7. 在失败路径发出 `Observer` 事件

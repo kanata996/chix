@@ -140,19 +140,17 @@ runtime 写出的 JSON：
 
 ```json
 {
-  "data": {
-    "id": "u_1"
-  }
+  "id": "u_1"
 }
 ```
 
-当前公开 API 只承诺标准 success envelope 和 success status。metadata 与
+当前公开 API 只承诺标准 success body 和 success status。metadata 与
 自定义 success headers 可以作为后续扩展，但不应成为当前公开 API 的前提。
 
 success 语义也应固定为：
 
-- `204 No Content` 是唯一允许省略 success envelope 的成功响应
-- 非 `204` 成功响应即使 handler 返回 `nil`，也应写成 `{"data": null}`
+- `204 No Content` 是唯一允许省略 success body 的成功响应
+- 非 `204` 成功响应即使 handler 返回 `nil`，也应写成 `null`
 - success status 优先级固定为：`Operation.SuccessStatus` > 最近一层 scope/runtime 默认值 > runtime 内建默认值
 - runtime 内建默认成功状态码固定为：`POST -> 201`，其余方法 -> `200`
 

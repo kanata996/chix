@@ -1,5 +1,5 @@
-// 本文件职责：定义 runtime 的 success / error JSON envelope 以及统一写回逻辑。
-// 定位：承载响应 wire contract，避免把 success path 输出细节隐藏在 error model 文件中。
+// 本文件职责：定义 runtime 的成功/失败 JSON 编码以及统一写回逻辑。
+// 定位：承载响应 wire contract，避免把 success / failure path 输出细节隐藏在执行流中。
 package runtime
 
 import (
@@ -7,13 +7,9 @@ import (
 	"net/http"
 )
 
-// marshalSuccessEnvelope 将业务返回值包装为 data envelope 并序列化为 JSON。
-func marshalSuccessEnvelope(value any) ([]byte, error) {
-	return json.Marshal(struct {
-		Data any `json:"data"`
-	}{
-		Data: value,
-	})
+// marshalSuccessBody 直接将业务返回值序列化为成功响应体。
+func marshalSuccessBody(value any) ([]byte, error) {
+	return json.Marshal(value)
 }
 
 // marshalErrorEnvelope 将公开错误归一化后包装为 error envelope 并序列化为 JSON。

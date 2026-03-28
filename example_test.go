@@ -48,7 +48,7 @@ func ExampleHandle() {
 	fmt.Println(strings.TrimSpace(rec.Body.String()))
 	// Output:
 	// 201
-	// {"data":{"id":"u_1","name":"Ada","verbose":true}}
+	// {"id":"u_1","name":"Ada","verbose":true}
 }
 
 func ExampleHandle_validationFailure() {

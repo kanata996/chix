@@ -154,15 +154,11 @@ func BenchmarkChiVsChixGetJSON(b *testing.B) {
 			return
 		}
 
-		payload, err := json.Marshal(struct {
-			Data benchmarkUserOutput `json:"data"`
-		}{
-			Data: benchmarkUserOutput{
-				ID:      id,
-				Name:    "kanata",
-				Age:     18,
-				Verbose: verbose,
-			},
+		payload, err := json.Marshal(benchmarkUserOutput{
+			ID:      id,
+			Name:    "kanata",
+			Age:     18,
+			Verbose: verbose,
 		})
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -250,15 +246,11 @@ func BenchmarkChiVsChixPostJSON(b *testing.B) {
 			return
 		}
 
-		payload, err := json.Marshal(struct {
-			Data benchmarkUserOutput `json:"data"`
-		}{
-			Data: benchmarkUserOutput{
-				ID:      id,
-				Name:    input.Name,
-				Age:     input.Age,
-				Verbose: verbose,
-			},
+		payload, err := json.Marshal(benchmarkUserOutput{
+			ID:      id,
+			Name:    input.Name,
+			Age:     input.Age,
+			Verbose: verbose,
 		})
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)

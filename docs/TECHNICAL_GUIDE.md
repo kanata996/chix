@@ -33,7 +33,7 @@ runtime 应只负责以下步骤：
 1. 从 `chi` 与 `*http.Request` 提取请求上下文
 2. 绑定并校验 endpoint 输入
 3. 调用业务 handler
-4. 把成功结果编码成标准 success envelope
+4. 把成功结果编码成标准 success body
 5. 把内部错误映射成稳定的公开 `HTTPError`
 6. 把错误编码成标准 error envelope
 7. 在失败路径上发出结构化观测
@@ -162,12 +162,10 @@ runtime 自己直接产出的公开错误也应保持收敛：
 
 响应模型应保持小而明确。
 
-成功 envelope：
+成功 body：
 
 ```json
-{
-  "data": {}
-}
+{}
 ```
 
 错误 envelope：
@@ -184,11 +182,11 @@ runtime 自己直接产出的公开错误也应保持收敛：
 
 核心 wire contract 必须固定：
 
-- 成功响应固定写成 `{"data": ...}`
+- 成功响应直接写 handler 返回的业务 body
 - 错误响应固定写成 `{"error": {...}}`
 - 错误 `details` 在 wire 上始终是数组；没有 details 时写空数组
-- `204 No Content` 是唯一允许省略 success envelope 的成功响应
-- 非 `204` 成功响应即使 handler 返回 `nil`，也应写成 `{"data": null}`
+- `204 No Content` 是唯一允许省略 success body 的成功响应
+- 非 `204` 成功响应即使 handler 返回 `nil`，也应写成 `null`
 - 成功状态码优先级固定为：`Operation.SuccessStatus` > 最近一层 scope/runtime 默认值 > runtime 内建默认值
 - runtime 内建默认成功状态码固定为：`POST -> 201`，其余方法 -> `200`
 

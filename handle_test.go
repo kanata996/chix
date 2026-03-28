@@ -21,7 +21,7 @@ type validationDetail struct {
 	Message string `json:"message"`
 }
 
-func TestHandleBindsInputAndWritesSuccessEnvelope(t *testing.T) {
+func TestHandleBindsInputAndWritesSuccessBody(t *testing.T) {
 	type createUserInput struct {
 		ID      string `path:"id"`
 		Verbose bool   `query:"verbose"`
@@ -56,15 +56,13 @@ func TestHandleBindsInputAndWritesSuccessEnvelope(t *testing.T) {
 		t.Fatalf("expected 201, got %d", rec.Code)
 	}
 
-	var envelope struct {
-		Data createUserOutput `json:"data"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+	var body createUserOutput
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	if envelope.Data.ID != "u_1" || envelope.Data.Name != "Ada" || !envelope.Data.Verbose {
-		t.Fatalf("unexpected envelope: %+v", envelope)
+	if body.ID != "u_1" || body.Name != "Ada" || !body.Verbose {
+		t.Fatalf("unexpected body: %+v", body)
 	}
 }
 
@@ -130,15 +128,13 @@ func TestHandleBindsAnonymousEmbeddedInputFields(t *testing.T) {
 		t.Fatalf("expected 201, got %d", rec.Code)
 	}
 
-	var envelope struct {
-		Data output `json:"data"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+	var body output
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	if envelope.Data.ID != "u_1" || envelope.Data.Name != "Ada" || !envelope.Data.Verbose {
-		t.Fatalf("unexpected envelope: %+v", envelope)
+	if body.ID != "u_1" || body.Name != "Ada" || !body.Verbose {
+		t.Fatalf("unexpected body: %+v", body)
 	}
 }
 
@@ -247,14 +243,12 @@ func TestHandleAcceptsApplicationVendorJSONMediaType(t *testing.T) {
 		t.Fatalf("expected 201, got %d", rec.Code)
 	}
 
-	var envelope struct {
-		Data output `json:"data"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+	var body output
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if envelope.Data.Name != "Ada" {
-		t.Fatalf("unexpected response: %+v", envelope)
+	if body.Name != "Ada" {
+		t.Fatalf("unexpected response: %+v", body)
 	}
 }
 
@@ -321,7 +315,7 @@ func TestHandleValidationWrites422(t *testing.T) {
 	}
 }
 
-func TestHandleWritesNilDataAsNull(t *testing.T) {
+func TestHandleWritesNilBodyAsNull(t *testing.T) {
 	type output struct {
 		ID string `json:"id"`
 	}
@@ -340,12 +334,12 @@ func TestHandleWritesNilDataAsNull(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	if strings.TrimSpace(rec.Body.String()) != `{"data":null}` {
+	if strings.TrimSpace(rec.Body.String()) != `null` {
 		t.Fatalf("unexpected body: %q", rec.Body.String())
 	}
 }
 
-func TestHandleNoContentSkipsEnvelope(t *testing.T) {
+func TestHandleNoContentSkipsBody(t *testing.T) {
 	rt := New()
 	router := chi.NewRouter()
 	router.Method(http.MethodDelete, "/users/{id}", Handle(rt, Operation[struct{}, struct{}]{

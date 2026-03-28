@@ -71,7 +71,7 @@ func execute[I any, O any](
 		return
 	}
 
-	payload, err := marshalSuccessEnvelope(output)
+	payload, err := marshalSuccessBody(output)
 	if err != nil {
 		cfg.writeFailure(w, getRequestContext(), err, op.ErrorMappers)
 		return
