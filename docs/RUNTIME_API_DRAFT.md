@@ -22,9 +22,7 @@ type Runtime struct {
 }
 
 type Operation[I any, O any] struct {
-	Name          string
 	Method        string
-	Pattern       string
 	SuccessStatus int
 	ErrorMappers  []ErrorMapper
 }
