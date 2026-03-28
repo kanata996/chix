@@ -155,7 +155,7 @@
 
 ### 为什么不继续扩 `binding`
 
-v1 阶段，`binding` 已经足够支撑 runtime core。
+v1 阶段，`binding` 已经足够支撑当前 runtime 实现。
 
 继续往这里叠更多能力，风险是：
 

@@ -1,4 +1,4 @@
-// 本文件职责：作为根包对外暴露 runtime core 的公开 API。
+// 本文件职责：作为根包对外暴露 runtime 的公开 API。
 // 定位：根包只保留稳定入口；具体执行、failure、observation 实现都下沉到 internal/runtime。
 package chix
 

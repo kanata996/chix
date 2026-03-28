@@ -1,4 +1,4 @@
-// 本文件职责：定义 runtime core 的公开类型和内部配置骨架。
+// 本文件职责：定义 runtime 的公开类型和内部配置骨架。
 // 定位：作为 v1 runtime 的类型入口，只承载结构定义，不放执行流程细节。
 package runtime
 

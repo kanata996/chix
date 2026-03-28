@@ -12,11 +12,11 @@
 - `chix` 负责绑定输入、校验输入、调用业务 handler、映射错误、写 JSON、发出失败观测
 - 业务代码负责领域逻辑，只返回成功结果或错误
 
-当前公开叙事围绕 runtime core，而不是旧的 `App/Register/OpenAPI` 模型。
+当前公开叙事围绕 runtime，而不是旧的 `App/Register/OpenAPI` 模型。
 
 ## 当前状态
 
-当前已经稳定到 v1 runtime core 方向的部件包括：
+当前已经稳定到 v1 runtime 方向的部件包括：
 
 - `Runtime`
 - `Scope`
