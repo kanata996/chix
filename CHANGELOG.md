@@ -20,6 +20,18 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 - Rewrote the README around the current `chi`-first runtime model: `Runtime`, `Scope`, `Handle(...)`, typed input binding, `Validator`, `HTTPError`, `ErrorMapper`, and `Observer`.
 - Added package-level docs so pkg.go.dev reflects the current runtime model instead of the deleted framework/App narrative.
 - Removed outdated README references to the deleted `App/Register/OpenAPI/Swagger UI` product shape.
+- Changed the success HTTP contract to write the handler DTO directly instead of wrapping every non-`204` success response in `{"data": ...}`.
+
+### Breaking Changes
+
+- Non-`204` success responses now serialize the handler return value as the top-level JSON body. Existing clients that read success payloads from `response.data` must switch to reading the DTO directly.
+- When a non-`204` handler returns `nil`, the success body is now JSON `null` instead of `{"data": null}`.
+
+### Migration Notes
+
+- Update success-response consumers from `response.data.<field>` to `response.<field>`.
+- Keep treating `204 No Content` as the only success status with no response body.
+- Error responses are unchanged and still use `{"error": {...}}`.
 
 ## [v0.3.0] - 2026-03-26
 
