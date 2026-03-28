@@ -4,36 +4,36 @@
 [![CI](https://github.com/kanata996/chix/workflows/CI/badge.svg)](https://github.com/kanata996/chix/actions/workflows/ci.yml)
 [![Codecov](https://codecov.io/github/kanata996/chix/graph/badge.svg)](https://codecov.io/github/kanata996/chix)
 
-`chix` 是一个直接绑定 `chi` 的 API 微框架，目标是让你在保留 `chi` 路由与中间件生态的前提下，更快地搭建开箱即用的 JSON API 服务。
+`chix` 是一个 `chi`-first 的 JSON API micro runtime。
 
-它不追求“适配任何路由器”，而是明确以 `chi` 为核心，补齐 API 服务开发里常见但重复的那一层能力：
+它不是 router，也不是通用 web framework。产品边界很明确：
 
-- 声明式操作注册
-- 类型化请求绑定，支持 `path`、`query`、`header` 和 JSON Body
-- 自动生成 OpenAPI 3.1 文档
-- 内建 Swagger UI 文档页
-- 统一输出 `application/problem+json` 错误响应
-- 提供适合 API 服务的默认 `chi` 中间件组合
+- `chi` 负责路由匹配、route grouping、middleware 和 ingress concerns
+- `chix` 负责绑定输入、校验输入、调用业务 handler、映射错误、写 JSON、发出失败观测
+- 业务代码负责领域逻辑，只返回成功结果或错误
 
-整体定位更接近 Huma 这类“面向 API 的框架”，但实现上不抽象掉 `chi`，而是直接站在 `chi` 上扩展。
+当前公开叙事围绕 runtime core，而不是旧的 `App/Register/OpenAPI` 模型。
 
 ## 当前状态
 
-仓库已经按新的方向完成第一版 MVP 重建，目前已经提供：
+当前已经稳定到 v1 runtime core 方向的部件包括：
 
-- 基于 `chi` 的 `App`
-- 通过泛型注册类型化处理函数
-- JSON 请求与响应处理
-- `/openapi.json` OpenAPI 文档输出
-- `/docs` Swagger UI 页面
+- `Runtime`
+- `Scope`
+- `Handle(rt, op, h)`
+- `HTTPError`
+- `ErrorMapper`
+- `Observer`
+- `path` / `query` / JSON body 输入绑定
+- `Validator` 与 `validatorx.Adapter(...)`
 
-当前版本仍然是起步阶段，后续还会继续补强：
+当前明确不做：
 
-- 更完整的 schema 生成能力
-- 更清晰的校验机制
-- 响应头与多响应描述
-- 安全方案与 OpenAPI 自定义能力
-- 更丰富的 `chi` 中间件预设组合
+- router DSL
+- framework-level middleware system
+- OpenAPI / Swagger UI
+- `App` / `Register` 风格入口
+- multipart、streaming、通用 transport 扩张
 
 ## 安装
 
@@ -48,99 +48,194 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/kanata996/chix"
 )
 
+var errUserExists = errors.New("user already exists")
+
 type CreateUserInput struct {
-	ID      string `path:"id" doc:"用户 ID"`
+	ID      string `path:"id"`
 	Verbose bool   `query:"verbose"`
 	Name    string `json:"name"`
 }
 
 type CreateUserOutput struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Verbose bool   `json:"verbose"`
 }
 
 func main() {
-	app := chix.New(chix.Config{
-		Title:       "Chix 示例 API",
-		Version:     "0.1.0",
-		Description: "一个基于 chix 与 chi 的 API 服务",
-	})
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Recoverer)
 
-	chix.Register(app, chix.Operation{
-		Method:      http.MethodPost,
-		Path:        "/users/{id}",
-		OperationID: "createUser",
-		Summary:     "创建用户",
-		Tags:        []string{"users"},
-	}, func(ctx context.Context, input *CreateUserInput) (*CreateUserOutput, error) {
+	rt := chix.New(
+		chix.WithObserver(chix.DefaultLogger(nil)),
+		chix.WithErrorMapper(func(err error) *chix.HTTPError {
+			if errors.Is(err, errUserExists) {
+				return &chix.HTTPError{
+					Status:  http.StatusConflict,
+					Code:    "user_exists",
+					Message: "user already exists",
+				}
+			}
+			return nil
+		}),
+	)
+
+	users := rt.Scope()
+
+	r.Method(http.MethodPost, "/users/{id}", chix.Handle(users, chix.Operation[CreateUserInput, CreateUserOutput]{
+		Method: http.MethodPost,
+		Validate: func(_ context.Context, in *CreateUserInput) []chix.Violation {
+			if in.Name == "" {
+				return []chix.Violation{{
+					Source:  "body",
+					Field:   "name",
+					Code:    "required",
+					Message: "name is required",
+				}}
+			}
+			return nil
+		},
+	}, func(_ context.Context, in *CreateUserInput) (*CreateUserOutput, error) {
+		if in.Name == "taken" {
+			return nil, errUserExists
+		}
+
 		return &CreateUserOutput{
-			ID:   input.ID,
-			Name: input.Name,
+			ID:      in.ID,
+			Name:    in.Name,
+			Verbose: in.Verbose,
 		}, nil
-	})
+	}))
 
-	log.Fatal(http.ListenAndServe(":8080", app))
+	log.Fatal(http.ListenAndServe(":8080", r))
 }
 ```
 
-启动后：
+成功响应：
 
-- `POST /users/{id}` 提供业务接口
-- `GET /openapi.json` 返回自动生成的 OpenAPI 文档
-- `GET /docs` 提供 Swagger UI 文档页
+```json
+{
+  "data": {
+    "id": "u_1",
+    "name": "Ada",
+    "verbose": true
+  }
+}
+```
+
+错误响应：
+
+```json
+{
+  "error": {
+    "code": "invalid_request",
+    "message": "invalid request",
+    "details": [
+      {
+        "source": "body",
+        "field": "name",
+        "code": "required",
+        "message": "name is required"
+      }
+    ]
+  }
+}
+```
+
+## Runtime 边界
+
+`chix` 只负责 API 边界上的这一小段执行路径：
+
+1. 绑定输入
+2. 执行 validation
+3. 调用业务 handler
+4. 写 success envelope
+5. 把内部错误映射成公开 `HTTPError`
+6. 写 error envelope
+7. 在失败路径发出 `Observer` 事件
+
+这意味着下面这些事仍然属于 `chi` 或外层 ingress：
+
+- 路由
+- middleware 链
+- request id 生成
+- recover / auth / rate limit / CORS
+- tracing / access log
 
 ## 输入模型
 
-`chix` 通过结构体标签把请求数据绑定到输入对象上：
+runtime 当前只支持三种输入来源：
 
-- ``path:"id"`` 绑定 `chi` 路径参数
-- ``query:"limit"`` 绑定查询参数
-- ``header:"X-Trace-ID"`` 绑定请求头
-- ``json:"name"`` 绑定 JSON Body 字段
+- `path`
+- `query`
+- JSON body
 
-例如：
+绑定规则保持收敛：
 
-```go
-type ListUsersInput struct {
-	AccountID string `path:"accountID"`
-	Limit     int    `query:"limit"`
-	TraceID   string `header:"X-Trace-ID"`
+- `path` / `query` 字段必须显式声明来源 tag
+- body 字段必须显式写 `json` tag
+- 未声明来源的导出字段不会被隐式视为 body 字段
+- query 标量字段重复出现会返回 `400 bad_request`
+- 非空 body 且 `Content-Type` 不是 `application/json` 或 `application/*+json` 时返回 `415 unsupported_media_type`
+- malformed JSON、类型不匹配、unknown field 都会返回 `400 bad_request`
+- required 语义属于 validation，不属于 binding
+
+## 校验与错误
+
+runtime 自己直接产出的公开 4xx 错误固定为：
+
+- `400 bad_request`
+- `415 unsupported_media_type`
+- `422 invalid_request`
+
+这些 runtime 自产公开错误不会再重新进入 `ErrorMapper` 链。
+
+业务错误则通过 `ErrorMapper` 归一化为稳定的 `HTTPError`。如果没有 mapper 命中，会回退到：
+
+```json
+{
+  "error": {
+    "code": "internal_error",
+    "message": "internal server error",
+    "details": []
+  }
 }
 ```
 
-任意导出字段只要没有被标记为 `path`、`query` 或 `header`，就会被视为 JSON Body 的一部分。
+如果你使用 `go-playground/validator`，推荐通过 `validatorx.Adapter(...)` 接到 `Operation.Validate`：
 
-## 默认行为
+```go
+op := chix.Operation[CreateUserInput, CreateUserOutput]{
+	Method:   http.MethodPost,
+	Validate: validatorx.Adapter[CreateUserInput](validator.New(validator.WithRequiredStructEnabled())),
+}
+```
 
-默认情况下，`chix` 会安装以下 `chi` 中间件：
+## Scope
 
-- `middleware.RequestID`
-- `middleware.RealIP`
-- `middleware.Recoverer`
-- `middleware.StripSlashes`
+`Scope(opts...)` 用来表达 route group 级策略，而不是把 runtime 做成 middleware 风格：
 
-你可以通过 `chix.Config.Middlewares` 增加全局中间件，也可以通过 `app.Use(...)` 继续挂载。
+- error mappers 在 runtime / scope / operation 之间按优先级叠加
+- observer、extractor、success status default 采用最近一层覆盖
 
-## OpenAPI
-
-每个注册的操作都会自动写入 OpenAPI 3.1 文档。
-
-当前会生成的内容包括：
-
-- 操作元数据，如 `operationId`、`summary`、`description`、`tags`
-- `path`、`query`、`header` 参数描述
-- JSON 请求体 schema
-- JSON 成功响应 schema
-- 默认的 `application/problem+json` 错误响应
-
-目前 `/docs` 页面通过 CDN 加载 Swagger UI 资源。
+这让你可以把一组 route 的错误映射和失败观测收在一起，同时保持 `chi` 的 route grouping 体验。
 
 ## 技术文档
 
-更详细的内部设计说明见 [docs/TECHNICAL_GUIDE.md](docs/TECHNICAL_GUIDE.md)。
+当前 source of truth 与设计说明在这里：
+
+- [docs/TECHNICAL_GUIDE.md](docs/TECHNICAL_GUIDE.md)
+- [docs/RUNTIME_API_DRAFT.md](docs/RUNTIME_API_DRAFT.md)
+- [docs/BINDING_STATUS.md](docs/BINDING_STATUS.md)

@@ -147,7 +147,7 @@ func normalizeHTTPError(err *HTTPError) *HTTPError {
 	if normalized.Details == nil {
 		normalized.Details = []any{}
 	} else {
-		normalized.Details = append([]any(nil), normalized.Details...)
+		normalized.Details = append([]any{}, normalized.Details...)
 	}
 	return &normalized
 }

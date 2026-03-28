@@ -6,14 +6,25 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## Compatibility Policy
 
-- The public compatibility boundary is the API and HTTP behavior documented in [README.md](./README.md).
+- The current public compatibility boundary is the API and HTTP behavior documented in [README.md](./README.md) and [docs/RUNTIME_API_DRAFT.md](./docs/RUNTIME_API_DRAFT.md).
+- [docs/TECHNICAL_GUIDE.md](./docs/TECHNICAL_GUIDE.md) is the maintainer source of truth for runtime semantics and product boundary.
 - `internal/*` packages, benchmark layouts, test helpers, and implementation details are not public API.
 - Before `v1.0.0`, breaking changes may still happen in minor releases, but they should be called out explicitly in this changelog.
 - After `v1.0.0`, breaking public API or HTTP contract changes should only ship in a new major version.
+- Historical entries below may describe pre-v1 API experiments. If an older entry conflicts with the current runtime docs, follow the current docs.
 
 ## [Unreleased]
 
+### Changed
+
+- Rewrote the README around the current `chi`-first runtime model: `Runtime`, `Scope`, `Handle(...)`, typed input binding, `Validator`, `HTTPError`, `ErrorMapper`, and `Observer`.
+- Added package-level docs so pkg.go.dev reflects the current runtime model instead of the deleted framework/App narrative.
+- Removed outdated README references to the deleted `App/Register/OpenAPI/Swagger UI` product shape.
+
 ## [v0.3.0] - 2026-03-26
+
+Historical note: this release described a pre-reset API experiment built around `Contract(...)` / `WriteError(...)`.
+It is kept for project history only and should not be used as the current runtime API reference.
 
 ### Highlights
 
@@ -48,6 +59,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 - Improved `reqx.DecodeQuery(...)` steady-state performance by caching query decode plans and unknown-field lookup state per destination struct type.
 
 ## [v0.2.1] - 2026-03-25
+
+Historical note: this release also predates the current `Runtime` / `Scope` / `Handle(...)` model.
 
 ### Added
 

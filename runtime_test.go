@@ -781,9 +781,10 @@ func assertErrorEnvelopePayload(t *testing.T, gotStatus int, body []byte, wantSt
 
 	var envelope struct {
 		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-			Details []any  `json:"details"`
+			Code       string          `json:"code"`
+			Message    string          `json:"message"`
+			Details    []any           `json:"details"`
+			DetailsRaw json.RawMessage `json:"details"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
@@ -793,8 +794,8 @@ func assertErrorEnvelopePayload(t *testing.T, gotStatus int, body []byte, wantSt
 	if envelope.Error.Code != wantCode {
 		t.Fatalf("expected error code %q, got %+v", wantCode, envelope)
 	}
-	if !strings.Contains(string(body), `"details"`) {
-		t.Fatalf("expected details field in error envelope, got %q", string(body))
+	if string(envelope.Error.DetailsRaw) == "null" {
+		t.Fatalf("expected details to be a JSON array, got %q", string(envelope.Error.DetailsRaw))
 	}
 }
 
