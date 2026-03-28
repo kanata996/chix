@@ -1,254 +1,305 @@
-# chix 技术指导
+# 开发指导
 
-本文档面向 `chix` 项目的维护者与贡献者，说明当前 MVP 的技术结构、核心流程、边界约束，以及下一阶段演进建议。
+本文定义 `chix` 的运行时边界、设计约束和 review 标准。
 
-## 1. 项目定位
+`chix` 是一个 `chi`-first 的 JSON API micro runtime。
+文档中的约束默认视为当前开发规范。
 
-`chix` 的核心目标不是做一个“通用 HTTP 抽象层”，而是构建一个直接绑定 `chi` 的 API 微框架。
+## 1. 产品定义
 
-这意味着：
+`chix` 不是 router，也不是通用 web framework。
 
-- `chi` 是一等依赖，不做路由器无关设计
-- 优先复用 `chi` 及其周边中间件生态
-- `chix` 负责补上 API 场景中重复出现的高层能力
-- 面向“快速交付服务接口”而不是“提供最底层 primitives”
+`chix` 是运行在 `chi` API 边界上的那一层 runtime：
 
-从产品判断上看，`chix` 应该更像：
+1. `chi` 负责匹配路由、组织 middleware、处理 ingress concerns
+2. `chix` 负责绑定输入、校验输入、执行业务 handler、映射错误、写 JSON、
+   发出边界观测
+3. 业务代码负责领域逻辑，返回成功结果或错误
 
-- `chi` + 声明式操作注册
-- `chi` + 类型化输入输出
-- `chi` + OpenAPI 自动生成
+## 2. 核心原则
 
-而不应该变成：
+`chix` 的 runtime 设计应持续遵守以下原则：
 
-- 一个隐藏 `chi` 的二次路由器
-- 一个试图兼容所有 HTTP 框架的适配层
-- 一个与实际运行时脱节、只管生成文档的工具
+- success / failure / observation 共享同一条 API 边界执行路径
+- runtime 拥有最终 HTTP 输出权
+- ingress concern 保持在 runtime 外层
+- route-local 策略使用显式声明，而不是回退到胶水式 helper
+- 普通 JSON API 的能力边界保持收敛
 
-## 2. 当前代码结构
+## 3. Runtime 应负责什么
 
-当前核心文件如下：
+runtime 应只负责以下步骤：
 
-- [app.go](../app.go)：应用入口、默认中间件、内建文档路由
-- [register.go](../register.go)：声明式操作注册与处理函数桥接
-- [bind.go](../bind.go)：请求参数与 JSON Body 绑定
-- [error.go](../error.go)：统一错误模型与 Problem Details 输出
-- [openapi.go](../openapi.go)：OpenAPI 文档模型与 schema 推导
-- [app_test.go](../app_test.go)：当前 MVP 的行为测试
+1. 从 `chi` 与 `*http.Request` 提取请求上下文
+2. 绑定并校验 endpoint 输入
+3. 调用业务 handler
+4. 把成功结果编码成标准 success envelope
+5. 把内部错误映射成稳定的公开 `HTTPError`
+6. 把错误编码成标准 error envelope
+7. 在失败路径上发出结构化观测
 
-## 3. 核心运行流程
+runtime 不应负责：
 
-一次请求从注册到执行的主流程如下：
+- 路由
+- ingress middleware 链
+- recover/auth/rate limit/CORS 等接入层问题
+- tracing 或 access log
+- 普通 JSON API 之外的 transport runtime
+- 为了“接管一切”去包装通用 `ResponseWriter`
 
-1. 调用 `Register(app, operation, handler)` 注册一个操作。
-2. `Register` 根据泛型输入输出类型构造运行时处理器。
-3. 注册时同步生成对应的 OpenAPI 操作文档并写入内存中的 `Document`。
-4. 请求进入时，运行时处理器调用 `bindInput` 把路径、查询、请求头和 JSON Body 绑定到输入结构体。
-5. 用户处理函数返回输出对象或错误。
-6. 成功时统一写出 JSON 响应；失败时统一写出 `application/problem+json`。
+## 4. Chi-First 的含义
 
-这个流程的关键点是：
+项目默认不追求 router-agnostic 设计。
 
-- 运行时行为和 OpenAPI 文档都从同一份输入输出类型推导
-- 路由注册与文档注册在同一个入口完成
-- `chi` 仍然是最终的 HTTP 路由与中间件承载层
+`chix` 直接面向 `chi` 优化，因为：
 
-## 4. App 设计原则
+- route grouping 是 API ergonomics 的核心能力
+- `chi` middleware composition 已经是成熟的 ingress shell
+- 路由参数和 request-scoped policy 在 `chi` 中更自然
+- request id、recover、timeout、auth 等配套能力 `chi` 已经做得足够好
 
-[app.go](../app.go) 负责维护 `chi.Router` 和 OpenAPI 文档状态。
+runtime 仍然可以暴露 `http.Handler`，但产品语言、文档、示例和集成能力都应
+默认围绕 `chi`。
 
-当前职责包括：
+## 5. Handler 模型
 
-- 创建 `chi` 路由器
-- 安装默认中间件
-- 注册 `/openapi.json`
-- 注册 `/docs`
-- 保存已注册操作对应的 OpenAPI `Document`
+runtime 应拥有最终 HTTP 输出权。handler 不再自己写成功响应或错误响应。
 
-这里有两个原则不要轻易破坏：
-
-- `App` 应该是薄的运行时容器，不要堆积业务语义
-- `App` 负责“装配”，而不是承担复杂绑定或校验逻辑
-
-后续如果功能继续增长，优先考虑把能力拆到独立文件或子包，而不是把 `App` 做成一个巨型类型。
-
-## 5. 注册模型设计
-
-[register.go](../register.go) 是当前 API 设计的核心。
-
-`Operation` 当前承载：
-
-- HTTP method
-- 路径
-- `operationId`
-- 摘要与描述
-- tags
-- 路由级中间件
-- 成功状态码及描述
-
-泛型处理函数签名：
+目标形状：
 
 ```go
-type Handler[In any, Out any] func(ctx context.Context, input *In) (*Out, error)
+type Operation[I any, O any] struct {
+	Name          string
+	Method        string
+	Pattern       string
+	SuccessStatus int
+	Validate      Validator[I]
+	ErrorMappers  []ErrorMapper
+}
+
+type Handler[I any, O any] func(context.Context, *I) (*O, error)
 ```
 
-这个签名的价值在于：
+通过 runtime 挂载：
 
-- 输入输出类型可以直接用于运行时绑定与文档推导
-- 处理函数层不需要再手动解析 `http.Request`
-- 保持足够轻量，没有引入复杂上下文对象
+```go
+func (rt *Runtime) Handle[I any, O any](op Operation[I, O], h Handler[I, O]) http.Handler
+```
 
-后续扩展建议：
+这是最关键的设计决策。没有 runtime-owned handler 模型，`chix` 就无法形成
+稳定的边界执行路径。
 
-- 不要急着引入过大的“上下文对象”
-- 如果要增加能力，优先通过 `Operation` 元数据或可选 hook 扩展
-- 保证最基础的 handler 签名长期稳定
+`Operation` 应只承载 runtime 执行真正需要的 route-local 策略。
+这意味着：
 
-## 6. 绑定机制
+- 可以放 success status、operation-level validation hook、operation-level error mappers
+- 不应重新塞回 summary/tags/openapi/middleware 之类文档或 ingress 元数据
 
-[bind.go](../bind.go) 负责输入绑定。
+## 6. 输入模型
 
-当前支持：
+输入绑定应显式、面向 JSON API，并保持足够收敛。
 
-- `path`
-- `query`
-- `header`
-- JSON Body
+runtime 直接支持：
 
-当前规则：
+- path binding
+- query binding
+- JSON body binding
+- validation hook / adapter point
 
-- 导出字段若带有 `path/query/header` 标签，则视为参数字段
-- 其他导出字段默认视为 JSON Body 字段
-- JSON Body 使用 `encoding/json` 解码，并启用 `DisallowUnknownFields`
-- 若请求体 schema 中存在非 `omitempty` 且非指针字段，则无请求体时返回 `400`
+runtime 不承担：
 
-这个实现是实用型 MVP，但还不够完整。后续需要重点演进的方向：
+- multipart form workflow
+- 任意 content negotiation
+- streaming request body
+- 单一 endpoint 上混合多种 transport 语义
 
-- 参数校验规则，如最小值、最大长度、枚举、正则
-- 更细粒度的 body 可选/必填控制
-- 对 `multipart/form-data`、`application/x-www-form-urlencoded` 的支持
-- 更稳定的匿名字段、嵌套结构处理规则
-- 更清晰的 tag 设计，避免未来 tag 语义冲突
+执行顺序也必须固定：
 
-建议不要把所有校验逻辑继续塞进 `bind.go`。更合理的方向是：
+1. 先完成 path / query / body 绑定
+2. 绑定成功后再执行 validation
+3. validation 成功后才进入业务 handler
 
-- `bind.go` 继续负责“提取与基本类型转换”
-- 校验能力放到单独的验证层或 hook 层
+任何绑定失败或 validation 失败都应直接终止请求，不进入业务 handler。
 
-## 7. 错误模型
+其中：
 
-[error.go](../error.go) 当前使用 `HTTPError` 作为内部错误承载，并统一输出 `Problem`。
+- 请求形状错误由 runtime 直接标准化为稳定的公开 4xx 错误
+- validation 错误由 runtime 直接标准化为 `422 invalid_request`
+- `422 invalid_request` 的 `details` 应由一个或多个 violation 组成
+- runtime 自己产出的公开边界错误不再重新进入 `ErrorMapper` 链
 
-设计目标：
+输入绑定规则也必须写死：
 
-- 让框架层错误总能稳定映射为 HTTP 状态码
-- 输出格式固定，便于 API 使用者消费
-- 默认把 `chi` 的 Request ID 回写到错误响应中
+- path / query 绑定必须显式声明来源标签
+- JSON body 字段使用标准 `json` tag；未声明绑定来源的导出字段不应被隐式视为 body 字段
+- 同一个字段最多只能声明一个输入来源
+- path / query 缺失值只保留 Go 零值；required 语义属于 validation，而不是 binding
+- query 绑定到标量字段时，如果同名参数出现多次，应视为请求形状错误
+- body 非空且 `Content-Type` 不是 `application/json` 或 `application/*+json` 时，应返回 `415 unsupported_media_type`
+- malformed JSON、JSON 类型不匹配、unknown field 都应视为请求形状错误
 
-后续建议：
+校验契约应固定为最小集合：
 
-- 增加错误类型码，而不只依赖 `status/title/detail`
-- 支持字段级错误详情
-- 为校验错误定义更稳定的错误结构
-- 为业务错误预留统一扩展点
+```go
+type Violation struct {
+	Source  string `json:"source"`
+	Field   string `json:"field"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
 
-## 8. OpenAPI 生成策略
+type Validator[I any] func(context.Context, *I) []Violation
+```
 
-[openapi.go](../openapi.go) 当前通过反射从输入输出类型推导 schema。
+其中：
 
-目前已经覆盖：
+- `Source` 只允许 `path`、`query`、`body`
+- 至少要支持 operation-level validation hook
+- 如果后续补 adapter-style 校验集成，也必须先归一化成相同的 `[]Violation` 契约，再交给 runtime
 
-- 基本标量类型
-- 数组
-- map
-- 结构体
-- `time.Time`
-- 参数与 body 的拆分
+runtime 自己直接产出的公开错误也应保持收敛：
 
-当前限制同样很明显：
+- `400 bad_request`：path / query / body 形状错误
+- `415 unsupported_media_type`：body 存在但媒体类型不受支持
+- `422 invalid_request`：validation 失败，`details` 为 violation 数组
 
-- 还没有 `components/schemas`
-- 还没有 `$ref` 去重
-- 还没有多响应、多内容类型、响应头描述
-- 还没有 security schemes
-- 对递归类型与复杂泛型结构的表达还比较保守
+## 7. 响应模型
 
-下一阶段建议优先做这几件事：
+响应模型应保持小而明确。
 
-1. 引入 `components/schemas`，减少重复 schema。
-2. 为常见标签建立文档语义，如 `description`、`example`、`deprecated`。
-3. 给参数、请求体、响应体增加更明确的元数据扩展点。
-4. 为认证、分页、错误模型建立标准化描述。
+成功 envelope：
 
-这里最重要的原则是：OpenAPI 不是附属品，必须和运行时行为保持一致。不能出现文档能表达但运行时不支持，或运行时行为存在但文档缺失的长期分裂。
+```json
+{
+  "data": {}
+}
+```
 
-## 9. docs 页面策略
+错误 envelope：
 
-当前 `/docs` 通过 CDN 方式加载 Swagger UI。
+```json
+{
+  "error": {
+    "code": "internal_error",
+    "message": "internal server error",
+    "details": []
+  }
+}
+```
 
-优点：
+核心 wire contract 必须固定：
 
-- 实现简单
-- 维护成本低
-- 对 MVP 足够实用
+- 成功响应固定写成 `{"data": ...}`
+- 错误响应固定写成 `{"error": {...}}`
+- 错误 `details` 在 wire 上始终是数组；没有 details 时写空数组
+- `204 No Content` 是唯一允许省略 success envelope 的成功响应
+- 非 `204` 成功响应即使 handler 返回 `nil`，也应写成 `{"data": null}`
+- 成功状态码优先级固定为：`Operation.SuccessStatus` > 最近一层 scope/runtime 默认值 > runtime 内建默认值
+- runtime 内建默认成功状态码固定为：`POST -> 201`，其余方法 -> `200`
 
-缺点：
+不应先暴露自定义成功 headers 或 metadata builder API。
+这些可以作为后续扩展方向，但不应成为当前 runtime 设计前提。
 
-- 依赖外部网络
-- UI 可控性有限
-- 生产环境若有严格静态资源策略，需要改成本地托管
+不要一开始就做出一个庞大的 response builder DSL。
 
-后续可以考虑两个方向：
+## 8. 错误模型
 
-- 保持默认 CDN 方式，同时提供可切换的静态资源托管方案
-- 在项目稳定后提供更贴近框架定位的默认文档前端
+错误映射仍然是 `chix` 存在的核心理由之一。
 
-## 10. 推荐的后续模块拆分
+业务代码返回 domain error，runtime 通过有序 mapper 和 fallback 规则把它
+转换成稳定的公开错误。
 
-随着功能增长，建议考虑把当前单包逐步拆成更清晰的内部模块，例如：
+必须保留的部件：
 
-- `internal/schema`：schema 推导
-- `internal/openapi`：文档装配
-- `internal/binding`：参数提取与类型转换
-- `internal/render`：响应输出
-- `internal/problems`：错误模型
+- `HTTPError`
+- `ErrorMapper`
+- 默认 internal error fallback
+- route/group/runtime 级 mapper 组合
 
-但现阶段不建议为了“看起来整洁”过早拆得太碎。当前代码量仍然适合在根包快速迭代。
+mapper 组合规则必须固定：
 
-## 11. 下一阶段开发优先级
+- operation-level mapper 优先于 scope-level mapper
+- 更内层的 scope mapper 优先于更外层的 scope mapper
+- scope-level mapper 优先于 runtime-level mapper
+- 同一层内保持声明顺序
+- 第一个返回非 nil 的 mapper 生效，剩余 mapper 不再执行
+- 已经是公开边界错误的值不再进入 mapper 链
+- 所有 mapper 都未命中时走 internal error fallback
 
-建议按下面顺序推进：
+公开边界错误的识别方式也必须固定：
 
-1. 校验能力
-原因：这会直接影响 API 可用性，也会反过来驱动 OpenAPI 表达能力。
+- `*HTTPError` 是唯一的公开边界错误载体
+- runtime 应通过 `errors.As(err, &httpErr)` 识别已经公开化的错误
+- handler 或 mapper 返回的 `*HTTPError` 可以被包装，但一旦能被识别出来，就必须直接进入响应路径，而不是重新参与 mapper
+- runtime 自己产出的 `400` / `415` / `422` 公开错误同样不再进入 mapper 链
 
-2. OpenAPI schema 强化
-原因：当前已经有自动文档，接下来需要把文档质量做实。
+runtime 需要持续区分两类东西：
 
-3. 响应模型扩展
-原因：实际 API 很快就会需要多状态码、多错误响应、Header 描述。
+- 用于观测的原始错误
+- 用于对外响应的公开错误
 
-4. 路由分组与模块化注册
-原因：服务一旦长大，单点注册会开始失控。
+`Scope` 的继承语义也应固定，避免实现各自理解：
 
-5. 安全方案与中间件预设
-原因：这是框架真正进入“开箱即用”阶段的重要一环。
+- `Scope(opts...)` 产生的是 parent config 的逻辑子作用域，而不是共享可变状态
+- error mappers 在 runtime / scope / operation 三层之间按规则叠加组合，而不是互相覆盖
+- observer、extractor、success status default 这类单值配置采用“最近一层覆盖更外层”
 
-## 12. 贡献时的约束
+## 9. 观测模型
 
-后续开发建议遵守以下约束：
+`chix` 应继续保留结构化边界观测 hook，而不是直接绑定某个日志后端。
 
-- 不为了抽象而抽象，优先服务实际 API 场景
-- 不削弱 `chi` 的存在感，不把 `chi` 包装成不可见实现细节
-- 保证运行时行为和 OpenAPI 文档同步演进
-- 新增能力时优先补测试，尤其是文档与运行时一致性测试
-- 公共 API 一旦放出，尽量保持稳定，不频繁改 handler 基础签名
+目标 event 结构应保持克制，只承载边界排障真正需要的信息。
 
-## 13. 当前文档与代码关系
+event 结构应固定为：
 
-如果后续实现发生变化，优先同步更新以下两处文档：
+```go
+type Event struct {
+	Error      error
+	Public     *HTTPError
+	RequestID  string
+	Method     string
+	Target     string
+	RemoteAddr string
+}
+```
 
-- [README.md](../README.md)：面向用户的定位、示例与能力说明
-- [docs/TECHNICAL_GUIDE.md](TECHNICAL_GUIDE.md)：面向维护者的技术设计与演进说明
+不要把 event 演变成 request dump。应用需要更多上下文时，应通过扩展点
+显式加入，而不是默认把整个 request 对象塞进事件结构。
 
-这份技术指导文档的目标不是替代代码，而是帮助后续重构与扩展时保持方向一致。
+观测触发时机也必须明确：
+
+- observer 只处理失败路径上的边界事件
+- runtime 应在已经解析出公开错误、但尚未尝试写错误响应时发出失败观测
+- 这样即使 response 已经开始，或后续错误写回失败，也仍然保留边界观测
+- 如果错误响应写回本身失败，runtime 应再发出一个 internal-error 观测事件
+
+## 10. Request ID 策略
+
+runtime 不管理 request id。
+
+runtime 只在 request id 存在时读取并记录它，典型来源是
+`middleware.RequestID`。如果不存在，对应字段就为空。
+
+这能让 request id 回到 ingress 层，而不是继续让 runtime 维护内部状态机。
+
+## 11. 非目标
+
+应明确避免以下方向：
+
+- 重新长成通用 framework shell
+- 试图替代 `chi`
+- 发明一套 router DSL
+- 在核心 runtime 稳定前就先做 OpenAPI/codegen
+- 再次退回 helper-first 的公开叙事
+- 为了少数 transport 场景过早扩张能力边界
+
+## 12. Review 标准
+
+以后审查 runtime 相关改动时，至少应回答这几个问题：
+
+1. 这个改动是否让 `chix` 更像一个 `chi`-first API runtime？
+2. 它是否加强了 success / failure 的单一路径？
+3. 它是否把 ingress concern 继续留在 runtime 外层？
+4. 它是否仍然保持普通 JSON API 的窄边界？
+5. 它是否保持了文档已经写死的 mapper / validation / response / observer 语义？
+6. 它引入的复杂度是否真的换来了更大的运行时杠杆？
