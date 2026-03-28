@@ -41,17 +41,27 @@ func execute[I any, O any](
 	h Handler[I, O],
 	inputSchema *schema.Schema,
 ) {
-	requestContext := cfg.extractRequestContext(r)
+	var (
+		requestContext    RequestContext
+		hasRequestContext bool
+	)
+	getRequestContext := func() RequestContext {
+		if !hasRequestContext {
+			requestContext = cfg.extractRequestContext(r)
+			hasRequestContext = true
+		}
+		return requestContext
+	}
 
 	var input I
 	if err := bindInputWithSchema(r, &input, inputSchema); err != nil {
-		cfg.writeFailure(w, requestContext, err, op.ErrorMappers)
+		cfg.writeFailure(w, getRequestContext(), err, op.ErrorMappers)
 		return
 	}
 
 	output, err := h(r.Context(), &input)
 	if err != nil {
-		cfg.writeFailure(w, requestContext, err, op.ErrorMappers)
+		cfg.writeFailure(w, getRequestContext(), err, op.ErrorMappers)
 		return
 	}
 
@@ -63,12 +73,12 @@ func execute[I any, O any](
 
 	payload, err := marshalSuccessEnvelope(output)
 	if err != nil {
-		cfg.writeFailure(w, requestContext, err, op.ErrorMappers)
+		cfg.writeFailure(w, getRequestContext(), err, op.ErrorMappers)
 		return
 	}
 
 	if err := writeJSONResponse(w, status, payload); err != nil {
-		cfg.observeInternalFailure(requestContext, err)
+		cfg.observeInternalFailure(getRequestContext(), err)
 	}
 }
 

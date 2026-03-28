@@ -27,6 +27,7 @@ type Field struct {
 type Schema struct {
 	ParameterFields []Field
 	BodyFields      []Field
+	HasValidation   bool
 
 	bodyFieldsByName map[string]Field
 	locations        map[string]Location
@@ -149,6 +150,9 @@ func walk(
 
 		if field.PkgPath != "" && !field.Anonymous {
 			continue
+		}
+		if tag := field.Tag.Get("validate"); tag != "" && tag != "-" {
+			schema.HasValidation = true
 		}
 
 		paramSource, paramName, hasParamSource, err := parameterSource(field)

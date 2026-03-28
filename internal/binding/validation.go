@@ -22,6 +22,9 @@ func validateStruct(input any, schema *schema.Schema) error {
 	if input == nil {
 		return nil
 	}
+	if schema != nil && !schema.HasValidation {
+		return nil
+	}
 
 	err := defaultValidator.Struct(input)
 	if err == nil {

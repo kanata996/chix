@@ -1,7 +1,6 @@
 package binding
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,35 +21,60 @@ func bindBodyFields(r *http.Request, value reflect.Value, schema *schema.Schema)
 		return newUnsupportedMediaTypeError(fmt.Errorf("unsupported content type %q", r.Header.Get("Content-Type")))
 	}
 
-	var raw map[string]json.RawMessage
 	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&raw); err != nil {
+	decoder.DisallowUnknownFields()
+
+	token, err := decoder.Token()
+	if err != nil {
 		if err == io.EOF {
 			return nil
 		}
 		return newRequestShapeError(err)
 	}
 
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return newRequestShapeError(fmt.Errorf("request body must contain a single JSON value"))
+	delim, ok := token.(json.Delim)
+	if !ok || delim != '{' {
+		return newRequestShapeError(fmt.Errorf("request body must be a JSON object"))
 	}
 
-	for name := range raw {
-		if _, ok := schema.LookupBodyField(name); !ok {
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return newRequestShapeError(err)
+		}
+
+		name, ok := token.(string)
+		if !ok {
+			return newRequestShapeError(fmt.Errorf("request body must be a JSON object"))
+		}
+
+		field, ok := schema.LookupBodyField(name)
+		if !ok {
 			return newRequestShapeError(fmt.Errorf("unknown body field %q", name))
 		}
-	}
 
-	for name, rawValue := range raw {
-		field, _ := schema.LookupBodyField(name)
 		target, err := fieldByIndexAlloc(value, field.Index)
 		if err != nil {
 			return err
 		}
-		if err := unmarshalBodyField(target, rawValue); err != nil {
+
+		if err := decodeBodyField(decoder, target); err != nil {
 			return newRequestShapeError(fmt.Errorf("invalid body field %q: %w", name, err))
 		}
+	}
+
+	token, err = decoder.Token()
+	if err != nil {
+		return newRequestShapeError(err)
+	}
+	delim, ok = token.(json.Delim)
+	if !ok || delim != '}' {
+		return newRequestShapeError(fmt.Errorf("request body must be a JSON object"))
+	}
+
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return newRequestShapeError(fmt.Errorf("request body must contain a single JSON value"))
 	}
 
 	return nil
@@ -67,6 +91,9 @@ func isJSONContentType(raw string) bool {
 	if raw == "" {
 		return false
 	}
+	if raw == "application/json" || strings.HasPrefix(raw, "application/json;") {
+		return true
+	}
 
 	mediaType, _, err := mime.ParseMediaType(raw)
 	if err != nil {
@@ -76,22 +103,13 @@ func isJSONContentType(raw string) bool {
 		(strings.HasPrefix(mediaType, "application/") && strings.HasSuffix(mediaType, "+json"))
 }
 
-func unmarshalBodyField(target reflect.Value, raw json.RawMessage) error {
+func decodeBodyField(decoder *json.Decoder, target reflect.Value) error {
 	if !target.CanAddr() {
 		return fmt.Errorf("field is not addressable")
 	}
 
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-
 	if err := decoder.Decode(target.Addr().Interface()); err != nil {
 		return err
 	}
-
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return fmt.Errorf("body field must contain a single JSON value")
-	}
-
 	return nil
 }

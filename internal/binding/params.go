@@ -4,6 +4,7 @@ import (
 	"encoding"
 	"fmt"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strconv"
 	"time"
@@ -16,43 +17,61 @@ import (
 var timeType = reflect.TypeOf(time.Time{})
 
 func bindParameterFields(r *http.Request, value reflect.Value, schema *schema.Schema) error {
+	var (
+		queryValues url.Values
+		queryLoaded bool
+	)
+
 	for _, field := range schema.ParameterFields {
-		values, exists := parameterValues(r, field.Source, field.Name)
-		if !exists || len(values) == 0 {
-			continue
-		}
+		switch field.Source {
+		case "path":
+			raw := chi.URLParam(r, field.Name)
+			if raw == "" {
+				continue
+			}
 
-		target, err := fieldByIndexAlloc(value, field.Index)
-		if err != nil {
-			return err
-		}
+			target, err := fieldByIndexAlloc(value, field.Index)
+			if err != nil {
+				return err
+			}
 
-		if len(values) > 1 && target.Kind() != reflect.Slice {
-			return newRequestShapeError(fmt.Errorf("duplicate %s parameter %q", field.Source, field.Name))
-		}
+			if err := assignSingleValue(target, raw); err != nil {
+				return newRequestShapeError(fmt.Errorf("invalid %s parameter %q: %w", field.Source, field.Name, err))
+			}
+		case "query":
+			if !queryLoaded {
+				queryValues = r.URL.Query()
+				queryLoaded = true
+			}
 
-		if err := assignValues(target, values); err != nil {
-			return newRequestShapeError(fmt.Errorf("invalid %s parameter %q: %w", field.Source, field.Name, err))
+			values, exists := queryValues[field.Name]
+			if !exists || len(values) == 0 {
+				continue
+			}
+
+			target, err := fieldByIndexAlloc(value, field.Index)
+			if err != nil {
+				return err
+			}
+
+			if len(values) > 1 && target.Kind() != reflect.Slice {
+				return newRequestShapeError(fmt.Errorf("duplicate %s parameter %q", field.Source, field.Name))
+			}
+
+			if len(values) == 1 {
+				if err := assignSingleValue(target, values[0]); err != nil {
+					return newRequestShapeError(fmt.Errorf("invalid %s parameter %q: %w", field.Source, field.Name, err))
+				}
+				continue
+			}
+
+			if err := assignValues(target, values); err != nil {
+				return newRequestShapeError(fmt.Errorf("invalid %s parameter %q: %w", field.Source, field.Name, err))
+			}
 		}
 	}
 
 	return nil
-}
-
-func parameterValues(r *http.Request, source string, name string) ([]string, bool) {
-	switch source {
-	case "path":
-		value := chi.URLParam(r, name)
-		if value == "" {
-			return nil, false
-		}
-		return []string{value}, true
-	case "query":
-		values, ok := r.URL.Query()[name]
-		return values, ok
-	default:
-		return nil, false
-	}
 }
 
 func assignValues(target reflect.Value, values []string) error {
@@ -72,6 +91,24 @@ func assignValues(target reflect.Value, values []string) error {
 	}
 
 	return assignScalar(target, values[0])
+}
+
+func assignSingleValue(target reflect.Value, raw string) error {
+	target = ensureSettableValue(target)
+
+	if target.Kind() == reflect.Slice {
+		item := reflect.New(target.Type().Elem()).Elem()
+		if err := assignScalar(item, raw); err != nil {
+			return err
+		}
+
+		slice := reflect.MakeSlice(target.Type(), 1, 1)
+		slice.Index(0).Set(item)
+		target.Set(slice)
+		return nil
+	}
+
+	return assignScalar(target, raw)
 }
 
 func assignScalar(target reflect.Value, raw string) error {

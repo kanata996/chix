@@ -671,6 +671,36 @@ func TestScopeFailureObservationConfigInheritanceAndOverride(t *testing.T) {
 	}
 }
 
+func TestHandleSkipsExtractorOnSuccess(t *testing.T) {
+	type output struct {
+		OK bool `json:"ok"`
+	}
+
+	extractorCalls := 0
+	rt := New(WithExtractor(func(*http.Request) RequestContext {
+		extractorCalls++
+		return RequestContext{Target: "unused"}
+	}))
+
+	router := chi.NewRouter()
+	router.Method(http.MethodGet, "/users", Handle(rt, Operation[struct{}, output]{
+		Method: http.MethodGet,
+	}, func(_ context.Context, _ *struct{}) (*output, error) {
+		return &output{OK: true}, nil
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/users", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if extractorCalls != 0 {
+		t.Fatalf("expected success path to skip extractor, got %d calls", extractorCalls)
+	}
+}
+
 func TestObserverReceivesBoundaryEvent(t *testing.T) {
 	sentinel := errors.New("boom")
 	var got Event

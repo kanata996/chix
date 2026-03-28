@@ -185,6 +185,31 @@ func TestLoadAcceptsSupportedParameterFieldTypes(t *testing.T) {
 	}
 }
 
+func TestLoadTracksValidationPresence(t *testing.T) {
+	type validated struct {
+		Name string `json:"name" validate:"required"`
+	}
+	type plain struct {
+		Name string `json:"name"`
+	}
+
+	validatedSchema, err := Load(reflect.TypeOf(validated{}))
+	if err != nil {
+		t.Fatalf("load validated schema: %v", err)
+	}
+	if !validatedSchema.HasValidation {
+		t.Fatal("expected schema to record validation tags")
+	}
+
+	plainSchema, err := Load(reflect.TypeOf(plain{}))
+	if err != nil {
+		t.Fatalf("load plain schema: %v", err)
+	}
+	if plainSchema.HasValidation {
+		t.Fatal("expected schema without validate tags to skip validation")
+	}
+}
+
 func assertField(t *testing.T, got Field, source string, name string, path string, index []int) {
 	t.Helper()
 
