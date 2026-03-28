@@ -54,6 +54,8 @@ func (cfg executionConfig) resolvePublicError(raw error, opMappers []ErrorMapper
 		return public
 	}
 
+	// 公开边界错误必须直接旁路 mapper；只有未公开化的原始错误才进入 mapper 链。
+	// 优先级顺序与技术手册保持一致：operation > 内层 scope > 外层 scope/runtime。
 	for _, mapper := range opMappers {
 		if mapper == nil {
 			continue

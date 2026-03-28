@@ -1,5 +1,5 @@
-// 本文件职责：放置请求上下文提取、默认日志观测器以及作用域配置解析逻辑。
-// 定位：服务 failure / observation 边界，但与主执行流程和错误映射实现分开维护。
+// 本文件职责：放置请求上下文提取和默认日志观测器。
+// 定位：服务 failure / observation 边界，不承载 scope 继承与配置解析语义。
 package runtime
 
 import (
@@ -47,48 +47,4 @@ func (cfg executionConfig) extractRequestContext(r *http.Request) RequestContext
 		return RequestContext{}
 	}
 	return cfg.extractor(r)
-}
-
-func (rt *Runtime) executionConfig() executionConfig {
-	return executionConfig{
-		errorMappers:  append([]ErrorMapper(nil), rt.errorMappers()...),
-		observer:      rt.observer(),
-		extractor:     rt.extractor(),
-		successStatus: rt.successStatus(),
-	}
-}
-
-func (rt *Runtime) extractor() Extractor {
-	for current := rt; current != nil; current = current.parent {
-		if current.local.hasExtractor {
-			return current.local.extractor
-		}
-	}
-	return DefaultExtractor
-}
-
-func (rt *Runtime) observer() Observer {
-	for current := rt; current != nil; current = current.parent {
-		if current.local.hasObserver {
-			return current.local.observer
-		}
-	}
-	return nil
-}
-
-func (rt *Runtime) successStatus() int {
-	for current := rt; current != nil; current = current.parent {
-		if current.local.hasSuccessStatus {
-			return current.local.successStatus
-		}
-	}
-	return 0
-}
-
-func (rt *Runtime) errorMappers() []ErrorMapper {
-	var chain []ErrorMapper
-	for current := rt; current != nil; current = current.parent {
-		chain = append(chain, current.local.errorMappers...)
-	}
-	return chain
 }

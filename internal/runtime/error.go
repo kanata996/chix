@@ -1,9 +1,8 @@
-// 本文件职责：定义公开错误载体、runtime 自产错误以及 JSON envelope 编码辅助。
-// 定位：作为 runtime failure 模型的基础层，被 failure 执行路径直接消费。
+// 本文件职责：定义公开错误载体、runtime 自产错误以及错误归一化辅助。
+// 定位：作为 runtime error model 的基础层，被 failure 执行路径直接消费。
 package runtime
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 )
@@ -205,27 +204,4 @@ func internalHTTPError() *HTTPError {
 		Message: "internal server error",
 		Details: []any{},
 	}
-}
-
-func marshalSuccessEnvelope(value any) ([]byte, error) {
-	return json.Marshal(struct {
-		Data any `json:"data"`
-	}{
-		Data: value,
-	})
-}
-
-func marshalErrorEnvelope(public *HTTPError) ([]byte, error) {
-	return json.Marshal(struct {
-		Error *HTTPError `json:"error"`
-	}{
-		Error: normalizeHTTPError(public),
-	})
-}
-
-func writeJSONResponse(w http.ResponseWriter, status int, payload []byte) error {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_, err := w.Write(payload)
-	return err
 }
