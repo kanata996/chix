@@ -72,6 +72,29 @@ type CreateUserOutput struct {
 	Verbose bool   `json:"verbose"`
 }
 
+func mapUserError(err error) *chix.HTTPError {
+	if errors.Is(err, errUserExists) {
+		return &chix.HTTPError{
+			Status:  http.StatusConflict,
+			Code:    "user_exists",
+			Message: "user already exists",
+		}
+	}
+	return nil
+}
+
+func createUser(_ context.Context, in *CreateUserInput) (*CreateUserOutput, error) {
+	if in.Name == "taken" {
+		return nil, errUserExists
+	}
+
+	return &CreateUserOutput{
+		ID:      in.ID,
+		Name:    in.Name,
+		Verbose: in.Verbose,
+	}, nil
+}
+
 func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -80,39 +103,35 @@ func main() {
 
 	rt := chix.New(
 		chix.WithObserver(chix.DefaultLogger(nil)),
-		chix.WithErrorMapper(func(err error) *chix.HTTPError {
-			if errors.Is(err, errUserExists) {
-				return &chix.HTTPError{
-					Status:  http.StatusConflict,
-					Code:    "user_exists",
-					Message: "user already exists",
-				}
-			}
-			return nil
-		}),
+		chix.WithErrorMapper(mapUserError),
 	)
 
-	users := rt.Scope()
-
-	r.Method(http.MethodPost, "/users/{id}", chix.Handle(users, chix.Operation[CreateUserInput, CreateUserOutput]{
+	createUserOp := chix.Operation[CreateUserInput, CreateUserOutput]{
 		Method: http.MethodPost,
-	}, func(_ context.Context, in *CreateUserInput) (*CreateUserOutput, error) {
-		if in.Name == "taken" {
-			return nil, errUserExists
-		}
+	}
 
-		return &CreateUserOutput{
-			ID:      in.ID,
-			Name:    in.Name,
-			Verbose: in.Verbose,
-		}, nil
-	}))
+	r.Method(http.MethodPost, "/users/{id}", chix.Handle(rt, createUserOp, createUser))
 
 	log.Fatal(http.ListenAndServe(":8080", r))
 }
 ```
 
-成功响应：
+运行：
+
+```bash
+go run .
+```
+
+请求：
+
+```bash
+curl -i \
+  -X POST 'http://localhost:8080/users/u_1?verbose=true' \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Ada"}'
+```
+
+成功响应。`POST` 在未显式指定状态码时默认返回 `201 Created`：
 
 ```json
 {
@@ -124,21 +143,199 @@ func main() {
 }
 ```
 
+错误请求：
+
+```bash
+curl -i \
+  -X POST 'http://localhost:8080/users/u_1' \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"taken"}'
+```
+
 错误响应：
 
 ```json
 {
   "error": {
-    "code": "invalid_request",
-    "message": "invalid request",
-    "details": [
-      {
-        "source": "body",
-        "field": "name",
-        "code": "required",
-        "message": "name failed required validation"
-      }
-    ]
+    "code": "user_exists",
+    "message": "user already exists",
+    "details": []
+  }
+}
+```
+
+## 怎么用 chix
+
+`chix` 的典型接入顺序很固定：
+
+1. 用 `chix.New(...)` 建一个 runtime，放全局默认策略
+2. 需要 route group 策略时，用 `rt.Scope(...)` 派生子作用域
+3. 定义输入/输出 struct，并显式标注 `path` / `query` / `json` 来源
+4. 用 `chix.Handle(scopeOrRuntime, op, handler)` 挂到 `chi`，业务 handler 只返回输出或错误
+
+如果一个接口的处理流程可以表述成“绑定输入 -> 校验 -> 执行业务 -> 写标准 JSON 响应”，那它就是 `chix` 的目标场景。
+
+## 1. 定义输入模型
+
+输入 struct 只支持三种来源：
+
+- `path`
+- `query`
+- JSON body
+
+推荐把不同来源拆成小块，再组合成最终 input：
+
+```go
+type RouteParams struct {
+	ID string `path:"id" validate:"min=3"`
+}
+
+type QueryParams struct {
+	Verbose bool     `query:"verbose"`
+	Tags    []string `query:"tag"`
+}
+
+type Body struct {
+	Name string `json:"name" validate:"required"`
+}
+
+type CreateUserInput struct {
+	RouteParams
+	QueryParams
+	Body
+}
+```
+
+这里的规则比较硬：
+
+- `path` / `query` 字段必须显式写来源 tag
+- body 字段必须显式写 `json` tag
+- 未声明来源的导出字段不会被隐式当成 body 字段
+- required 语义属于 `validate`，不属于 binding
+- query 绑定到标量字段时，如果同名参数出现多次，会直接返回 `400 bad_request`
+
+## 2. 挂载 handler
+
+`chix` 不让业务代码直接写 `http.ResponseWriter`。你把类型化 handler 交给 runtime，runtime 负责成功响应、错误响应和失败观测。
+
+```go
+r.Method(http.MethodGet, "/users/{id}", chix.Handle(rt, chix.Operation[GetUserInput, UserOutput]{
+	Method: http.MethodGet,
+}, func(ctx context.Context, in *GetUserInput) (*UserOutput, error) {
+	return svc.GetUser(ctx, in.ID)
+}))
+```
+
+`Handle` 的行为有几个关键点：
+
+- 挂载时就会解析输入 schema；schema 非法会直接 panic，而不是拖到请求期
+- 成功状态码默认是 `POST -> 201`，其他方法 `-> 200`
+- `Operation.SuccessStatus` 可以覆盖默认值
+- `204 No Content` 是唯一会跳过 success envelope 的成功响应
+- 非 `204` 成功响应即使 handler 返回 `nil`，也会写成 `{"data": null}`
+
+删除接口通常这样写：
+
+```go
+r.Method(http.MethodDelete, "/users/{id}", chix.Handle(rt, chix.Operation[DeleteUserInput, struct{}]{
+	Method:        http.MethodDelete,
+	SuccessStatus: http.StatusNoContent,
+}, func(ctx context.Context, in *DeleteUserInput) (*struct{}, error) {
+	return nil, svc.DeleteUser(ctx, in.ID)
+}))
+```
+
+## 3. 错误映射
+
+业务代码返回 domain error，`chix` 负责把它映射成稳定的公开 HTTP 错误：
+
+```go
+func mapUserError(err error) *chix.HTTPError {
+	if errors.Is(err, errUserExists) {
+		return &chix.HTTPError{
+			Status:  http.StatusConflict,
+			Code:    "user_exists",
+			Message: "user already exists",
+		}
+	}
+	return nil
+}
+```
+
+错误解析顺序固定为：
+
+- `handler` 或 `mapper` 已经返回 `*chix.HTTPError` 时，直接写回，不再继续走 mapper 链
+- `Operation.ErrorMappers`
+- 当前 scope 到外层 scope 的 mapper
+- runtime-level mapper
+- 都没命中时回退到 `500 internal_error`
+
+runtime 自己产出的公开 4xx 错误也不会再进入 mapper 链：
+
+- `400 bad_request`
+- `415 unsupported_media_type`
+- `422 invalid_request`
+
+## 4. 用 Scope 表达 route group 策略
+
+`Scope(opts...)` 不是 middleware 替身，它表达的是一组路由共享的 runtime 策略。
+
+```go
+rt := chix.New(
+	chix.WithObserver(chix.DefaultLogger(nil)),
+)
+
+users := rt.Scope(
+	chix.WithErrorMapper(mapUserError),
+)
+
+admin := rt.Scope(
+	chix.WithErrorMapper(mapAdminError),
+	chix.WithSuccessStatus(http.StatusAccepted),
+)
+```
+
+继承规则也很简单：
+
+- `ErrorMapper` 在 `runtime / scope / operation` 之间按内层优先追加
+- `Observer`、`Extractor`、`SuccessStatus` 采用最近一层覆盖
+- 适合放 route group 级错误映射、失败观测和默认成功状态码
+
+配合 `chi` 的 route grouping，常见写法就是：
+
+```go
+r.Route("/users", func(r chi.Router) {
+	r.Method(http.MethodPost, "/{id}", chix.Handle(users, createUserOp, createUser))
+	r.Method(http.MethodDelete, "/{id}", chix.Handle(users, deleteUserOp, deleteUser))
+})
+
+r.Route("/admin", func(r chi.Router) {
+	r.Method(http.MethodPost, "/rebuild-index", chix.Handle(admin, rebuildIndexOp, rebuildIndex))
+})
+```
+
+## 输入、响应和默认行为
+
+输入绑定规则：
+
+- 非空 body 且 `Content-Type` 不是 `application/json` 或 `application/*+json` 时返回 `415 unsupported_media_type`
+- malformed JSON、JSON 类型不匹配、unknown field 都返回 `400 bad_request`
+- bind 成功后才会执行 `validator/v10`
+- validation 失败固定返回 `422 invalid_request`
+
+响应 wire contract：
+
+- 成功响应固定为 `{"data": ...}`
+- 错误响应固定为 `{"error": {...}}`
+- 错误 `details` 在 wire 上始终是数组
+- 没有 mapper 命中的业务错误会回退到固定的内部错误：
+
+```json
+{
+  "error": {
+    "code": "internal_error",
+    "message": "internal server error",
+    "details": []
   }
 }
 ```
@@ -155,53 +352,13 @@ func main() {
 6. 写 error envelope
 7. 在失败路径发出 `Observer` 事件
 
-这意味着下面这些事仍然属于 `chi` 或外层 ingress：
+这意味着下面这些事仍然继续留在 `chi` 或更外层 ingress：
 
 - 路由
 - middleware 链
 - request id 生成
 - recover / auth / rate limit / CORS
 - tracing / access log
-
-## 输入模型
-
-runtime 当前只支持三种输入来源：
-
-- `path`
-- `query`
-- JSON body
-
-绑定规则保持收敛：
-
-- `path` / `query` 字段必须显式声明来源 tag
-- body 字段必须显式写 `json` tag
-- 未声明来源的导出字段不会被隐式视为 body 字段
-- query 标量字段重复出现会返回 `400 bad_request`
-- 非空 body 且 `Content-Type` 不是 `application/json` 或 `application/*+json` 时返回 `415 unsupported_media_type`
-- malformed JSON、类型不匹配、unknown field 都会返回 `400 bad_request`
-- required 语义属于 validation，不属于 binding
-
-## 校验与错误
-
-runtime 自己直接产出的公开 4xx 错误固定为：
-
-- `400 bad_request`
-- `415 unsupported_media_type`
-- `422 invalid_request`
-
-这些 runtime 自产公开错误不会再重新进入 `ErrorMapper` 链。
-
-业务错误则通过 `ErrorMapper` 归一化为稳定的 `HTTPError`。如果没有 mapper 命中，会回退到：
-
-```json
-{
-  "error": {
-    "code": "internal_error",
-    "message": "internal server error",
-    "details": []
-  }
-}
-```
 
 runtime 内置 `go-playground/validator/v10`，会在 bind 成功后自动根据 `validate` tag 执行校验：
 
@@ -211,15 +368,6 @@ type CreateUserInput struct {
 	Name string `json:"name" validate:"required"`
 }
 ```
-
-## Scope
-
-`Scope(opts...)` 用来表达 route group 级策略，而不是把 runtime 做成 middleware 风格：
-
-- error mappers 在 runtime / scope / operation 之间按优先级叠加
-- observer、extractor、success status default 采用最近一层覆盖
-
-这让你可以把一组 route 的错误映射和失败观测收在一起，同时保持 `chi` 的 route grouping 体验。
 
 ## 技术文档
 
