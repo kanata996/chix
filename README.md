@@ -374,3 +374,4 @@ type CreateUserInput struct {
 - [docs/TECHNICAL_GUIDE.md](docs/TECHNICAL_GUIDE.md)
 - [docs/RUNTIME_API_DRAFT.md](docs/RUNTIME_API_DRAFT.md)
 - [docs/BINDING_STATUS.md](docs/BINDING_STATUS.md)
+- [docs/POSITIONING.md](docs/POSITIONING.md)
