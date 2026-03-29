@@ -167,7 +167,7 @@ curl -i \
 2. 需要 route group 策略时，用 `rt.Scope(...)` 派生子作用域
 3. 定义输入/输出 struct，并显式标注 `path` / `query` / `json` 来源
 4. 普通接口用 `chix.Handle(scopeOrRuntime, handler)` 挂到 `chi`
-5. 需要 route-local 覆盖时，再把 `Operation` 作为第三个参数传给 `Handle`
+5. 需要 route-local 覆盖时，再把 `Operation` 作为第三个参数传给 `chix.Handle`
 
 如果一个接口的处理流程可以表述成“绑定输入 -> 校验 -> 执行业务 -> 写标准 JSON 响应”，那它就是 `chix` 的目标场景。
 
@@ -222,7 +222,7 @@ r.Get("/users/{id}", chix.Handle(rt, func(ctx context.Context, in *GetUserInput)
 }))
 ```
 
-只有你需要 operation 级覆盖时，再显式写 `Handle(..., handler, chix.Operation{...})`。
+只有你需要 operation 级覆盖时，再显式写 `chix.Handle(rt, handler, chix.Operation{...})`。
 
 `Handle` 的行为有几个关键点：
 

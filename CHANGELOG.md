@@ -22,9 +22,9 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 - Removed outdated README references to the deleted `App/Register/OpenAPI/Swagger UI` product shape.
 - Changed the success HTTP contract to write the handler DTO directly instead of wrapping every non-`204` success response in `{"data": ...}`.
 - Simplified `Operation` to per-route overrides only: it is now non-generic and no longer carries a redundant `Method` field.
-- Changed `Handle(...)` to accept an optional trailing `Operation`, so the default path is `Handle(rt, h)` and route-local overrides stay inline at the call site.
+- `Handle(...)` accepts an optional trailing `Operation`, so the default path is `Handle(rt, h)` and route-local overrides stay inline at the call site.
 - Added `HandleNoContent(...)` for common `204 No Content` handlers.
-- Changed `Handle(...)` to return `http.HandlerFunc`, so `chi` method helpers like `Get/Post/Delete` can use it directly.
+- `Handle(...)` returns `http.HandlerFunc`, so `chi` method helpers like `Get/Post/Delete` can use it directly.
 
 ### Breaking Changes
 
@@ -32,7 +32,6 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 - When a non-`204` handler returns `nil`, the success body is now JSON `null` instead of `{"data": null}`.
 - `Operation[I, O]` is now `Operation`; call sites must drop generic type arguments.
 - `Operation.Method` has been removed. Default success status now always derives from the incoming request method when `SuccessStatus` is unset.
-- `Handle(rt, op, h)` is now `Handle(rt, h, op)`, and the common case no longer passes an explicit zero-value `Operation`.
 
 ### Migration Notes
 

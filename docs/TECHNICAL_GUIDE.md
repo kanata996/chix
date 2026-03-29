@@ -85,8 +85,8 @@ func HandleNoContent[I any](rt *Runtime, h func(context.Context, *I) error) http
 
 其中：
 
-- `Handle` 默认用于普通场景
-- 需要 operation 级覆盖时，把 `Operation` 作为第三个参数传给 `Handle`
+- `Handle` 是唯一公开挂载入口
+- 需要 operation 级覆盖时，把 `Operation` 作为额外参数传给 `Handle`
 - `HandleNoContent` 用于只返回错误、默认成功状态为 `204 No Content` 的 handler
 
 这是最关键的设计决策。没有 runtime-owned handler 模型，`chix` 就无法形成

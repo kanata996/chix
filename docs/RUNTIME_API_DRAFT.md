@@ -56,7 +56,7 @@ func HandleNoContent[I any](rt *Runtime, h func(context.Context, *I) error) http
 ```
 
 默认场景直接使用 `Handle(rt, h)`；只有需要 operation 级覆盖时才显式把
-`Operation` 作为第三个参数传入。只返回错误、默认 `204 No Content` 的场景使用
+`Operation` 作为额外参数传入。只返回错误、默认 `204 No Content` 的场景使用
 `HandleNoContent(...)`。
 
 示例：
