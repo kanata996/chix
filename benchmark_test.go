@@ -107,12 +107,9 @@ func BenchmarkChiVsChixMinimal204(b *testing.B) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	chixHandler := Handle(New(), Operation[benchmarkDeleteInput, struct{}]{
-		Method:        http.MethodDelete,
-		SuccessStatus: http.StatusNoContent,
-	}, func(_ context.Context, input *benchmarkDeleteInput) (*struct{}, error) {
+	chixHandler := HandleNoContent(New(), func(_ context.Context, input *benchmarkDeleteInput) error {
 		benchmarkStringSink = input.ID
-		return &struct{}{}, nil
+		return nil
 	})
 
 	req := benchmarkRequestWithRouteParams(http.MethodDelete, "/users/1234", nil, map[string]string{
@@ -171,9 +168,7 @@ func BenchmarkChiVsChixGetJSON(b *testing.B) {
 		benchmarkBytesSink = n
 	})
 
-	chixHandler := Handle(New(), Operation[benchmarkGetInput, benchmarkUserOutput]{
-		Method: http.MethodGet,
-	}, func(_ context.Context, input *benchmarkGetInput) (*benchmarkUserOutput, error) {
+	chixHandler := Handle(New(), func(_ context.Context, input *benchmarkGetInput) (*benchmarkUserOutput, error) {
 		return &benchmarkUserOutput{
 			ID:      input.ID,
 			Name:    "kanata",
@@ -263,9 +258,7 @@ func BenchmarkChiVsChixPostJSON(b *testing.B) {
 		benchmarkBytesSink = n
 	})
 
-	chixHandler := Handle(New(), Operation[benchmarkPostInput, benchmarkUserOutput]{
-		Method: http.MethodPost,
-	}, func(_ context.Context, input *benchmarkPostInput) (*benchmarkUserOutput, error) {
+	chixHandler := Handle(New(), func(_ context.Context, input *benchmarkPostInput) (*benchmarkUserOutput, error) {
 		return &benchmarkUserOutput{
 			ID:      input.ID,
 			Name:    input.Name,

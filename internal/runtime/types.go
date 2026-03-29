@@ -13,9 +13,8 @@ type Runtime struct {
 	local  scopeConfig
 }
 
-// Operation 描述单个挂载点的请求方法、成功状态码和 operation 级错误映射策略。
-type Operation[I any, O any] struct {
-	Method        string
+// Operation 描述单个挂载点的成功状态码和 operation 级错误映射策略。
+type Operation struct {
 	SuccessStatus int
 	ErrorMappers  []ErrorMapper
 }

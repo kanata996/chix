@@ -21,8 +21,7 @@ type Runtime struct {
 	// unexported
 }
 
-type Operation[I any, O any] struct {
-	Method        string
+type Operation struct {
 	SuccessStatus int
 	ErrorMappers  []ErrorMapper
 }
@@ -52,8 +51,13 @@ func (rt *Runtime) Scope(opts ...Option) *Runtime
 ## 4. 挂到 Chi
 
 ```go
-func Handle[I any, O any](rt *Runtime, op Operation[I, O], h Handler[I, O]) http.Handler
+func Handle[I any, O any](rt *Runtime, h Handler[I, O], ops ...Operation) http.HandlerFunc
+func HandleNoContent[I any](rt *Runtime, h func(context.Context, *I) error) http.HandlerFunc
 ```
+
+默认场景直接使用 `Handle(rt, h)`；只有需要 operation 级覆盖时才显式把
+`Operation` 作为第三个参数传入。只返回错误、默认 `204 No Content` 的场景使用
+`HandleNoContent(...)`。
 
 示例：
 
@@ -71,7 +75,7 @@ users := rt.Scope(
 	chix.WithErrorMapper(mapUserError),
 )
 
-r.Method("GET", "/users/{id}", chix.Handle(users, GetUser, HandleGetUser))
+r.Get("/users/{id}", chix.Handle(users, HandleGetUser))
 ```
 
 ## 5. 输入绑定

@@ -3,6 +3,7 @@
 package chix
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -11,7 +12,7 @@ import (
 
 type Runtime = runtime.Runtime
 
-type Operation[I any, O any] = runtime.Operation[I, O]
+type Operation = runtime.Operation
 type Handler[I any, O any] = runtime.Handler[I, O]
 
 type Event = runtime.Event
@@ -29,9 +30,14 @@ func New(opts ...Option) *Runtime {
 	return runtime.New(opts...)
 }
 
-// Handle 将操作与处理函数包装为 HTTP Handler，并在构建阶段解析输入 schema；rt、h 为空或 schema 解析失败时会 panic。
-func Handle[I any, O any](rt *Runtime, op Operation[I, O], h Handler[I, O]) http.Handler {
-	return runtime.Handle(rt, op, h)
+// Handle 将处理函数包装为 HTTP HandlerFunc，并在构建阶段解析输入 schema；rt、h 为空、schema 解析失败或传入多个 operation 时会 panic。
+func Handle[I any, O any](rt *Runtime, h Handler[I, O], ops ...Operation) http.HandlerFunc {
+	return runtime.Handle(rt, h, ops...)
+}
+
+// HandleNoContent 将只返回错误的处理函数包装为默认 204 No Content 的 HTTP HandlerFunc。
+func HandleNoContent[I any](rt *Runtime, h func(context.Context, *I) error) http.HandlerFunc {
+	return runtime.HandleNoContent(rt, h)
 }
 
 // DefaultExtractor 从 HTTP 请求提取默认请求上下文，包含请求 ID、方法、目标地址和远端地址。

@@ -7,7 +7,7 @@
 //
 // 当前根包公开的核心入口包括：
 //   - Runtime / Scope
-//   - Handle(rt, op, h)
+//   - Handle(rt, h, ...op) / HandleNoContent(rt, h)
 //   - HTTPError / ErrorMapper
 //   - Observer / Extractor
 //   - 内置输入校验（validator/v10）

@@ -21,17 +21,26 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 - Added package-level docs so pkg.go.dev reflects the current runtime model instead of the deleted framework/App narrative.
 - Removed outdated README references to the deleted `App/Register/OpenAPI/Swagger UI` product shape.
 - Changed the success HTTP contract to write the handler DTO directly instead of wrapping every non-`204` success response in `{"data": ...}`.
+- Simplified `Operation` to per-route overrides only: it is now non-generic and no longer carries a redundant `Method` field.
+- Changed `Handle(...)` to accept an optional trailing `Operation`, so the default path is `Handle(rt, h)` and route-local overrides stay inline at the call site.
+- Added `HandleNoContent(...)` for common `204 No Content` handlers.
+- Changed `Handle(...)` to return `http.HandlerFunc`, so `chi` method helpers like `Get/Post/Delete` can use it directly.
 
 ### Breaking Changes
 
 - Non-`204` success responses now serialize the handler return value as the top-level JSON body. Existing clients that read success payloads from `response.data` must switch to reading the DTO directly.
 - When a non-`204` handler returns `nil`, the success body is now JSON `null` instead of `{"data": null}`.
+- `Operation[I, O]` is now `Operation`; call sites must drop generic type arguments.
+- `Operation.Method` has been removed. Default success status now always derives from the incoming request method when `SuccessStatus` is unset.
+- `Handle(rt, op, h)` is now `Handle(rt, h, op)`, and the common case no longer passes an explicit zero-value `Operation`.
 
 ### Migration Notes
 
 - Update success-response consumers from `response.data.<field>` to `response.<field>`.
 - Keep treating `204 No Content` as the only success status with no response body.
 - Error responses are unchanged and still use `{"error": {...}}`.
+- Replace `Handle(rt, Operation[I, O]{}, h)` with `Handle(rt, h)` when you do not need operation-level overrides.
+- Replace delete-style `Handle(..., Operation{SuccessStatus: http.StatusNoContent}, ...)` boilerplate with `HandleNoContent(...)` where appropriate.
 
 ## [v0.3.0] - 2026-03-26
 

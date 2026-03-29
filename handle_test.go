@@ -36,9 +36,7 @@ func TestHandleBindsInputAndWritesSuccessBody(t *testing.T) {
 
 	rt := New()
 	router := chi.NewRouter()
-	router.Method(http.MethodPost, "/users/{id}", Handle(rt, Operation[createUserInput, createUserOutput]{
-		Method: http.MethodPost,
-	}, func(_ context.Context, input *createUserInput) (*createUserOutput, error) {
+	router.Post("/users/{id}", Handle(rt, func(_ context.Context, input *createUserInput) (*createUserOutput, error) {
 		return &createUserOutput{
 			ID:      input.ID,
 			Name:    input.Name,
@@ -80,9 +78,21 @@ func TestHandlePanicsOnInvalidInputSchema(t *testing.T) {
 		}
 	}()
 
-	_ = Handle(New(), Operation[input, struct{}]{}, func(_ context.Context, _ *input) (*struct{}, error) {
+	_ = Handle(New(), func(_ context.Context, _ *input) (*struct{}, error) {
 		return &struct{}{}, nil
 	})
+}
+
+func TestHandlePanicsOnMultipleOperationOverrides(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered == nil {
+			t.Fatal("expected panic for multiple operation overrides")
+		}
+	}()
+
+	_ = Handle(New(), func(_ context.Context, _ *struct{}) (*struct{}, error) {
+		return &struct{}{}, nil
+	}, Operation{}, Operation{})
 }
 
 func TestHandleBindsAnonymousEmbeddedInputFields(t *testing.T) {
@@ -108,9 +118,7 @@ func TestHandleBindsAnonymousEmbeddedInputFields(t *testing.T) {
 
 	rt := New()
 	router := chi.NewRouter()
-	router.Method(http.MethodPost, "/users/{id}", Handle(rt, Operation[input, output]{
-		Method: http.MethodPost,
-	}, func(_ context.Context, in *input) (*output, error) {
+	router.Method(http.MethodPost, "/users/{id}", Handle(rt, func(_ context.Context, in *input) (*output, error) {
 		return &output{
 			ID:      in.ID,
 			Name:    in.Name,
@@ -145,9 +153,7 @@ func TestHandleDoesNotImplicitlyBindUntaggedBodyFields(t *testing.T) {
 
 	rt := New()
 	router := chi.NewRouter()
-	router.Method(http.MethodPost, "/users", Handle(rt, Operation[input, struct{}]{
-		Method: http.MethodPost,
-	}, func(_ context.Context, in *input) (*struct{}, error) {
+	router.Method(http.MethodPost, "/users", Handle(rt, func(_ context.Context, in *input) (*struct{}, error) {
 		t.Fatalf("handler should not run with invalid request: %+v", in)
 		return nil, nil
 	}))
@@ -171,9 +177,7 @@ func TestHandleRejectsNestedUnknownBodyFields(t *testing.T) {
 
 	rt := New()
 	router := chi.NewRouter()
-	router.Method(http.MethodPost, "/users", Handle(rt, Operation[input, struct{}]{
-		Method: http.MethodPost,
-	}, func(_ context.Context, _ *input) (*struct{}, error) {
+	router.Method(http.MethodPost, "/users", Handle(rt, func(_ context.Context, _ *input) (*struct{}, error) {
 		t.Fatal("handler should not run")
 		return nil, nil
 	}))
@@ -194,9 +198,7 @@ func TestHandleRejectsUnsupportedMediaType(t *testing.T) {
 
 	rt := New()
 	router := chi.NewRouter()
-	router.Method(http.MethodPost, "/users", Handle(rt, Operation[input, struct{}]{
-		Method: http.MethodPost,
-	}, func(_ context.Context, _ *input) (*struct{}, error) {
+	router.Method(http.MethodPost, "/users", Handle(rt, func(_ context.Context, _ *input) (*struct{}, error) {
 		t.Fatal("handler should not run")
 		return nil, nil
 	}))
@@ -227,9 +229,7 @@ func TestHandleAcceptsApplicationVendorJSONMediaType(t *testing.T) {
 
 	rt := New()
 	router := chi.NewRouter()
-	router.Method(http.MethodPost, "/users", Handle(rt, Operation[input, output]{
-		Method: http.MethodPost,
-	}, func(_ context.Context, in *input) (*output, error) {
+	router.Method(http.MethodPost, "/users", Handle(rt, func(_ context.Context, in *input) (*output, error) {
 		return &output{Name: in.Name}, nil
 	}))
 
@@ -259,7 +259,7 @@ func TestHandleRejectsDuplicateScalarQueryValues(t *testing.T) {
 
 	rt := New()
 	router := chi.NewRouter()
-	router.Method(http.MethodGet, "/users", Handle(rt, Operation[input, struct{}]{}, func(_ context.Context, _ *input) (*struct{}, error) {
+	router.Method(http.MethodGet, "/users", Handle(rt, func(_ context.Context, _ *input) (*struct{}, error) {
 		t.Fatal("handler should not run")
 		return nil, nil
 	}))
@@ -279,9 +279,7 @@ func TestHandleValidationWrites422(t *testing.T) {
 
 	rt := New()
 	router := chi.NewRouter()
-	router.Method(http.MethodPost, "/users", Handle(rt, Operation[input, struct{}]{
-		Method: http.MethodPost,
-	}, func(_ context.Context, _ *input) (*struct{}, error) {
+	router.Method(http.MethodPost, "/users", Handle(rt, func(_ context.Context, _ *input) (*struct{}, error) {
 		t.Fatal("handler should not run")
 		return nil, nil
 	}))
@@ -322,7 +320,7 @@ func TestHandleWritesNilBodyAsNull(t *testing.T) {
 
 	rt := New()
 	router := chi.NewRouter()
-	router.Method(http.MethodGet, "/users", Handle(rt, Operation[struct{}, output]{}, func(_ context.Context, _ *struct{}) (*output, error) {
+	router.Method(http.MethodGet, "/users", Handle(rt, func(_ context.Context, _ *struct{}) (*output, error) {
 		return nil, nil
 	}))
 
@@ -342,11 +340,8 @@ func TestHandleWritesNilBodyAsNull(t *testing.T) {
 func TestHandleNoContentSkipsBody(t *testing.T) {
 	rt := New()
 	router := chi.NewRouter()
-	router.Method(http.MethodDelete, "/users/{id}", Handle(rt, Operation[struct{}, struct{}]{
-		Method:        http.MethodDelete,
-		SuccessStatus: http.StatusNoContent,
-	}, func(_ context.Context, _ *struct{}) (*struct{}, error) {
-		return &struct{}{}, nil
+	router.Delete("/users/{id}", HandleNoContent(rt, func(_ context.Context, _ *struct{}) error {
+		return nil
 	}))
 
 	req := httptest.NewRequest(http.MethodDelete, "/users/u_1", nil)
@@ -393,13 +388,13 @@ func TestHandleMapperPrecedenceAcrossOperationNestedScopeAndRuntime(t *testing.T
 			WithErrorMapper(makeMapper(&calls, "nested-2", &HTTPError{Status: http.StatusGone, Code: "nested", Message: "nested"})),
 		)
 
-		handler := Handle(nested, Operation[input, output]{
+		handler := Handle(nested, func(_ context.Context, _ *input) (*output, error) {
+			return nil, baseErr
+		}, Operation{
 			ErrorMappers: []ErrorMapper{
 				makeMapper(&calls, "op-1", nil),
 				makeMapper(&calls, "op-2", &HTTPError{Status: http.StatusNotFound, Code: "op", Message: "op"}),
 			},
-		}, func(_ context.Context, _ *input) (*output, error) {
-			return nil, baseErr
 		})
 
 		rec := httptest.NewRecorder()
@@ -424,13 +419,13 @@ func TestHandleMapperPrecedenceAcrossOperationNestedScopeAndRuntime(t *testing.T
 			WithErrorMapper(makeMapper(&calls, "nested-2", &HTTPError{Status: http.StatusGone, Code: "nested", Message: "nested"})),
 		)
 
-		handler := Handle(nested, Operation[input, output]{
+		handler := Handle(nested, func(_ context.Context, _ *input) (*output, error) {
+			return nil, baseErr
+		}, Operation{
 			ErrorMappers: []ErrorMapper{
 				makeMapper(&calls, "op-1", nil),
 				makeMapper(&calls, "op-2", nil),
 			},
-		}, func(_ context.Context, _ *input) (*output, error) {
-			return nil, baseErr
 		})
 
 		rec := httptest.NewRecorder()
@@ -455,13 +450,13 @@ func TestHandleMapperPrecedenceAcrossOperationNestedScopeAndRuntime(t *testing.T
 			WithErrorMapper(makeMapper(&calls, "nested-2", nil)),
 		)
 
-		handler := Handle(nested, Operation[input, output]{
+		handler := Handle(nested, func(_ context.Context, _ *input) (*output, error) {
+			return nil, baseErr
+		}, Operation{
 			ErrorMappers: []ErrorMapper{
 				makeMapper(&calls, "op-1", nil),
 				makeMapper(&calls, "op-2", nil),
 			},
-		}, func(_ context.Context, _ *input) (*output, error) {
-			return nil, baseErr
 		})
 
 		rec := httptest.NewRecorder()
@@ -494,10 +489,10 @@ func TestHandleWrappedHTTPErrorBypassesMappers(t *testing.T) {
 
 	rt := New(WithErrorMapper(countingMapper))
 	scope := rt.Scope(WithErrorMapper(countingMapper))
-	handler := Handle(scope, Operation[input, output]{
-		ErrorMappers: []ErrorMapper{countingMapper},
-	}, func(_ context.Context, _ *input) (*output, error) {
+	handler := Handle(scope, func(_ context.Context, _ *input) (*output, error) {
 		return nil, fmt.Errorf("wrapped: %w", public)
+	}, Operation{
+		ErrorMappers: []ErrorMapper{countingMapper},
 	})
 
 	rec := httptest.NewRecorder()
@@ -517,7 +512,7 @@ func TestHandleRuntimePublicErrorsBypassMappers(t *testing.T) {
 
 	cases := []struct {
 		name       string
-		operation  Operation[input, struct{}]
+		operation  Operation
 		request    *http.Request
 		wantStatus int
 		wantCode   string
@@ -533,10 +528,8 @@ func TestHandleRuntimePublicErrorsBypassMappers(t *testing.T) {
 			wantCode:   "bad_request",
 		},
 		{
-			name: "415 unsupported media type",
-			operation: Operation[input, struct{}]{
-				Method: http.MethodPost,
-			},
+			name:      "415 unsupported media type",
+			operation: Operation{},
 			request: func() *http.Request {
 				req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader("name=Ada"))
 				req.Header.Set("Content-Type", "text/plain")
@@ -546,10 +539,8 @@ func TestHandleRuntimePublicErrorsBypassMappers(t *testing.T) {
 			wantCode:   "unsupported_media_type",
 		},
 		{
-			name: "422 invalid request",
-			operation: Operation[input, struct{}]{
-				Method: http.MethodPost,
-			},
+			name:      "422 invalid request",
+			operation: Operation{},
 			request: func() *http.Request {
 				req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{}`))
 				req.Header.Set("Content-Type", "application/json")
@@ -573,10 +564,10 @@ func TestHandleRuntimePublicErrorsBypassMappers(t *testing.T) {
 			op := tt.operation
 			op.ErrorMappers = []ErrorMapper{countingMapper}
 
-			handler := Handle(scope, op, func(_ context.Context, _ *input) (*struct{}, error) {
+			handler := Handle(scope, func(_ context.Context, _ *input) (*struct{}, error) {
 				t.Fatal("handler should not run")
 				return nil, nil
-			})
+			}, op)
 
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, tt.request)
@@ -594,7 +585,7 @@ func TestScopeOverridesSingleValueOptions(t *testing.T) {
 	scope := rt.Scope(WithSuccessStatus(http.StatusCreated))
 
 	router := chi.NewRouter()
-	router.Method(http.MethodGet, "/users", Handle(scope, Operation[struct{}, struct{}]{}, func(_ context.Context, _ *struct{}) (*struct{}, error) {
+	router.Method(http.MethodGet, "/users", Handle(scope, func(_ context.Context, _ *struct{}) (*struct{}, error) {
 		return &struct{}{}, nil
 	}))
 
@@ -635,10 +626,10 @@ func TestScopeFailureObservationConfigInheritanceAndOverride(t *testing.T) {
 		}),
 	)
 
-	inheritedHandler := Handle(inherited, Operation[input, output]{}, func(_ context.Context, _ *input) (*output, error) {
+	inheritedHandler := Handle(inherited, func(_ context.Context, _ *input) (*output, error) {
 		return nil, sentinel
 	})
-	overriddenHandler := Handle(overridden, Operation[input, output]{}, func(_ context.Context, _ *input) (*output, error) {
+	overriddenHandler := Handle(overridden, func(_ context.Context, _ *input) (*output, error) {
 		return nil, sentinel
 	})
 
@@ -677,9 +668,7 @@ func TestHandleSkipsExtractorOnSuccess(t *testing.T) {
 	}))
 
 	router := chi.NewRouter()
-	router.Method(http.MethodGet, "/users", Handle(rt, Operation[struct{}, output]{
-		Method: http.MethodGet,
-	}, func(_ context.Context, _ *struct{}) (*output, error) {
+	router.Method(http.MethodGet, "/users", Handle(rt, func(_ context.Context, _ *struct{}) (*output, error) {
 		return &output{OK: true}, nil
 	}))
 
@@ -710,7 +699,7 @@ func TestObserverReceivesBoundaryEvent(t *testing.T) {
 
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
-	router.Method(http.MethodGet, "/users", Handle(rt, Operation[struct{}, struct{}]{}, func(_ context.Context, _ *struct{}) (*struct{}, error) {
+	router.Method(http.MethodGet, "/users", Handle(rt, func(_ context.Context, _ *struct{}) (*struct{}, error) {
 		return nil, sentinel
 	}))
 
@@ -750,7 +739,7 @@ func TestObserverEmitsBoundaryFailureBeforeErrorWrite(t *testing.T) {
 		}),
 	)
 
-	handler := Handle(rt, Operation[input, output]{}, func(_ context.Context, _ *input) (*output, error) {
+	handler := Handle(rt, func(_ context.Context, _ *input) (*output, error) {
 		return nil, sentinel
 	})
 
@@ -795,7 +784,7 @@ func TestObserverEmitsInternalErrorWhenErrorResponseWriteFails(t *testing.T) {
 		}),
 	)
 
-	handler := Handle(rt, Operation[input, output]{}, func(_ context.Context, _ *input) (*output, error) {
+	handler := Handle(rt, func(_ context.Context, _ *input) (*output, error) {
 		return nil, sentinel
 	})
 

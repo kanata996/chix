@@ -3,6 +3,7 @@
 package runtime
 
 import (
+	"context"
 	"net/http"
 	"reflect"
 	"strings"
@@ -10,13 +11,17 @@ import (
 	"github.com/kanata996/chix/internal/schema"
 )
 
-// Handle 将 operation 与业务处理函数挂载为 http.Handler，并在挂载时完成输入 schema 解析与执行配置快照准备。
-func Handle[I any, O any](rt *Runtime, op Operation[I, O], h Handler[I, O]) http.Handler {
+// Handle 将业务处理函数挂载为 http.HandlerFunc，并在挂载时完成输入 schema 解析与执行配置快照准备。
+// 可选的 operation 只用于声明 route-local 覆盖；未传时使用零值配置。
+func Handle[I any, O any](rt *Runtime, h Handler[I, O], ops ...Operation) http.HandlerFunc {
 	if rt == nil {
 		panic("chix: runtime must not be nil")
 	}
 	if h == nil {
 		panic("chix: handler must not be nil")
+	}
+	if len(ops) > 1 {
+		panic("chix: handle accepts at most one operation override")
 	}
 
 	inputSchema, err := schema.Load(reflect.TypeOf((*I)(nil)).Elem())
@@ -25,10 +30,30 @@ func Handle[I any, O any](rt *Runtime, op Operation[I, O], h Handler[I, O]) http
 	}
 
 	cfg := rt.executionConfig()
+	var op Operation
+	if len(ops) == 1 {
+		op = ops[0]
+	}
 	op.ErrorMappers = append([]ErrorMapper(nil), op.ErrorMappers...)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		execute(cfg, w, r, op, h, inputSchema)
+	})
+}
+
+// HandleNoContent 将只返回错误的业务处理函数挂载为默认 204 No Content 的 handler。
+func HandleNoContent[I any](rt *Runtime, h func(context.Context, *I) error) http.HandlerFunc {
+	if h == nil {
+		panic("chix: handler must not be nil")
+	}
+
+	return Handle(rt, func(ctx context.Context, input *I) (*struct{}, error) {
+		if err := h(ctx, input); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}, Operation{
+		SuccessStatus: http.StatusNoContent,
 	})
 }
 
@@ -37,7 +62,7 @@ func execute[I any, O any](
 	cfg executionConfig,
 	w http.ResponseWriter,
 	r *http.Request,
-	op Operation[I, O],
+	op Operation,
 	h Handler[I, O],
 	inputSchema *schema.Schema,
 ) {
@@ -65,7 +90,7 @@ func execute[I any, O any](
 		return
 	}
 
-	status := resolveSuccessStatus(op.Method, r.Method, op.SuccessStatus, cfg.successStatus)
+	status := resolveSuccessStatus(r.Method, op.SuccessStatus, cfg.successStatus)
 	if status == http.StatusNoContent {
 		w.WriteHeader(status)
 		return
@@ -83,7 +108,7 @@ func execute[I any, O any](
 }
 
 // resolveSuccessStatus 按 operation 显式配置、runtime 继承配置和请求方法推导成功响应状态码；未显式指定时，POST 默认返回 201，其余方法返回 200。
-func resolveSuccessStatus(opMethod string, requestMethod string, explicit int, inherited int) int {
+func resolveSuccessStatus(requestMethod string, explicit int, inherited int) int {
 	if explicit > 0 {
 		return explicit
 	}
@@ -91,10 +116,7 @@ func resolveSuccessStatus(opMethod string, requestMethod string, explicit int, i
 		return inherited
 	}
 
-	method := strings.ToUpper(opMethod)
-	if method == "" {
-		method = strings.ToUpper(requestMethod)
-	}
+	method := strings.ToUpper(requestMethod)
 	if method == http.MethodPost {
 		return http.StatusCreated
 	}

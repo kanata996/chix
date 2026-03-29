@@ -23,9 +23,7 @@ func TestHandleMapsPathQueryAndNestedBodyValidationErrors(t *testing.T) {
 
 	rt := New()
 	router := chi.NewRouter()
-	router.Method(http.MethodPost, "/users/{id}", Handle(rt, Operation[input, struct{}]{
-		Method: http.MethodPost,
-	}, func(_ context.Context, _ *input) (*struct{}, error) {
+	router.Post("/users/{id}", Handle(rt, func(_ context.Context, _ *input) (*struct{}, error) {
 		t.Fatal("handler should not run")
 		return nil, nil
 	}))
@@ -71,9 +69,7 @@ func TestHandleMapsNestedBodyValidationErrors(t *testing.T) {
 
 	rt := New()
 	router := chi.NewRouter()
-	router.Method(http.MethodPost, "/users", Handle(rt, Operation[input, struct{}]{
-		Method: http.MethodPost,
-	}, func(_ context.Context, _ *input) (*struct{}, error) {
+	router.Post("/users", Handle(rt, func(_ context.Context, _ *input) (*struct{}, error) {
 		t.Fatal("handler should not run")
 		return nil, nil
 	}))
@@ -105,7 +101,7 @@ func TestHandleMapsEmbeddedQueryValidationErrors(t *testing.T) {
 
 	rt := New()
 	router := chi.NewRouter()
-	router.Method(http.MethodGet, "/users", Handle(rt, Operation[input, struct{}]{}, func(_ context.Context, _ *input) (*struct{}, error) {
+	router.Get("/users", Handle(rt, func(_ context.Context, _ *input) (*struct{}, error) {
 		t.Fatal("handler should not run")
 		return nil, nil
 	}))
@@ -136,9 +132,7 @@ func TestHandleMapsEmbeddedBodyValidationErrors(t *testing.T) {
 
 	rt := New()
 	router := chi.NewRouter()
-	router.Method(http.MethodPost, "/users", Handle(rt, Operation[input, struct{}]{
-		Method: http.MethodPost,
-	}, func(_ context.Context, _ *input) (*struct{}, error) {
+	router.Post("/users", Handle(rt, func(_ context.Context, _ *input) (*struct{}, error) {
 		t.Fatal("handler should not run")
 		return nil, nil
 	}))

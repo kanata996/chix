@@ -28,9 +28,7 @@ func ExampleHandle() {
 
 	rt := chix.New()
 	router := chi.NewRouter()
-	router.Method(http.MethodPost, "/users/{id}", chix.Handle(rt, chix.Operation[createUserInput, createUserOutput]{
-		Method: http.MethodPost,
-	}, func(_ context.Context, input *createUserInput) (*createUserOutput, error) {
+	router.Post("/users/{id}", chix.Handle(rt, func(_ context.Context, input *createUserInput) (*createUserOutput, error) {
 		return &createUserOutput{
 			ID:      input.ID,
 			Name:    input.Name,
@@ -58,9 +56,7 @@ func ExampleHandle_validationFailure() {
 
 	rt := chix.New()
 	router := chi.NewRouter()
-	router.Method(http.MethodPost, "/users", chix.Handle(rt, chix.Operation[createUserInput, struct{}]{
-		Method: http.MethodPost,
-	}, func(_ context.Context, _ *createUserInput) (*struct{}, error) {
+	router.Post("/users", chix.Handle(rt, func(_ context.Context, _ *createUserInput) (*struct{}, error) {
 		return &struct{}{}, nil
 	}))
 
@@ -100,9 +96,7 @@ func ExampleHandle_errorMapper() {
 	}))
 
 	router := chi.NewRouter()
-	router.Method(http.MethodPost, "/users", chix.Handle(rt, chix.Operation[createUserInput, createUserOutput]{
-		Method: http.MethodPost,
-	}, func(_ context.Context, input *createUserInput) (*createUserOutput, error) {
+	router.Post("/users", chix.Handle(rt, func(_ context.Context, input *createUserInput) (*createUserOutput, error) {
 		if input.Name == "taken" {
 			return nil, errUserExists
 		}

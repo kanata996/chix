@@ -20,7 +20,8 @@
 
 - `Runtime`
 - `Scope`
-- `Handle(rt, op, h)`
+- `Handle(rt, h, ...op)`
+- `HandleNoContent(rt, h)`
 - `HTTPError`
 - `ErrorMapper`
 - `Observer`
@@ -106,11 +107,7 @@ func main() {
 		chix.WithErrorMapper(mapUserError),
 	)
 
-	createUserOp := chix.Operation[CreateUserInput, CreateUserOutput]{
-		Method: http.MethodPost,
-	}
-
-	r.Method(http.MethodPost, "/users/{id}", chix.Handle(rt, createUserOp, createUser))
+	r.Post("/users/{id}", chix.Handle(rt, createUser))
 
 	log.Fatal(http.ListenAndServe(":8080", r))
 }
@@ -169,7 +166,8 @@ curl -i \
 1. 用 `chix.New(...)` 建一个 runtime，放全局默认策略
 2. 需要 route group 策略时，用 `rt.Scope(...)` 派生子作用域
 3. 定义输入/输出 struct，并显式标注 `path` / `query` / `json` 来源
-4. 用 `chix.Handle(scopeOrRuntime, op, handler)` 挂到 `chi`，业务 handler 只返回输出或错误
+4. 普通接口用 `chix.Handle(scopeOrRuntime, handler)` 挂到 `chi`
+5. 需要 route-local 覆盖时，再把 `Operation` 作为第三个参数传给 `Handle`
 
 如果一个接口的处理流程可以表述成“绑定输入 -> 校验 -> 执行业务 -> 写标准 JSON 响应”，那它就是 `chix` 的目标场景。
 
@@ -216,13 +214,15 @@ type CreateUserInput struct {
 
 `chix` 不让业务代码直接写 `http.ResponseWriter`。你把类型化 handler 交给 runtime，runtime 负责成功响应、错误响应和失败观测。
 
+默认场景直接用 `Handle`：
+
 ```go
-r.Method(http.MethodGet, "/users/{id}", chix.Handle(rt, chix.Operation[GetUserInput, UserOutput]{
-	Method: http.MethodGet,
-}, func(ctx context.Context, in *GetUserInput) (*UserOutput, error) {
+r.Get("/users/{id}", chix.Handle(rt, func(ctx context.Context, in *GetUserInput) (*UserOutput, error) {
 	return svc.GetUser(ctx, in.ID)
 }))
 ```
+
+只有你需要 operation 级覆盖时，再显式写 `Handle(..., handler, chix.Operation{...})`。
 
 `Handle` 的行为有几个关键点：
 
@@ -235,11 +235,8 @@ r.Method(http.MethodGet, "/users/{id}", chix.Handle(rt, chix.Operation[GetUserIn
 删除接口通常这样写：
 
 ```go
-r.Method(http.MethodDelete, "/users/{id}", chix.Handle(rt, chix.Operation[DeleteUserInput, struct{}]{
-	Method:        http.MethodDelete,
-	SuccessStatus: http.StatusNoContent,
-}, func(ctx context.Context, in *DeleteUserInput) (*struct{}, error) {
-	return nil, svc.DeleteUser(ctx, in.ID)
+r.Delete("/users/{id}", chix.HandleNoContent(rt, func(ctx context.Context, in *DeleteUserInput) error {
+	return svc.DeleteUser(ctx, in.ID)
 }))
 ```
 
@@ -303,12 +300,12 @@ admin := rt.Scope(
 
 ```go
 r.Route("/users", func(r chi.Router) {
-	r.Method(http.MethodPost, "/{id}", chix.Handle(users, createUserOp, createUser))
-	r.Method(http.MethodDelete, "/{id}", chix.Handle(users, deleteUserOp, deleteUser))
+	r.Post("/{id}", chix.Handle(users, createUser))
+	r.Delete("/{id}", chix.HandleNoContent(users, deleteUser))
 })
 
 r.Route("/admin", func(r chi.Router) {
-	r.Method(http.MethodPost, "/rebuild-index", chix.Handle(admin, rebuildIndexOp, rebuildIndex))
+	r.Post("/rebuild-index", chix.Handle(admin, rebuildIndex, rebuildIndexOp))
 })
 ```
 
