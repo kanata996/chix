@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 )
 
@@ -153,7 +154,14 @@ func writeErrorPayload(w http.ResponseWriter, status int, code, message string, 
 
 // marshalErrorEnvelope 把公共错误字段编码为最终的 JSON 响应体。
 // 该步骤只关心响应体结构，不处理日志、副作用或写出行为。
-func marshalErrorEnvelope(code, message string, details []any) ([]byte, error) {
+func marshalErrorEnvelope(code, message string, details []any) (body []byte, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			body = nil
+			err = fmt.Errorf("resp: marshal error envelope panicked: %v", recovered)
+		}
+	}()
+
 	return json.Marshal(errorEnvelope{
 		Error: errorPayload{
 			Code:    code,

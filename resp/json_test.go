@@ -10,6 +10,7 @@ import (
 
 type payloadMap map[string]any
 
+// Created 会以 201 状态直接写出 JSON 对象。
 func TestCreatedWritesDirectPayload(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/accounts", nil)
 	rr := httptest.NewRecorder()
@@ -32,6 +33,7 @@ func TestCreatedWritesDirectPayload(t *testing.T) {
 	}
 }
 
+// JSON 会按指定成功状态直接写出 JSON 对象。
 func TestJSONWritesDirectPayload(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -54,6 +56,7 @@ func TestJSONWritesDirectPayload(t *testing.T) {
 	}
 }
 
+// JSON 显式允许把 nil 数据编码为公开的 null 响应体。
 func TestJSONAllowsNilData(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -69,6 +72,7 @@ func TestJSONAllowsNilData(t *testing.T) {
 	}
 }
 
+// 查询串携带 pretty 时，JSON 会切换为缩进输出。
 func TestJSONUsesPrettyQueryParam(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/?pretty", nil)
 	rr := httptest.NewRecorder()
@@ -83,6 +87,7 @@ func TestJSONUsesPrettyQueryParam(t *testing.T) {
 	}
 }
 
+// JSONPretty 会按给定缩进格式输出 JSON。
 func TestJSONPrettyWritesIndentedJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -97,6 +102,7 @@ func TestJSONPrettyWritesIndentedJSON(t *testing.T) {
 	}
 }
 
+// JSONBlob 会原样写出已编码好的 JSON 字节。
 func TestJSONBlobWritesRawJSONBytes(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -117,6 +123,7 @@ func TestJSONBlobWritesRawJSONBytes(t *testing.T) {
 	}
 }
 
+// JSON 在编码不支持的值时会直接返回错误。
 func TestJSONRejectsUnsupportedValue(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -127,6 +134,7 @@ func TestJSONRejectsUnsupportedValue(t *testing.T) {
 	}
 }
 
+// JSON 会拒绝非法的 HTTP 状态码。
 func TestJSONRejectsInvalidStatus(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -137,6 +145,7 @@ func TestJSONRejectsInvalidStatus(t *testing.T) {
 	}
 }
 
+// OK 语义要求显式数据，nil 数据会被拒绝。
 func TestOKRejectsNilData(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -146,6 +155,7 @@ func TestOKRejectsNilData(t *testing.T) {
 	}
 }
 
+// OK 在编码不支持的值时会直接返回错误。
 func TestOKRejectsUnsupportedValue(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -156,6 +166,7 @@ func TestOKRejectsUnsupportedValue(t *testing.T) {
 	}
 }
 
+// OK 会拒绝空的 ResponseWriter。
 func TestOKRejectsNilWriter(t *testing.T) {
 	err := OK(nil, httptest.NewRequest(http.MethodGet, "/", nil), map[string]any{"id": "u_1"})
 	if err == nil || err.Error() != "resp: response writer is nil" {
@@ -163,6 +174,7 @@ func TestOKRejectsNilWriter(t *testing.T) {
 	}
 }
 
+// OK 也会复用 pretty 查询参数的格式化语义。
 func TestOKUsesPrettyQueryParam(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/?pretty", nil)
 	rr := httptest.NewRecorder()
@@ -175,6 +187,7 @@ func TestOKUsesPrettyQueryParam(t *testing.T) {
 	}
 }
 
+// NoContent 只写 204 状态，不产生响应体。
 func TestNoContentWritesBodylessStatus(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/", nil)
 	rr := httptest.NewRecorder()
@@ -190,6 +203,7 @@ func TestNoContentWritesBodylessStatus(t *testing.T) {
 	}
 }
 
+// 带响应体的成功写回只允许使用可携带 body 的 2xx 状态。
 func TestValidateSuccessBodyStatus(t *testing.T) {
 	testCases := []struct {
 		name   string
@@ -217,6 +231,7 @@ func TestValidateSuccessBodyStatus(t *testing.T) {
 	}
 }
 
+// 通用成功状态校验会拒绝 2xx 之外和越界的状态码。
 func TestValidateSuccessStatus(t *testing.T) {
 	testCases := []struct {
 		name   string
@@ -244,6 +259,7 @@ func TestValidateSuccessStatus(t *testing.T) {
 	}
 }
 
+// writeJSON 会把底层编码错误直接向上返回。
 func TestWriteJSONPropagatesEncodeError(t *testing.T) {
 	err := writeJSON(httptest.NewRecorder(), http.StatusOK, make(chan int), "")
 	if err == nil {
@@ -251,6 +267,7 @@ func TestWriteJSONPropagatesEncodeError(t *testing.T) {
 	}
 }
 
+// writeSuccess 会拒绝非成功状态码。
 func TestWriteSuccessRejectsInvalidStatus(t *testing.T) {
 	err := writeSuccess(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil), http.StatusBadRequest, map[string]any{"id": "u_1"})
 	if err == nil || err.Error() != "resp: invalid success status 400" {
@@ -258,6 +275,7 @@ func TestWriteSuccessRejectsInvalidStatus(t *testing.T) {
 	}
 }
 
+// 写响应体失败时会返回带 responseStarted 标记的包装错误。
 func TestWriteJSONBytesReturnsWrappedWriteError(t *testing.T) {
 	w := &failingWriter{}
 

@@ -10,6 +10,7 @@ type logDetailStruct struct {
 	Code  string `json:"code"`
 }
 
+// 已经是安全 map 结构的 details 会走快路径并保留原有键值。
 func TestSafeErrorLogDetailsFastPath(t *testing.T) {
 	safeDetails, ok := safeErrorLogDetails([]any{
 		map[string]any{
@@ -36,6 +37,7 @@ func TestSafeErrorLogDetailsFastPath(t *testing.T) {
 	}
 }
 
+// 快路径失败时，可序列化的结构体 details 仍会被回退为安全日志对象。
 func TestSafeErrorLogDetailsFallbackPreservesMarshalableStruct(t *testing.T) {
 	safeDetails, ok := safeErrorLogDetails([]any{
 		logDetailStruct{
@@ -61,6 +63,7 @@ func TestSafeErrorLogDetailsFallbackPreservesMarshalableStruct(t *testing.T) {
 	}
 }
 
+// 超出日志预算的 details 会被整体丢弃，避免错误日志失控。
 func TestSafeErrorLogDetailsDropsOversizedPayload(t *testing.T) {
 	safeDetails, ok := safeErrorLogDetails([]any{
 		map[string]any{

@@ -36,6 +36,12 @@ type wrappedTestError struct {
 	err error
 }
 
+type panicJSONDetail struct{}
+
+func (panicJSONDetail) MarshalJSON() ([]byte, error) {
+	panic("panic during MarshalJSON")
+}
+
 func (e *wrappedTestError) Error() string {
 	return fmt.Sprintf("%s: %v", e.op, e.err)
 }
@@ -60,6 +66,7 @@ func (w *failingWriter) Write(_ []byte) (int, error) {
 	return 0, errors.New("socket closed")
 }
 
+// WriteError 会把 HTTPError 写成标准 error envelope。
 func TestWriteErrorWritesEnvelope(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -95,6 +102,7 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 	}
 }
 
+// 传入 nil 错误时，WriteError 应是纯 no-op。
 func TestWriteErrorNilErrorIsNoop(t *testing.T) {
 	rr := httptest.NewRecorder()
 
@@ -106,6 +114,7 @@ func TestWriteErrorNilErrorIsNoop(t *testing.T) {
 	}
 }
 
+// HEAD 请求写错误时只写状态和头，不写响应体。
 func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodHead, "/", nil)
 	rr := httptest.NewRecorder()
@@ -125,6 +134,7 @@ func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 	}
 }
 
+// 非法状态码会被标准化为 500，且内部 cause 不会泄漏到公开响应。
 func TestWriteErrorNormalizesInvalidStatusAndHidesCause(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -157,6 +167,7 @@ func TestWriteErrorNormalizesInvalidStatusAndHidesCause(t *testing.T) {
 	}
 }
 
+// context.Canceled 会映射为对外可见的 client closed request 错误。
 func TestWriteErrorMapsContextCanceled(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -182,6 +193,7 @@ func TestWriteErrorMapsContextCanceled(t *testing.T) {
 	}
 }
 
+// context.DeadlineExceeded 会映射为对外可见的超时错误。
 func TestWriteErrorMapsContextDeadlineExceeded(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -207,6 +219,7 @@ func TestWriteErrorMapsContextDeadlineExceeded(t *testing.T) {
 	}
 }
 
+// 未知普通错误会统一降级为 500 internal_error。
 func TestWriteErrorMapsUnknownErrorToInternalError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -236,6 +249,7 @@ func TestWriteErrorMapsUnknownErrorToInternalError(t *testing.T) {
 	}
 }
 
+// 公开 details 不可编码时，会丢弃 details 并返回降级写回错误。
 func TestWriteErrorDropsUnencodableDetails(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -268,6 +282,46 @@ func TestWriteErrorDropsUnencodableDetails(t *testing.T) {
 	}
 }
 
+// details 的自定义 JSON 编码即使发生 panic，也应降级丢弃而不是把响应路径打崩。
+func TestWriteErrorDropsPanickingDetails(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("WriteError() panicked: %v", recovered)
+		}
+	}()
+
+	err := WriteError(rr, req, NewError(
+		http.StatusBadRequest,
+		"bad_request",
+		"bad request",
+		panicJSONDetail{},
+	))
+	if err == nil {
+		t.Fatal("expected degraded write error, got nil")
+	}
+
+	var degraded *ErrorWriteDegraded
+	if !errors.As(err, &degraded) || degraded == nil {
+		t.Fatalf("WriteError() error = %T, want *ErrorWriteDegraded", err)
+	}
+	if !degraded.PreservedPublicResponse {
+		t.Fatal("degraded.PreservedPublicResponse = false, want true")
+	}
+
+	payload := decodePayload(t, rr.Body.Bytes())
+	body, ok := payload["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error body = %#v, want object", payload["error"])
+	}
+	if details, ok := body["details"].([]any); !ok || len(details) != 0 {
+		t.Fatalf("error.details = %#v, want empty array", body["details"])
+	}
+}
+
+// ErrorWriteDegraded 在 nil 接收者和普通错误场景下都应提供稳定的错误语义。
 func TestErrorWriteDegradedMethods(t *testing.T) {
 	var nilErr *ErrorWriteDegraded
 	if got := nilErr.Error(); got != "resp: error response details were dropped" {
@@ -287,6 +341,7 @@ func TestErrorWriteDegradedMethods(t *testing.T) {
 	}
 }
 
+// asHTTPError 会保留已有 HTTPError，并对 nil 输入保持安全。
 func TestAsHTTPError(t *testing.T) {
 	if got := asHTTPError(nil); got != nil {
 		t.Fatalf("asHTTPError(nil) = %#v, want nil", got)
@@ -298,6 +353,7 @@ func TestAsHTTPError(t *testing.T) {
 	}
 }
 
+// details 降级后如果补写响应也失败，调用方会同时拿到降级错误和写出错误。
 func TestWriteErrorPayloadReturnsJoinedErrorWhenFallbackWriteFails(t *testing.T) {
 	w := &failingWriter{}
 
@@ -323,6 +379,7 @@ func TestWriteErrorPayloadReturnsJoinedErrorWhenFallbackWriteFails(t *testing.T)
 	}
 }
 
+// 响应一旦已经开始写出，WriteError 不会再次重写响应。
 func TestWriteErrorSkipsRewriteAfterResponseStarted(t *testing.T) {
 	w := &failingWriter{}
 
@@ -346,6 +403,7 @@ func TestWriteErrorSkipsRewriteAfterResponseStarted(t *testing.T) {
 	}
 }
 
+// 5xx 错误会给请求日志补充诊断字段，但不写入公开 details。
 func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 	var buf bytes.Buffer
 
@@ -423,6 +481,93 @@ func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 	}
 }
 
+// 5xx 请求日志会显式标记超时错误，便于和普通内部错误区分。
+func TestWriteErrorEnrichesRequestLogWithTimeoutFlag(t *testing.T) {
+	var buf bytes.Buffer
+
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	r := chi.NewRouter()
+	r.Use(httplog.RequestLogger(logger, &httplog.Options{
+		Level:         slog.LevelInfo,
+		Schema:        httplog.SchemaECS,
+		RecoverPanics: true,
+	}))
+	r.Use(chimiddleware.RequestID)
+	r.Get("/timeout", func(w http.ResponseWriter, r *http.Request) {
+		err := wrapError(
+			http.StatusInternalServerError,
+			"internal_error",
+			"",
+			context.DeadlineExceeded,
+		)
+		_ = WriteError(w, r, err)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/timeout", nil)
+	req.Header.Set(chimiddleware.RequestIDHeader, "req-timeout")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+
+	logEntry := decodePayload(t, buf.Bytes())
+	if got := logEntry["error.timeout"]; got != true {
+		t.Fatalf("error.timeout = %#v, want true", got)
+	}
+	if _, exists := logEntry["error.canceled"]; exists {
+		t.Fatalf("error.canceled unexpectedly present: %#v", logEntry["error.canceled"])
+	}
+	if got := logEntry["request.id"]; got != "req-timeout" {
+		t.Fatalf("request.id = %#v, want req-timeout", got)
+	}
+}
+
+// 5xx 请求日志会显式标记 canceled 错误，即使公开响应仍是 500。
+func TestWriteErrorEnrichesRequestLogWithCanceledFlag(t *testing.T) {
+	var buf bytes.Buffer
+
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	r := chi.NewRouter()
+	r.Use(httplog.RequestLogger(logger, &httplog.Options{
+		Level:         slog.LevelInfo,
+		Schema:        httplog.SchemaECS,
+		RecoverPanics: true,
+	}))
+	r.Use(chimiddleware.RequestID)
+	r.Get("/canceled", func(w http.ResponseWriter, r *http.Request) {
+		err := wrapError(
+			http.StatusInternalServerError,
+			"internal_error",
+			"",
+			context.Canceled,
+		)
+		_ = WriteError(w, r, err)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/canceled", nil)
+	req.Header.Set(chimiddleware.RequestIDHeader, "req-canceled")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+
+	logEntry := decodePayload(t, buf.Bytes())
+	if got := logEntry["error.canceled"]; got != true {
+		t.Fatalf("error.canceled = %#v, want true", got)
+	}
+	if _, exists := logEntry["error.timeout"]; exists {
+		t.Fatalf("error.timeout unexpectedly present: %#v", logEntry["error.timeout"])
+	}
+	if got := logEntry["request.id"]; got != "req-canceled" {
+		t.Fatalf("request.id = %#v, want req-canceled", got)
+	}
+}
+
+// 4xx 错误不会污染请求日志的 error.* 诊断字段。
 func TestWriteErrorDoesNotEnrichRequestLogFor4xx(t *testing.T) {
 	var buf bytes.Buffer
 
@@ -462,6 +607,7 @@ func TestWriteErrorDoesNotEnrichRequestLogFor4xx(t *testing.T) {
 	}
 }
 
+// 错误响应写出失败时，会优先使用请求上下文里的 request logger 记录独立错误日志。
 func TestLogErrorResponseWriteFailureUsesRequestLogger(t *testing.T) {
 	var requestBuf bytes.Buffer
 	requestLogger := slog.New(slog.NewJSONHandler(&requestBuf, nil))
@@ -522,5 +668,35 @@ func TestLogErrorResponseWriteFailureUsesRequestLogger(t *testing.T) {
 	}
 	if got := failureLog["resp.public_response_preserved"]; got != true {
 		t.Fatalf("resp.public_response_preserved = %#v, want true", got)
+	}
+}
+
+// 没有 request logger 时，错误响应写出失败日志会回退到 slog.Default。
+func TestLogErrorResponseWriteFailureFallsBackToDefaultLogger(t *testing.T) {
+	var defaultBuf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
+	defer slog.SetDefault(previousDefault)
+
+	req := httptest.NewRequest(http.MethodGet, "/failure", nil)
+	logErrorResponseWriteFailure(
+		req,
+		NewError(http.StatusInternalServerError, "internal_error", "Internal Server Error"),
+		errors.New("socket closed"),
+	)
+
+	if defaultBuf.Len() == 0 {
+		t.Fatal("default logger did not capture output")
+	}
+
+	logEntry := decodePayload(t, defaultBuf.Bytes())
+	if got := logEntry["msg"]; got != "resp: failed to write error response" {
+		t.Fatalf("msg = %#v, want resp: failed to write error response", got)
+	}
+	if got := logEntry["error.code"]; got != "internal_error" {
+		t.Fatalf("error.code = %#v, want internal_error", got)
+	}
+	if got := logEntry["http.response.status_code"]; got != float64(http.StatusInternalServerError) {
+		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusInternalServerError)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// responseWriteError 在 nil 接收者和普通错误场景下都应提供稳定的错误语义。
 func TestResponseWriteErrorMethods(t *testing.T) {
 	var nilErr *responseWriteError
 	if got := nilErr.Error(); got != "resp: write response failed" {
@@ -26,6 +27,7 @@ func TestResponseWriteErrorMethods(t *testing.T) {
 	}
 }
 
+// 底层写 JSON 字节时会拒绝空的 ResponseWriter。
 func TestWriteJSONBytesRejectsNilWriter(t *testing.T) {
 	err := writeJSONBytes(nil, http.StatusOK, []byte(`{"ok":true}`))
 	if err == nil || err.Error() != "resp: response writer is nil" {
@@ -33,6 +35,7 @@ func TestWriteJSONBytesRejectsNilWriter(t *testing.T) {
 	}
 }
 
+// 底层写 JSON 字节时会校验 HTTP 状态码合法性。
 func TestWriteJSONBytesRejectsInvalidStatus(t *testing.T) {
 	rr := httptest.NewRecorder()
 
@@ -42,6 +45,7 @@ func TestWriteJSONBytesRejectsInvalidStatus(t *testing.T) {
 	}
 }
 
+// 仅写状态码的辅助函数也会拒绝空的 ResponseWriter。
 func TestWriteStatusRejectsNilWriter(t *testing.T) {
 	err := writeStatus(nil, http.StatusNoContent)
 	if err == nil || err.Error() != "resp: response writer is nil" {
@@ -49,6 +53,7 @@ func TestWriteStatusRejectsNilWriter(t *testing.T) {
 	}
 }
 
+// 仅写状态码的辅助函数会校验 HTTP 状态码合法性。
 func TestWriteStatusRejectsInvalidStatus(t *testing.T) {
 	rr := httptest.NewRecorder()
 
@@ -58,6 +63,7 @@ func TestWriteStatusRejectsInvalidStatus(t *testing.T) {
 	}
 }
 
+// JSON 编码阶段遇到不支持的值时直接返回编码错误。
 func TestEncodeJSONRejectsUnsupportedValue(t *testing.T) {
 	_, err := encodeJSON(make(chan int), "")
 	if err == nil {
@@ -65,6 +71,7 @@ func TestEncodeJSONRejectsUnsupportedValue(t *testing.T) {
 	}
 }
 
+// HTTP 状态码校验会接受标准范围并拒绝越界值。
 func TestValidateHTTPStatus(t *testing.T) {
 	if err := validateHTTPStatus(http.StatusOK); err != nil {
 		t.Fatalf("validateHTTPStatus(200) error = %v", err)
