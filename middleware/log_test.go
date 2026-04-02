@@ -63,6 +63,84 @@ func TestNewLogger_AddsCommonAttrsAndTraceID(t *testing.T) {
 	}
 }
 
+// 传入普通 slog.Logger 时，中间件也应保证请求日志和上下文日志都带 traceId。
+func TestRequestLogger_MakesPlainLoggerTraceAware(t *testing.T) {
+	var buf bytes.Buffer
+
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+
+	r := chi.NewRouter()
+	r.Use(RequestLogger(RequestLoggerOptions{
+		Logger: logger,
+		Level:  slog.LevelInfo,
+	}))
+	r.Get("/trace", func(w http.ResponseWriter, r *http.Request) {
+		ctxLogger := LoggerFromContext(r.Context())
+		if ctxLogger == nil {
+			t.Fatal("LoggerFromContext() = nil, want logger")
+		}
+		ctxLogger.InfoContext(r.Context(), "inside handler")
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/trace", nil)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	lines := splitLogLines(t, buf.Bytes())
+	if len(lines) != 2 {
+		t.Fatalf("log lines = %d, want 2", len(lines))
+	}
+
+	for i, line := range lines {
+		if got := strings.Count(string(line), `"traceId"`); got != 1 {
+			t.Fatalf("line %d traceId count = %d, want 1, payload = %s", i, got, line)
+		}
+
+		entry := decodeLogEntry(t, line)
+		if got, ok := entry["traceId"].(string); !ok || got == "" {
+			t.Fatalf("line %d traceId = %#v, want non-empty string", i, entry["traceId"])
+		}
+	}
+}
+
+// 已经 trace-aware 的 logger 不应被再次包装，否则会重复输出 traceId。
+func TestRequestLogger_DoesNotDuplicateTraceIDForTraceAwareLogger(t *testing.T) {
+	var buf bytes.Buffer
+
+	logger := NewLogger(LoggerOptions{
+		Output: &buf,
+		Level:  slog.LevelInfo,
+	})
+
+	r := chi.NewRouter()
+	r.Use(RequestLogger(RequestLoggerOptions{
+		Logger: logger,
+		Level:  slog.LevelInfo,
+	}))
+	r.Get("/trace", func(w http.ResponseWriter, r *http.Request) {
+		logger.InfoContext(r.Context(), "inside handler")
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/trace", nil)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	lines := splitLogLines(t, buf.Bytes())
+	if len(lines) != 2 {
+		t.Fatalf("log lines = %d, want 2", len(lines))
+	}
+
+	for i, line := range lines {
+		if got := strings.Count(string(line), `"traceId"`); got != 1 {
+			t.Fatalf("line %d traceId count = %d, want 1, payload = %s", i, got, line)
+		}
+	}
+}
+
 // RequestLogger 在成功请求上会注入稳定的基础请求日志字段。
 func TestRequestLogger_InjectsBaseRequestAttrsOnSuccess(t *testing.T) {
 	var buf bytes.Buffer

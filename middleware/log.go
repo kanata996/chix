@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -69,6 +70,9 @@ func RequestLogger(opts RequestLoggerOptions) func(http.Handler) http.Handler {
 	logger := opts.Logger
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if !opts.DisableTraceID {
+		logger = ensureTraceIDLogger(logger)
 	}
 
 	schema := opts.Schema
@@ -196,4 +200,29 @@ func newHandler(output io.Writer, development bool, handlerOpts *slog.HandlerOpt
 	}
 
 	return traceid.LogHandler(handler)
+}
+
+func ensureTraceIDLogger(logger *slog.Logger) *slog.Logger {
+	if logger == nil {
+		return nil
+	}
+
+	handler := logger.Handler()
+	if handler == nil || handlerSupportsTraceID(handler) {
+		return logger
+	}
+
+	return slog.New(traceid.LogHandler(handler))
+}
+
+func handlerSupportsTraceID(handler slog.Handler) bool {
+	handlerType := reflect.TypeOf(handler)
+	if handlerType == nil {
+		return false
+	}
+	if handlerType.Kind() == reflect.Pointer {
+		handlerType = handlerType.Elem()
+	}
+
+	return handlerType.PkgPath() == "github.com/go-chi/traceid" && handlerType.Name() == "logHandler"
 }
