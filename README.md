@@ -1,44 +1,34 @@
 # chix
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/kanata996/chix.svg)](https://pkg.go.dev/github.com/kanata996/chix)
-[![CI](https://github.com/kanata996/chix/workflows/CI/badge.svg)](https://github.com/kanata996/chix/actions/workflows/ci.yml)
-[![Codecov](https://codecov.io/github/kanata996/chix/graph/badge.svg)](https://codecov.io/github/kanata996/chix)
+`chix` 是一个基于 `chi` 和 `net/http` 的轻量级 JSON API HTTP 边界工具包。
 
-`chix` 是一个直接绑定 `chi` 的 API 微框架，目标是让你在保留 `chi` 路由与中间件生态的前提下，更快地搭建开箱即用的 JSON API 服务。
+它聚焦在服务的请求与响应边界：
 
-它不追求“适配任何路由器”，而是明确以 `chi` 为核心，补齐 API 服务开发里常见但重复的那一层能力：
+- 将 path/query/header/JSON body 绑定到 DTO
+- 使用 `validator/v10` 对 DTO 进行校验
+- 写出 JSON 成功响应
+- 写出一致的结构化错误响应
 
-- 声明式操作注册
-- 类型化请求绑定，支持 `path`、`query`、`header` 和 JSON Body
-- 自动生成 OpenAPI 3.1 文档
-- 内建 Swagger UI 文档页
-- 统一输出 `application/problem+json` 错误响应
-- 提供适合 API 服务的默认 `chi` 中间件组合
+当前仓库对外主要暴露三个包：
 
-整体定位更接近 Huma 这类“面向 API 的框架”，但实现上不抽象掉 `chi`，而是直接站在 `chi` 上扩展。
+- `github.com/kanata996/chix`：常用能力的根包 facade
+- `github.com/kanata996/chix/reqx`：请求侧绑定与校验辅助
+- `github.com/kanata996/chix/resp`：响应侧 JSON 与错误写回辅助
 
-## 当前状态
+## 状态
 
-仓库已经按新的方向完成第一版 MVP 重建，目前已经提供：
+`chix` 当前仍处于 `v1.0.0` 之前阶段。库已经可用，但在 `v1.0.0` 之前，小版本发布中仍可能出现破坏性变更。
 
-- 基于 `chi` 的 `App`
-- 通过泛型注册类型化处理函数
-- JSON 请求与响应处理
-- `/openapi.json` OpenAPI 文档输出
-- `/docs` Swagger UI 页面
-
-当前版本仍然是起步阶段，后续还会继续补强：
-
-- 更完整的 schema 生成能力
-- 更清晰的校验机制
-- 响应头与多响应描述
-- 安全方案与 OpenAPI 自定义能力
-- 更丰富的 `chi` 中间件预设组合
+公开 API 以及 README 中描述的 HTTP 行为变更，应在 [CHANGELOG.md](./CHANGELOG.md) 中明确记录。
 
 ## 安装
 
+要求：
+
+- Go `1.25` 或更高版本
+
 ```bash
-go get github.com/kanata996/chix
+go get github.com/kanata996/chix@latest
 ```
 
 ## 快速开始
@@ -47,100 +37,116 @@ go get github.com/kanata996/chix
 package main
 
 import (
-	"context"
-	"log"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/kanata996/chix"
 )
 
-type CreateUserInput struct {
-	ID      string `path:"id" doc:"用户 ID"`
-	Verbose bool   `query:"verbose"`
-	Name    string `json:"name"`
-}
-
-type CreateUserOutput struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+type createAccountRequest struct {
+	OrgID string `param:"org_id"`
+	Name  string `json:"name" validate:"required"`
 }
 
 func main() {
-	app := chix.New(chix.Config{
-		Title:       "Chix 示例 API",
-		Version:     "0.1.0",
-		Description: "一个基于 chix 与 chi 的 API 服务",
+	r := chi.NewRouter()
+
+	r.Post("/orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
+		var req createAccountRequest
+		if err := chix.BindAndValidate(r, &req); err != nil {
+			_ = chix.WriteError(w, r, err)
+			return
+		}
+
+		_ = chix.Created(w, r, map[string]any{
+			"id":     "acct_123",
+			"org_id": req.OrgID,
+			"name":   req.Name,
+		})
 	})
 
-	chix.Register(app, chix.Operation{
-		Method:      http.MethodPost,
-		Path:        "/users/{id}",
-		OperationID: "createUser",
-		Summary:     "创建用户",
-		Tags:        []string{"users"},
-	}, func(ctx context.Context, input *CreateUserInput) (*CreateUserOutput, error) {
-		return &CreateUserOutput{
-			ID:   input.ID,
-			Name: input.Name,
-		}, nil
-	})
-
-	log.Fatal(http.ListenAndServe(":8080", app))
+	_ = http.ListenAndServe(":8080", r)
 }
 ```
 
-启动后：
+## 请求绑定
 
-- `POST /users/{id}` 提供业务接口
-- `GET /openapi.json` 返回自动生成的 OpenAPI 文档
-- `GET /docs` 提供 Swagger UI 文档页
+支持的 tag：
 
-## 输入模型
+- `param:"..."`：`chi` 路由参数
+- `query:"..."`：查询字符串参数
+- `json:"..."`：JSON 请求体
+- `header:"..."`：请求头
+- `validate:"..."`：`validator/v10` 校验规则
 
-`chix` 通过结构体标签把请求数据绑定到输入对象上：
+`Bind(...)` 遵循 Echo 风格的绑定顺序：
 
-- ``path:"id"`` 绑定 `chi` 路径参数
-- ``query:"limit"`` 绑定查询参数
-- ``header:"X-Trace-ID"`` 绑定请求头
-- ``json:"name"`` 绑定 JSON Body 字段
+1. path 参数
+2. `GET` 和 `DELETE` 请求上的 query 参数
+3. JSON body
 
-例如：
+根包中常用的请求侧 API：
 
-```go
-type ListUsersInput struct {
-	AccountID string `path:"accountID"`
-	Limit     int    `query:"limit"`
-	TraceID   string `header:"X-Trace-ID"`
+- `Bind`、`BindBody`、`BindQueryParams`、`BindPathValues`、`BindHeaders`
+- `BindAndValidate`、`BindAndValidateBody`、`BindAndValidateQuery`、`BindAndValidatePath`、`BindAndValidateHeaders`
+- `ParamString`、`ParamInt`、`ParamUUID`
+- `WithMaxBodyBytes`
+
+默认请求行为：
+
+- 未知的 query 和 header 字段默认忽略
+- 空 JSON body 默认视为 no-op
+- JSON body 使用 Go 标准库解码
+- 未知 JSON 字段默认忽略
+
+## 响应
+
+成功响应辅助：
+
+- `OK`
+- `Created`
+- `NoContent`
+- `JSON`、`JSONPretty`、`JSONBlob`
+
+`WriteError(...)` 会将任意错误归一化为稳定的公开错误响应结构：
+
+```json
+{
+  "error": {
+    "code": "invalid_request",
+    "message": "request contains invalid fields",
+    "details": [
+      {
+        "field": "name",
+        "code": "required",
+        "message": "is required"
+      }
+    ]
+  }
 }
 ```
 
-任意导出字段只要没有被标记为 `path`、`query` 或 `header`，就会被视为 JSON Body 的一部分。
+如果你需要可复用的公共错误值，可以直接使用 `resp.HTTPError`，以及 `resp.BadRequest(...)`、`resp.NotFound(...)`、`resp.UnprocessableEntity(...)` 等辅助构造函数。
 
-## 默认行为
+## 包结构
 
-默认情况下，`chix` 会安装以下 `chi` 中间件：
+- `chix`：面向大多数 handler 的常用 facade
+- `reqx`：完整的请求侧 API
+- `resp`：完整的响应侧 API
 
-- `middleware.RequestID`
-- `middleware.RealIP`
-- `middleware.Recoverer`
-- `middleware.StripSlashes`
+如果你只需要常用能力，优先使用根包；如果你需要完整能力面，再直接导入 `reqx` 或 `resp`。
 
-你可以通过 `chix.Config.Middlewares` 增加全局中间件，也可以通过 `app.Use(...)` 继续挂载。
+## 开发
 
-## OpenAPI
+```bash
+make test
+make ci
+```
 
-每个注册的操作都会自动写入 OpenAPI 3.1 文档。
+更多信息：
 
-当前会生成的内容包括：
-
-- 操作元数据，如 `operationId`、`summary`、`description`、`tags`
-- `path`、`query`、`header` 参数描述
-- JSON 请求体 schema
-- JSON 成功响应 schema
-- 默认的 `application/problem+json` 错误响应
-
-目前 `/docs` 页面通过 CDN 加载 Swagger UI 资源。
-
-## 技术文档
-
-更详细的内部设计说明见 [docs/TECHNICAL_GUIDE.md](docs/TECHNICAL_GUIDE.md)。
+- [CHANGELOG.md](./CHANGELOG.md)
+- [CONTRIBUTING.md](./CONTRIBUTING.md)
+- [SECURITY.md](./SECURITY.md)
+- [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
+- [LICENSE](./LICENSE)
