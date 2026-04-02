@@ -10,6 +10,7 @@ import (
 	"github.com/kanata996/chix/resp"
 )
 
+// 统一绑定时遵循 path、query、body 的覆盖顺序。
 func TestBind_FollowsEchoOrder(t *testing.T) {
 	type request struct {
 		ID   string `param:"id" query:"id" json:"id"`
@@ -36,6 +37,7 @@ func TestBind_FollowsEchoOrder(t *testing.T) {
 	}
 }
 
+// POST 请求不会绑定 query 参数。
 func TestBind_SkipsQueryOnPost(t *testing.T) {
 	type request struct {
 		ID    string `param:"id" json:"id"`
@@ -62,6 +64,7 @@ func TestBind_SkipsQueryOnPost(t *testing.T) {
 	}
 }
 
+// 空 body 场景下忽略不合法的 Content-Type。
 func TestBind_IgnoresEmptyBodyContentType(t *testing.T) {
 	type request struct {
 		Page int `query:"page"`
@@ -79,6 +82,7 @@ func TestBind_IgnoresEmptyBodyContentType(t *testing.T) {
 	}
 }
 
+// DELETE 请求中 query 参数会覆盖 path 参数。
 func TestBind_BindsQueryOverPathOnDelete(t *testing.T) {
 	type request struct {
 		ID string `param:"id" query:"id"`
@@ -99,6 +103,7 @@ func TestBind_BindsQueryOverPathOnDelete(t *testing.T) {
 	}
 }
 
+// Header 绑定时会使用规范化后的请求头名称。
 func TestBindHeaders_BindsCanonicalHeader(t *testing.T) {
 	type request struct {
 		RequestID string `header:"x-request-id"`
@@ -116,6 +121,7 @@ func TestBindHeaders_BindsCanonicalHeader(t *testing.T) {
 	}
 }
 
+// 请求级校验错误优先使用请求标签中的字段名。
 func TestBindAndValidate_UsesRequestTagNames(t *testing.T) {
 	type request struct {
 		UUID string `param:"uuid" validate:"required"`
@@ -147,6 +153,7 @@ func TestBindAndValidate_UsesRequestTagNames(t *testing.T) {
 	}
 }
 
+// GET 请求默认忽略未声明的 query 字段。
 func TestBind_IgnoresUnknownQueryFieldOnGet(t *testing.T) {
 	type request struct {
 		Page int `query:"page"`
@@ -163,6 +170,7 @@ func TestBind_IgnoresUnknownQueryFieldOnGet(t *testing.T) {
 	}
 }
 
+// body 存在且 Content-Type 非 JSON 时会返回媒体类型错误。
 func TestBind_RejectsUnsupportedBodyContentTypeWhenBodyPresent(t *testing.T) {
 	type request struct {
 		Name string `json:"name"`
@@ -176,6 +184,7 @@ func TestBind_RejectsUnsupportedBodyContentTypeWhenBodyPresent(t *testing.T) {
 	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
 }
 
+// GET 请求中的 query 绑定错误会直接向上返回。
 func TestBind_PropagatesQueryBindingErrorOnGet(t *testing.T) {
 	type request struct {
 		Page int `query:"page"`
@@ -191,6 +200,7 @@ func TestBind_PropagatesQueryBindingErrorOnGet(t *testing.T) {
 	}
 }
 
+// POST 请求无 body 时保留已绑定的 path 参数。
 func TestBind_UsesPathValueWhenPostHasNoBody(t *testing.T) {
 	type request struct {
 		ID string `param:"id" json:"id"`

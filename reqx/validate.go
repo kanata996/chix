@@ -161,11 +161,9 @@ func validateStruct(target any, source sourceKind) ([]Violation, error) {
 		return nil, err
 	}
 
-	var validationErrs validator.ValidationErrors
-	if !errors.As(err, &validationErrs) {
-		return nil, err
-	}
-
+	// validator/v10's Struct contract returns only nil,
+	// InvalidValidationError, or ValidationErrors.
+	validationErrs := err.(validator.ValidationErrors)
 	return violationsFromValidation(source, validationErrs), nil
 }
 
