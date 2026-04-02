@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -127,6 +128,106 @@ func TestReadBodyBranches(t *testing.T) {
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("readBody() error = %v, want %v", err, wantErr)
 	}
+}
+
+// headerValues 会忽略规范化后为空的 header key，并保留合法键值。
+func TestHeaderValuesSkipsBlankHeaderKey(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header = http.Header{
+		" ":      {"ignored"},
+		"x-name": {"kanata"},
+	}
+
+	values := headerValues(req)
+	if got := values.Get("X-Name"); got != "kanata" {
+		t.Fatalf("X-Name = %q, want kanata", got)
+	}
+	if _, exists := values[""]; exists {
+		t.Fatalf("blank header key unexpectedly present: %#v", values[""])
+	}
+}
+
+// deepCloneValue 会覆盖 invalid、指针、接口、切片、数组、map 和 nil 容器分支。
+func TestDeepCloneValueBranches(t *testing.T) {
+	t.Run("invalid source", func(t *testing.T) {
+		dst := reflect.New(reflect.TypeOf(0)).Elem()
+		deepCloneValue(dst, reflect.Value{})
+		if got := dst.Int(); got != 0 {
+			t.Fatalf("dst = %d, want 0", got)
+		}
+	})
+
+	t.Run("nested containers", func(t *testing.T) {
+		type inner struct {
+			Value int
+		}
+		type sample struct {
+			Ptr      *inner
+			Any      any
+			Slice    []int
+			Array    [2]*inner
+			Map      map[string][]int
+			NilPtr   *inner
+			NilAny   any
+			NilSlice []int
+			NilMap   map[string]int
+		}
+
+		src := sample{
+			Ptr:   &inner{Value: 1},
+			Any:   []int{2, 3},
+			Slice: []int{4, 5},
+			Array: [2]*inner{&inner{Value: 6}, &inner{Value: 7}},
+			Map: map[string][]int{
+				"k": []int{8, 9},
+			},
+		}
+
+		cloned := cloneBindingTarget(&src)
+
+		src.Ptr.Value = 10
+		src.Any.([]int)[0] = 11
+		src.Slice[0] = 12
+		src.Array[0].Value = 13
+		src.Map["k"][0] = 14
+
+		if cloned.Ptr == src.Ptr || cloned.Ptr.Value != 1 {
+			t.Fatalf("cloned.Ptr = %#v, want independent copy", cloned.Ptr)
+		}
+		if got := cloned.Any.([]int)[0]; got != 2 {
+			t.Fatalf("cloned.Any[0] = %d, want 2", got)
+		}
+		if got := cloned.Slice[0]; got != 4 {
+			t.Fatalf("cloned.Slice[0] = %d, want 4", got)
+		}
+		if cloned.Array[0] == src.Array[0] || cloned.Array[0].Value != 6 {
+			t.Fatalf("cloned.Array[0] = %#v, want independent copy", cloned.Array[0])
+		}
+		if got := cloned.Map["k"][0]; got != 8 {
+			t.Fatalf("cloned.Map[\"k\"][0] = %d, want 8", got)
+		}
+		if cloned.NilPtr != nil || cloned.NilAny != nil || cloned.NilSlice != nil || cloned.NilMap != nil {
+			t.Fatalf("nil containers = %#v, want preserved nils", cloned)
+		}
+	})
+
+	t.Run("nan map key preserves value", func(t *testing.T) {
+		src := map[float64]string{
+			math.NaN(): "present-in-source",
+		}
+
+		var dst map[float64]string
+		deepCloneValue(reflect.ValueOf(&dst).Elem(), reflect.ValueOf(src))
+
+		if len(dst) != 1 {
+			t.Fatalf("len(dst) = %d, want 1", len(dst))
+		}
+		for _, value := range dst {
+			if value != "present-in-source" {
+				t.Fatalf("map value = %q, want present-in-source", value)
+			}
+		}
+	})
 }
 
 // 空 body 且不允许为空时返回空 body 错误。

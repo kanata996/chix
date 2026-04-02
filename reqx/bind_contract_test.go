@@ -128,6 +128,35 @@ func TestBindHeaders_MissingHeaderPreservesExistingValues(t *testing.T) {
 	}
 }
 
+// 顶层 Bind 在 path 阶段失败时，应直接返回错误且不保留 query 阶段的潜在更新。
+func TestBind_PathTypeMismatchDoesNotPartiallyApply(t *testing.T) {
+	type request struct {
+		ID   int    `param:"id"`
+		Page int    `query:"page"`
+		Name string `json:"name"`
+	}
+
+	req := requestWithPathParams(map[string][]string{
+		"id": {"oops"},
+	})
+	req.URL.RawQuery = "page=7"
+
+	dst := request{
+		ID:   42,
+		Page: 3,
+		Name: "kanata",
+	}
+
+	err := Bind(req, &dst)
+	violation := assertSingleViolation(t, err)
+	if violation.Field != "id" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
+		t.Fatalf("violation = %#v", violation)
+	}
+	if dst.ID != 42 || dst.Page != 3 || dst.Name != "kanata" {
+		t.Fatalf("dst = %#v, want existing values preserved", dst)
+	}
+}
+
 // POST 请求会跳过 query，空 body 也不会覆盖已有 JSON 字段。
 func TestBind_PostSkipsQueryAndEmptyBodyPreservesExistingValues(t *testing.T) {
 	type request struct {

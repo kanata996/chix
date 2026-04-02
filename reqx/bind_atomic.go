@@ -61,16 +61,13 @@ func deepCloneValue(dst, src reflect.Value) {
 		}
 
 		cloned := reflect.MakeMapWithSize(src.Type(), src.Len())
-		for _, key := range src.MapKeys() {
+		iter := src.MapRange()
+		for iter.Next() {
+			key := iter.Key()
 			clonedKey := reflect.New(key.Type()).Elem()
 			deepCloneValue(clonedKey, key)
 
-			value := src.MapIndex(key)
-			if !value.IsValid() {
-				cloned.SetMapIndex(clonedKey, reflect.Zero(src.Type().Elem()))
-				continue
-			}
-
+			value := iter.Value()
 			clonedValue := reflect.New(value.Type()).Elem()
 			deepCloneValue(clonedValue, value)
 
