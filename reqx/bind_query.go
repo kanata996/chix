@@ -256,15 +256,32 @@ func queryValues(r *http.Request) url.Values {
 }
 
 func headerValues(r *http.Request) url.Values {
+	if r == nil || len(r.Header) == 0 {
+		return url.Values{}
+	}
+	if headerKeysAreCanonical(r.Header) {
+		return url.Values(r.Header)
+	}
+
 	values := url.Values{}
 
 	for key, rawValues := range r.Header {
 		normalizedKey := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(key))
-		for _, rawValue := range rawValues {
-			values.Add(normalizedKey, rawValue)
+		if normalizedKey == "" {
+			continue
 		}
+		values[normalizedKey] = append(values[normalizedKey], rawValues...)
 	}
 	return values
+}
+
+func headerKeysAreCanonical(header http.Header) bool {
+	for key := range header {
+		if key != textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(key)) {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeIdentity(value string) string {

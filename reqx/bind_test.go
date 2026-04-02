@@ -121,6 +121,26 @@ func TestBindHeaders_BindsCanonicalHeader(t *testing.T) {
 	}
 }
 
+// 非规范 header key 仍会被规范化后参与绑定。
+func TestBindHeaders_NormalizesNonCanonicalHeaderKey(t *testing.T) {
+	type request struct {
+		RequestID string `header:"x-request-id"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/items", nil)
+	req.Header = http.Header{
+		" x-request-id ": {"req-123"},
+	}
+
+	var bound request
+	if err := BindHeaders(req, &bound); err != nil {
+		t.Fatalf("BindHeaders() error = %v", err)
+	}
+	if bound.RequestID != "req-123" {
+		t.Fatalf("BindHeaders() request_id = %q", bound.RequestID)
+	}
+}
+
 // 请求级校验错误优先使用请求标签中的字段名。
 func TestBindAndValidate_UsesRequestTagNames(t *testing.T) {
 	type request struct {
