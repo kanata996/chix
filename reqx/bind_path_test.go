@@ -131,6 +131,7 @@ func TestBindPathValues_RejectsUnexportedTaggedField(t *testing.T) {
 	})
 
 	var path pathRequest
+	_ = path.id
 	err := BindPathValues(req, &path)
 	if err == nil {
 		t.Fatal("BindPathValues() error = nil")

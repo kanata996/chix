@@ -173,7 +173,7 @@ func TestBind_RejectsUnsupportedBodyContentTypeWhenBodyPresent(t *testing.T) {
 
 	var bound request
 	err := Bind(req, &bound)
-	assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
+	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
 }
 
 func TestBind_PropagatesQueryBindingErrorOnGet(t *testing.T) {

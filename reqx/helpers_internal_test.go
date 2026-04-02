@@ -132,7 +132,7 @@ func TestBindJSONWithConfigRejectsEmptyBodyWhenNotAllowed(t *testing.T) {
 		Name string `json:"name"`
 	}
 	err := bindJSONWithConfig(req, &dst, bindBodyConfig{}, bodyBindMode{})
-	assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
+	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
 }
 
 func TestBindJSONWithConfigRejectsInvalidContentTypeOnEmptyBody(t *testing.T) {
@@ -145,7 +145,7 @@ func TestBindJSONWithConfigRejectsInvalidContentTypeOnEmptyBody(t *testing.T) {
 	err := bindJSONWithConfig(req, &dst, bindBodyConfig{allowEmptyBody: true}, bodyBindMode{
 		validateContentTypeOnEmpty: true,
 	})
-	assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
+	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
 }
 
 func TestBindJSONWithConfigPropagatesReadError(t *testing.T) {
@@ -188,7 +188,7 @@ func TestValidateJSONContentTypeAllowsJSONSuffix(t *testing.T) {
 func TestMapDecodeErrorBranches(t *testing.T) {
 	t.Run("syntax", func(t *testing.T) {
 		err := mapDecodeError(&json.SyntaxError{})
-		assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
 	})
 
 	t.Run("type", func(t *testing.T) {
@@ -211,7 +211,7 @@ func TestMapDecodeErrorBranches(t *testing.T) {
 
 	t.Run("eof", func(t *testing.T) {
 		err := mapDecodeError(io.EOF)
-		assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
+		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
 	})
 
 	t.Run("unknown field", func(t *testing.T) {
@@ -224,7 +224,7 @@ func TestMapDecodeErrorBranches(t *testing.T) {
 
 	t.Run("default", func(t *testing.T) {
 		err := mapDecodeError(errors.New("boom"))
-		assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
 	})
 }
 
@@ -268,7 +268,7 @@ func TestDescribeJSONType(t *testing.T) {
 
 func TestEmptyBodyError(t *testing.T) {
 	err := emptyBodyError()
-	assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
+	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
 }
 
 func TestPathValuesBranches(t *testing.T) {

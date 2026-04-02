@@ -16,7 +16,7 @@ func TestBindBody_RejectsUnsupportedMediaType(t *testing.T) {
 
 	var dst request
 	err := BindBody(req, &dst)
-	assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
+	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
 }
 
 func TestBindBody_RejectsInvalidMediaTypeHeader(t *testing.T) {
@@ -29,7 +29,7 @@ func TestBindBody_RejectsInvalidMediaTypeHeader(t *testing.T) {
 
 	var dst request
 	err := BindBody(req, &dst)
-	assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
+	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
 }
 
 func TestBindBody_IgnoresEmptyBodyByDefault(t *testing.T) {
@@ -85,7 +85,7 @@ func TestBindBody_RejectsInvalidJSON(t *testing.T) {
 
 	var dst request
 	err := BindBody(req, &dst)
-	assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
 }
 
 func TestBindBody_RejectsMultipleJSONValues(t *testing.T) {
@@ -97,7 +97,7 @@ func TestBindBody_RejectsMultipleJSONValues(t *testing.T) {
 
 	var dst request
 	err := BindBody(req, &dst)
-	assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must contain a single JSON value")
+	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must contain a single JSON value")
 }
 
 func TestBindBody_RespectsMaxBodyBytes(t *testing.T) {
@@ -109,7 +109,7 @@ func TestBindBody_RespectsMaxBodyBytes(t *testing.T) {
 
 	var dst request
 	err := BindBody(req, &dst, WithMaxBodyBytes(4))
-	assertHTTPError(t, err, http.StatusRequestEntityTooLarge, CodeRequestTooLarge, "request body is too large")
+	_ = assertHTTPError(t, err, http.StatusRequestEntityTooLarge, CodeRequestTooLarge, "request body is too large")
 }
 
 func TestBindBody_RequestMustNotBeNil(t *testing.T) {

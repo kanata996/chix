@@ -171,6 +171,7 @@ func TestBindQueryParams_RejectsUnexportedTaggedField(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
 
 	var dst request
+	_ = dst.name
 	err := BindQueryParams(req, &dst)
 	if err == nil {
 		t.Fatal("BindQueryParams() error = nil")
