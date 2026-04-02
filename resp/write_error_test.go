@@ -8,11 +8,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httplog/v3"
+	chixmw "github.com/kanata996/chix/middleware"
 )
 
 type failingWriter struct {
@@ -380,14 +382,8 @@ func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 	if got := logEntry["error.code"]; got != "internal_error" {
 		t.Fatalf("error.code = %#v, want internal_error", got)
 	}
-	if got := logEntry["error.category"]; got != "server" {
-		t.Fatalf("error.category = %#v, want server", got)
-	}
 	if got := logEntry["error.message"]; got != "load user: db timeout" {
 		t.Fatalf("error.message = %#v, want wrapped raw error", got)
-	}
-	if got := logEntry["error.public_message"]; got != "Internal Server Error" {
-		t.Fatalf("error.public_message = %#v, want Internal Server Error", got)
 	}
 	if got := logEntry["error.type"]; got != "*resp.wrappedTestError" {
 		t.Fatalf("error.type = %#v, want *resp.wrappedTestError", got)
@@ -398,47 +394,133 @@ func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 	if got := logEntry["error.root_type"]; got != "*resp.rawTestError" {
 		t.Fatalf("error.root_type = %#v, want *resp.rawTestError", got)
 	}
-	if got := logEntry["error.expected"]; got != false {
-		t.Fatalf("error.expected = %#v, want false", got)
-	}
-	if got := logEntry["error.wrapped"]; got != true {
-		t.Fatalf("error.wrapped = %#v, want true", got)
-	}
-	if got := logEntry["error.details_count"]; got != float64(1) {
-		t.Fatalf("error.details_count = %#v, want 1", got)
-	}
 	if got := logEntry["request.id"]; got != "req-123" {
 		t.Fatalf("request.id = %#v, want req-123", got)
 	}
 	if got := logEntry["http.route"]; got != "/users/{id}" {
 		t.Fatalf("http.route = %#v, want /users/{id}", got)
 	}
+	if _, exists := logEntry["error.details"]; exists {
+		t.Fatalf("error.details unexpectedly present: %#v", logEntry["error.details"])
+	}
+	if _, exists := logEntry["error.chain"]; exists {
+		t.Fatalf("error.chain unexpectedly present: %#v", logEntry["error.chain"])
+	}
+	if _, exists := logEntry["error.chain_types"]; exists {
+		t.Fatalf("error.chain_types unexpectedly present: %#v", logEntry["error.chain_types"])
+	}
+	if _, exists := logEntry["error.public_message"]; exists {
+		t.Fatalf("error.public_message unexpectedly present: %#v", logEntry["error.public_message"])
+	}
+	if _, exists := logEntry["error.expected"]; exists {
+		t.Fatalf("error.expected unexpectedly present: %#v", logEntry["error.expected"])
+	}
+	if _, exists := logEntry["error.category"]; exists {
+		t.Fatalf("error.category unexpectedly present: %#v", logEntry["error.category"])
+	}
+	if _, exists := logEntry["error.details_count"]; exists {
+		t.Fatalf("error.details_count unexpectedly present: %#v", logEntry["error.details_count"])
+	}
+}
 
-	chain, ok := logEntry["error.chain"].([]any)
-	if !ok || len(chain) != 2 {
-		t.Fatalf("error.chain = %#v, want 2 entries", logEntry["error.chain"])
-	}
-	if chain[0] != "load user: db timeout" || chain[1] != "db timeout" {
-		t.Fatalf("error.chain = %#v, want wrapped/raw messages", chain)
+func TestWriteErrorDoesNotEnrichRequestLogFor4xx(t *testing.T) {
+	var buf bytes.Buffer
+
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	r := chi.NewRouter()
+	r.Use(httplog.RequestLogger(logger, &httplog.Options{
+		Level:         slog.LevelInfo,
+		Schema:        httplog.SchemaECS,
+		RecoverPanics: true,
+	}))
+	r.Use(chimiddleware.RequestID)
+	r.Get("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+		err := BadRequest("bad_request", "bad request", map[string]any{
+			"field": "name",
+			"code":  "required",
+		})
+		_ = WriteError(w, r, err)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/users/u_123", nil)
+	req.Header.Set(chimiddleware.RequestIDHeader, "req-456")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
 	}
 
-	typeChain, ok := logEntry["error.chain_types"].([]any)
-	if !ok || len(typeChain) != 2 {
-		t.Fatalf("error.chain_types = %#v, want 2 entries", logEntry["error.chain_types"])
+	logEntry := decodePayload(t, buf.Bytes())
+	if got := logEntry["http.response.status_code"]; got != float64(http.StatusBadRequest) {
+		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusBadRequest)
 	}
-	if typeChain[0] != "*resp.wrappedTestError" || typeChain[1] != "*resp.rawTestError" {
-		t.Fatalf("error.chain_types = %#v, want wrapped/raw types", typeChain)
+	for key := range logEntry {
+		if strings.HasPrefix(key, "error.") {
+			t.Fatalf("unexpected error log field for 4xx: %s=%#v", key, logEntry[key])
+		}
+	}
+}
+
+func TestLogErrorResponseWriteFailureUsesRequestLogger(t *testing.T) {
+	var requestBuf bytes.Buffer
+	requestLogger := slog.New(slog.NewJSONHandler(&requestBuf, nil))
+
+	var defaultBuf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
+	defer slog.SetDefault(previousDefault)
+
+	r := chi.NewRouter()
+	r.Use(chixmw.RequestLogger(chixmw.RequestLoggerOptions{
+		Logger: requestLogger,
+		Level:  slog.LevelInfo,
+	}))
+	r.Get("/failure", func(w http.ResponseWriter, r *http.Request) {
+		logErrorResponseWriteFailure(r,
+			NewError(http.StatusInternalServerError, "internal_error", "Internal Server Error"),
+			&ErrorWriteDegraded{
+				Cause:                   errors.New("json: unsupported type: func()"),
+				PreservedPublicResponse: true,
+			},
+		)
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/failure", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNoContent)
+	}
+	if defaultBuf.Len() != 0 {
+		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
 	}
 
-	details, ok := logEntry["error.details"].([]any)
-	if !ok || len(details) != 1 {
-		t.Fatalf("error.details = %#v, want one entry", logEntry["error.details"])
+	lines := bytes.Split(bytes.TrimSpace(requestBuf.Bytes()), []byte{'\n'})
+	if len(lines) != 2 {
+		t.Fatalf("request logger lines = %d, want 2", len(lines))
 	}
-	detail0, ok := details[0].(map[string]any)
-	if !ok {
-		t.Fatalf("error.details[0] = %#v, want object", details[0])
+
+	var failureLog payloadMap
+	for _, line := range lines {
+		entry := decodePayload(t, line)
+		if entry["msg"] == "resp: failed to write error response" {
+			failureLog = entry
+			break
+		}
 	}
-	if detail0["field"] != "name" || detail0["code"] != "required" {
-		t.Fatalf("error.details[0] = %#v, want field/code pair", detail0)
+	if failureLog == nil {
+		t.Fatalf("failure log not found in request logger output: %s", requestBuf.Bytes())
+	}
+	if got := failureLog["error.code"]; got != "internal_error" {
+		t.Fatalf("error.code = %#v, want internal_error", got)
+	}
+	if got := failureLog["resp.error_degraded"]; got != true {
+		t.Fatalf("resp.error_degraded = %#v, want true", got)
+	}
+	if got := failureLog["resp.public_response_preserved"]; got != true {
+		t.Fatalf("resp.public_response_preserved = %#v, want true", got)
 	}
 }

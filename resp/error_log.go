@@ -23,7 +23,9 @@ import (
 	"log/slog"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/httplog/v3"
 	chixmw "github.com/kanata996/chix/middleware"
@@ -60,22 +62,25 @@ func annotateRequestErrorLog(r *http.Request, err error, httpErr *HTTPError) {
 }
 
 // requestErrorLogAttrs 生成请求级错误日志字段。
-// 这些字段以排障为主，兼顾响应语义和可检索性，例如错误链、根因、route、request id 等。
+// 4xx 仅保留外层请求日志，不再补内部错误诊断；5xx 才补充排障字段。
 func requestErrorLogAttrs(r *http.Request, err error, httpErr *HTTPError) []slog.Attr {
 	if err == nil || httpErr == nil {
 		return nil
 	}
 
-	details := httpErr.Details()
+	status := httpErr.Status()
+	if status < http.StatusInternalServerError {
+		return nil
+	}
+
 	chain := buildErrorChainInfo(errorForDiagnostics(err, httpErr))
-	attrs := []slog.Attr{
-		slog.String("error.code", httpErr.Code()),
-		slog.String("error.category", errorLogCategory(httpErr.Status())),
-		slog.String("error.message", chain.message),
-		slog.String("error.public_message", httpErr.Message()),
-		slog.String("error.type", chain.errorType),
-		slog.Bool("error.expected", httpErr.Status() < http.StatusInternalServerError),
-		slog.Int("error.details_count", len(details)),
+	attrs := make([]slog.Attr, 0, 7)
+	attrs = append(attrs, slog.String("error.code", httpErr.Code()))
+	if chain.message != "" {
+		attrs = append(attrs, slog.String("error.message", chain.message))
+	}
+	if chain.errorType != "" {
+		attrs = append(attrs, slog.String("error.type", chain.errorType))
 	}
 
 	if chain.rootMessage != "" {
@@ -83,15 +88,6 @@ func requestErrorLogAttrs(r *http.Request, err error, httpErr *HTTPError) []slog
 	}
 	if chain.rootType != "" {
 		attrs = append(attrs, slog.String("error.root_type", chain.rootType))
-	}
-	if chain.wrapped {
-		attrs = append(attrs, slog.Bool("error.wrapped", true))
-	}
-	if len(chain.chain) > 1 {
-		attrs = append(attrs, slog.Any("error.chain", chain.chain))
-	}
-	if len(chain.typeChain) > 1 {
-		attrs = append(attrs, slog.Any("error.chain_types", chain.typeChain))
 	}
 	if errors.Is(err, context.Canceled) {
 		attrs = append(attrs, slog.Bool("error.canceled", true))
@@ -101,11 +97,6 @@ func requestErrorLogAttrs(r *http.Request, err error, httpErr *HTTPError) []slog
 	}
 	if r != nil && !chixmw.HasBaseRequestLogAttrs(r.Context()) {
 		attrs = append(attrs, chixmw.BaseRequestLogAttrs(r)...)
-	}
-	if safeDetails, ok := safeErrorLogDetails(details); ok {
-		attrs = append(attrs, slog.Any("error.details", safeDetails))
-	} else if len(details) > 0 {
-		attrs = append(attrs, slog.Bool("error.details_dropped", true))
 	}
 
 	return attrs
@@ -121,15 +112,6 @@ func errorForDiagnostics(err error, httpErr *HTTPError) error {
 	return err
 }
 
-// errorLogCategory 按 HTTP 状态码把错误收敛为 client / server 两类，
-// 便于日志筛选和告警维度聚合。
-func errorLogCategory(status int) string {
-	if status >= http.StatusInternalServerError {
-		return "server"
-	}
-	return "client"
-}
-
 // logErrorResponseWriteFailure 只记录“错误响应自身写出失败”的异常。
 // 这是基础设施级问题，不属于普通业务失败，因此需要单独打一条 error 日志。
 func logErrorResponseWriteFailure(r *http.Request, httpErr *HTTPError, err error) {
@@ -138,8 +120,12 @@ func logErrorResponseWriteFailure(r *http.Request, httpErr *HTTPError, err error
 	}
 
 	ctx := context.Background()
+	logger := slog.Default()
 	if r != nil {
 		ctx = r.Context()
+		if ctxLogger := chixmw.LoggerFromContext(ctx); ctxLogger != nil {
+			logger = ctxLogger
+		}
 	}
 
 	attrs := []any{
@@ -156,7 +142,7 @@ func logErrorResponseWriteFailure(r *http.Request, httpErr *HTTPError, err error
 		)
 	}
 
-	slog.ErrorContext(ctx, "resp: failed to write error response", attrs...)
+	logger.ErrorContext(ctx, "resp: failed to write error response", attrs...)
 }
 
 // buildErrorChainInfo 把错误链整理成适合日志输出的摘要结构。
@@ -168,23 +154,29 @@ func buildErrorChainInfo(err error) errorChainInfo {
 	}
 
 	info := errorChainInfo{
-		wrapped: len(chain) > 1,
+		chain:     make([]string, 0, len(chain)),
+		typeChain: make([]string, 0, len(chain)),
+		wrapped:   len(chain) > 1,
 	}
 	for _, item := range chain {
 		message := limitErrorLogString(item.Error())
 		errType := errorTypeName(item)
 		if message != "" {
+			if info.message == "" {
+				info.message = message
+			}
+			info.rootMessage = message
 			info.chain = append(info.chain, message)
 		}
 		if errType != "" {
+			if info.errorType == "" {
+				info.errorType = errType
+			}
+			info.rootType = errType
 			info.typeChain = append(info.typeChain, errType)
 		}
 	}
 
-	info.message = firstNonEmpty(info.chain...)
-	info.errorType = firstNonEmpty(info.typeChain...)
-	info.rootMessage = firstNonEmpty(reverseStrings(info.chain)...)
-	info.rootType = firstNonEmpty(reverseStrings(info.typeChain)...)
 	return info
 }
 
@@ -195,33 +187,38 @@ func flattenErrorChain(err error, limit int) []error {
 		return nil
 	}
 
-	seen := map[error]struct{}{}
-	var chain []error
-	var walk func(error)
-	walk = func(current error) {
-		if current == nil || len(chain) >= limit {
-			return
+	initialCap := limit
+	if initialCap > 4 {
+		initialCap = 4
+	}
+	seen := make(map[error]struct{}, initialCap)
+	chain := make([]error, 0, initialCap)
+	stack := make([]error, 1, initialCap)
+	stack[0] = err
+
+	for len(stack) > 0 && len(chain) < limit {
+		last := len(stack) - 1
+		current := stack[last]
+		stack = stack[:last]
+		if current == nil {
+			continue
 		}
 		if _, ok := seen[current]; ok {
-			return
+			continue
 		}
 		seen[current] = struct{}{}
 		chain = append(chain, current)
 
-		switch unwrapped := unwrapErrors(current); len(unwrapped) {
-		case 0:
-			return
-		default:
-			for _, next := range unwrapped {
-				walk(next)
-				if len(chain) >= limit {
-					return
-				}
+		unwrapped := unwrapErrors(current)
+		for i := len(unwrapped) - 1; i >= 0; i-- {
+			if len(chain)+len(stack) >= limit && i == 0 {
+				// Keep stack growth bounded when we've already hit the limit envelope.
+				break
 			}
+			stack = append(stack, unwrapped[i])
 		}
 	}
 
-	walk(err)
 	return chain
 }
 
@@ -249,6 +246,19 @@ func safeErrorLogDetails(details []any) (any, bool) {
 		return nil, false
 	}
 
+	budget := maxLoggedErrorDetailsSize
+	safeDetails, ok, handled := sanitizeErrorLogSlice(details, &budget)
+	if handled {
+		if !ok {
+			return nil, false
+		}
+		return safeDetails, true
+	}
+
+	return safeErrorLogDetailsFallback(details)
+}
+
+func safeErrorLogDetailsFallback(details []any) (any, bool) {
 	body, err := json.Marshal(normalizeDetails(details))
 	if err != nil || len(body) > maxLoggedErrorDetailsSize {
 		return nil, false
@@ -259,6 +269,151 @@ func safeErrorLogDetails(details []any) (any, bool) {
 		return nil, false
 	}
 	return decoded, true
+}
+
+func sanitizeErrorLogSlice(values []any, budget *int) ([]any, bool, bool) {
+	if !consumeErrorLogBudget(budget, 2) {
+		return nil, false, true
+	}
+
+	out := make([]any, 0, len(values))
+	for i, value := range values {
+		if i > 0 && !consumeErrorLogBudget(budget, 1) {
+			return nil, false, true
+		}
+		safeValue, ok, handled := sanitizeErrorLogValue(value, budget)
+		if !handled {
+			return nil, false, false
+		}
+		if !ok {
+			return nil, false, true
+		}
+		out = append(out, safeValue)
+	}
+	return out, true, true
+}
+
+func sanitizeErrorLogMap(values map[string]any, budget *int) (map[string]any, bool, bool) {
+	if !consumeErrorLogBudget(budget, 2) {
+		return nil, false, true
+	}
+
+	out := make(map[string]any, len(values))
+	index := 0
+	for key, value := range values {
+		if index > 0 && !consumeErrorLogBudget(budget, 1) {
+			return nil, false, true
+		}
+		index++
+		if !consumeErrorLogBudget(budget, jsonStringSize(key)+1) {
+			return nil, false, true
+		}
+
+		safeValue, ok, handled := sanitizeErrorLogValue(value, budget)
+		if !handled {
+			return nil, false, false
+		}
+		if !ok {
+			return nil, false, true
+		}
+		out[key] = safeValue
+	}
+	return out, true, true
+}
+
+func sanitizeErrorLogValue(value any, budget *int) (any, bool, bool) {
+	switch current := value.(type) {
+	case nil:
+		return nil, consumeErrorLogBudget(budget, 4), true
+	case string:
+		return current, consumeErrorLogBudget(budget, jsonStringSize(current)), true
+	case bool:
+		if current {
+			return current, consumeErrorLogBudget(budget, 4), true
+		}
+		return current, consumeErrorLogBudget(budget, 5), true
+	case int:
+		return current, consumeErrorLogBudget(budget, len(strconv.FormatInt(int64(current), 10))), true
+	case int8:
+		return current, consumeErrorLogBudget(budget, len(strconv.FormatInt(int64(current), 10))), true
+	case int16:
+		return current, consumeErrorLogBudget(budget, len(strconv.FormatInt(int64(current), 10))), true
+	case int32:
+		return current, consumeErrorLogBudget(budget, len(strconv.FormatInt(int64(current), 10))), true
+	case int64:
+		return current, consumeErrorLogBudget(budget, len(strconv.FormatInt(current, 10))), true
+	case uint:
+		return current, consumeErrorLogBudget(budget, len(strconv.FormatUint(uint64(current), 10))), true
+	case uint8:
+		return current, consumeErrorLogBudget(budget, len(strconv.FormatUint(uint64(current), 10))), true
+	case uint16:
+		return current, consumeErrorLogBudget(budget, len(strconv.FormatUint(uint64(current), 10))), true
+	case uint32:
+		return current, consumeErrorLogBudget(budget, len(strconv.FormatUint(uint64(current), 10))), true
+	case uint64:
+		return current, consumeErrorLogBudget(budget, len(strconv.FormatUint(current, 10))), true
+	case float32:
+		return current, consumeErrorLogBudget(budget, len(strconv.FormatFloat(float64(current), 'g', -1, 32))), true
+	case float64:
+		return current, consumeErrorLogBudget(budget, len(strconv.FormatFloat(current, 'g', -1, 64))), true
+	case json.Number:
+		return current, consumeErrorLogBudget(budget, len(current.String())), true
+	case []any:
+		safeSlice, ok, handled := sanitizeErrorLogSlice(current, budget)
+		return safeSlice, ok, handled
+	case map[string]any:
+		safeMap, ok, handled := sanitizeErrorLogMap(current, budget)
+		return safeMap, ok, handled
+	default:
+		return nil, false, false
+	}
+}
+
+func consumeErrorLogBudget(budget *int, cost int) bool {
+	if budget == nil || cost < 0 {
+		return false
+	}
+	if *budget < cost {
+		return false
+	}
+	*budget -= cost
+	return true
+}
+
+func jsonStringSize(value string) int {
+	size := 2
+	for len(value) > 0 {
+		if value[0] < utf8.RuneSelf {
+			switch value[0] {
+			case '\\', '"', '\b', '\f', '\n', '\r', '\t':
+				size += 2
+			case '<', '>', '&':
+				size += 6
+			default:
+				if value[0] < 0x20 {
+					size += 6
+				} else {
+					size++
+				}
+			}
+			value = value[1:]
+			continue
+		}
+
+		r, width := utf8.DecodeRuneInString(value)
+		if r == utf8.RuneError && width == 1 {
+			size += 6
+			value = value[1:]
+			continue
+		}
+		if r == '\u2028' || r == '\u2029' {
+			size += 6
+		} else {
+			size += width
+		}
+		value = value[width:]
+	}
+	return size
 }
 
 // errorTypeName 返回 error 的 Go 运行时类型名，便于按类型聚合和检索。
@@ -283,28 +438,4 @@ func limitErrorLogString(value string) string {
 		return trimmed
 	}
 	return trimmed[:maxLoggedErrorStringBytes] + "...(truncated)"
-}
-
-// firstNonEmpty 返回第一个非空字符串，常用于挑选“当前值/根值”的候选项。
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-// reverseStrings 返回字符串切片的反转副本，避免原地修改调用方数据。
-func reverseStrings(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make([]string, len(values))
-	copy(out, values)
-	for i := 0; i < len(out)/2; i++ {
-		j := len(out) - 1 - i
-		out[i], out[j] = out[j], out[i]
-	}
-	return out
 }

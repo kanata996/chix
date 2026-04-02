@@ -3,6 +3,7 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -130,6 +131,33 @@ func TestRequestLogger_InjectsBaseRequestAttrsOnPanic(t *testing.T) {
 	}
 	if got := logEntry["error.message"]; got != "panic: boom" {
 		t.Fatalf("error.message = %#v, want panic: boom", got)
+	}
+}
+
+func TestRequestLogger_StoresLoggerInContext(t *testing.T) {
+	logger := NewLogger(LoggerOptions{
+		Output: io.Discard,
+		Level:  slog.LevelInfo,
+	})
+
+	r := chi.NewRouter()
+	r.Use(RequestLogger(RequestLoggerOptions{
+		Logger: logger,
+		Level:  slog.LevelInfo,
+	}))
+	r.Get("/ctx", func(w http.ResponseWriter, r *http.Request) {
+		if got := LoggerFromContext(r.Context()); got != logger {
+			t.Fatalf("LoggerFromContext() = %p, want %p", got, logger)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/ctx", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNoContent)
 	}
 }
 

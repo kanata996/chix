@@ -15,7 +15,12 @@ import (
 	"github.com/golang-cz/devslog"
 )
 
-type ctxKeyBaseRequestLogAttrs struct{}
+type ctxKeyRequestLogContext struct{}
+
+type requestLogContext struct {
+	logger           *slog.Logger
+	baseAttrsApplied bool
+}
 
 // LoggerOptions controls the slog logger created by NewLogger.
 type LoggerOptions struct {
@@ -88,12 +93,25 @@ func RequestLogger(opts RequestLoggerOptions) func(http.Handler) http.Handler {
 			LogRequestBody:     opts.LogRequestBody,
 			LogResponseBody:    opts.LogResponseBody,
 		}),
-		requestLogAttrsMiddleware,
+		requestLogContextMiddleware(logger),
 	)
 
 	return func(next http.Handler) http.Handler {
 		return chain.Handler(next)
 	}
+}
+
+// LoggerFromContext returns the request logger configured by RequestLogger.
+// It returns nil when the context did not come through that middleware chain.
+func LoggerFromContext(ctx context.Context) *slog.Logger {
+	if ctx == nil {
+		return nil
+	}
+	requestLogCtx, _ := ctx.Value(ctxKeyRequestLogContext{}).(*requestLogContext)
+	if requestLogCtx == nil {
+		return nil
+	}
+	return requestLogCtx.logger
 }
 
 // BaseRequestLogAttrs returns stable request log fields shared across success,
@@ -103,7 +121,7 @@ func BaseRequestLogAttrs(r *http.Request) []slog.Attr {
 		return nil
 	}
 
-	var attrs []slog.Attr
+	attrs := make([]slog.Attr, 0, 2)
 	if requestID := chimw.GetReqID(r.Context()); requestID != "" {
 		attrs = append(attrs, slog.String("request.id", requestID))
 	}
@@ -124,24 +142,30 @@ func HasBaseRequestLogAttrs(ctx context.Context) bool {
 	if ctx == nil {
 		return false
 	}
-	added, _ := ctx.Value(ctxKeyBaseRequestLogAttrs{}).(bool)
-	return added
+	requestLogCtx, _ := ctx.Value(ctxKeyRequestLogContext{}).(*requestLogContext)
+	return requestLogCtx != nil && requestLogCtx.baseAttrsApplied
 }
 
-func requestLogAttrsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(context.WithValue(r.Context(), ctxKeyBaseRequestLogAttrs{}, true))
+func requestLogContextMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := context.WithValue(r.Context(), ctxKeyRequestLogContext{}, &requestLogContext{
+				logger:           logger,
+				baseAttrsApplied: true,
+			})
+			r = r.WithContext(ctx)
 
-		defer func() {
-			attrs := BaseRequestLogAttrs(r)
-			if len(attrs) == 0 {
-				return
-			}
-			httplog.SetAttrs(r.Context(), attrs...)
-		}()
+			defer func() {
+				attrs := BaseRequestLogAttrs(r)
+				if len(attrs) == 0 {
+					return
+				}
+				httplog.SetAttrs(r.Context(), attrs...)
+			}()
 
-		next.ServeHTTP(w, r)
-	})
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func loggerAttrs(opts LoggerOptions) []any {
