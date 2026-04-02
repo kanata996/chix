@@ -249,13 +249,14 @@ func TestRequestLogger_StoresLoggerInContext(t *testing.T) {
 
 // 没经过请求日志中间件的上下文不会携带 logger 或基础日志标记。
 func TestLoggerContextHelpersReturnZeroValuesWithoutMiddleware(t *testing.T) {
-	if got := LoggerFromContext(nil); got != nil {
+	var nilCtx context.Context
+	if got := LoggerFromContext(nilCtx); got != nil {
 		t.Fatalf("LoggerFromContext(nil) = %p, want nil", got)
 	}
 	if got := LoggerFromContext(context.Background()); got != nil {
 		t.Fatalf("LoggerFromContext(background) = %p, want nil", got)
 	}
-	if HasBaseRequestLogAttrs(nil) {
+	if HasBaseRequestLogAttrs(nilCtx) {
 		t.Fatal("HasBaseRequestLogAttrs(nil) = true, want false")
 	}
 	if HasBaseRequestLogAttrs(context.Background()) {
@@ -415,7 +416,11 @@ func TestNewLogger_UsesStdoutWhenOutputMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Pipe() error = %v", err)
 	}
-	defer reader.Close()
+	defer func() {
+		if closeErr := reader.Close(); closeErr != nil {
+			t.Fatalf("reader.Close() error = %v", closeErr)
+		}
+	}()
 
 	previousStdout := os.Stdout
 	os.Stdout = writer
@@ -529,10 +534,4 @@ func attrsToMap(attrs []slog.Attr) map[string]any {
 		out[attr.Key] = attr.Value.Any()
 	}
 	return out
-}
-
-func withRoutePattern(req *http.Request, route string) *http.Request {
-	rctx := chi.NewRouteContext()
-	rctx.RoutePatterns = []string{route}
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 }
