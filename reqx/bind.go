@@ -18,11 +18,11 @@ func Bind[T any](r *http.Request, dst *T, opts ...BindOption) error {
 	cfg := applyBindOptions(opts...)
 	bound := cloneBindingTarget(dst)
 
-	if err := bindTaggedValues(r, bound, pathSource, bindValuesConfig{allowUnknownFields: true}); err != nil {
+	if err := bindTaggedValuesInPlace(r, bound, pathSource, bindValuesConfig{allowUnknownFields: true}); err != nil {
 		return err
 	}
 	if shouldBindQueryParams(r.Method) {
-		if err := bindTaggedValues(r, bound, querySource, cfg.query); err != nil {
+		if err := bindTaggedValuesInPlace(r, bound, querySource, cfg.query); err != nil {
 			return err
 		}
 	}
