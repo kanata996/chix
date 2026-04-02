@@ -128,6 +128,13 @@ func main() {
 
 如果你需要可复用的公共错误值，可以直接使用 `resp.HTTPError`，以及 `resp.BadRequest(...)`、`resp.NotFound(...)`、`resp.UnprocessableEntity(...)` 等辅助构造函数。
 
+## 日志中间件
+
+`middleware` 当前提供一套组合好的请求日志链路：
+
+- `RequestLogger(...)`：统一装配 `RequestID`、`traceid`、`httplog.RequestLogger` 与基础请求日志字段
+- `NewLogger(...)`：构造适配上述中间件的 `slog.Logger`
+
 ## 包结构
 
 - `chix`：面向大多数 handler 的常用 facade

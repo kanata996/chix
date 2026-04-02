@@ -25,9 +25,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httplog/v3"
+	chixmw "github.com/kanata996/chix/middleware"
 )
 
 const (
@@ -100,11 +99,8 @@ func requestErrorLogAttrs(r *http.Request, err error, httpErr *HTTPError) []slog
 	if errors.Is(err, context.DeadlineExceeded) {
 		attrs = append(attrs, slog.Bool("error.timeout", true))
 	}
-	if requestID := chimw.GetReqID(r.Context()); requestID != "" {
-		attrs = append(attrs, slog.String("request.id", requestID))
-	}
-	if route := requestRoutePattern(r); route != "" {
-		attrs = append(attrs, slog.String("http.route", route))
+	if r != nil && !chixmw.HasBaseRequestLogAttrs(r.Context()) {
+		attrs = append(attrs, chixmw.BaseRequestLogAttrs(r)...)
 	}
 	if safeDetails, ok := safeErrorLogDetails(details); ok {
 		attrs = append(attrs, slog.Any("error.details", safeDetails))
@@ -161,15 +157,6 @@ func logErrorResponseWriteFailure(r *http.Request, httpErr *HTTPError, err error
 	}
 
 	slog.ErrorContext(ctx, "resp: failed to write error response", attrs...)
-}
-
-// requestRoutePattern 读取当前请求命中的 chi route pattern。
-// 这里取 pattern 而不是原始 path，是为了降低日志基数并提升聚合能力。
-func requestRoutePattern(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-	return strings.TrimSpace(chi.RouteContext(r.Context()).RoutePattern())
 }
 
 // buildErrorChainInfo 把错误链整理成适合日志输出的摘要结构。
