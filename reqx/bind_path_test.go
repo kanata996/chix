@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/yogorobot/app-mall/chix/resp"
+	"github.com/kanata996/chix/resp"
 )
 
 func TestBindAndValidatePath_BindsTrimmedParams(t *testing.T) {

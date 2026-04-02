@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/yogorobot/app-mall/chix/resp"
+	"github.com/kanata996/chix/resp"
 )
 
 type Normalizer interface {

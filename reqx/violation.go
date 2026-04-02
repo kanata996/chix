@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/yogorobot/app-mall/chix/resp"
+	"github.com/kanata996/chix/resp"
 )
 
 const (

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yogorobot/app-mall/chix/resp"
+	"github.com/kanata996/chix/resp"
 )
 
 func TestBind_FollowsEchoOrder(t *testing.T) {
