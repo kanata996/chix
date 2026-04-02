@@ -384,6 +384,21 @@ func TestAsHTTPError(t *testing.T) {
 	}
 }
 
+// 底层写 HTTP 错误时，空的 HTTPError 会直接视为 no-op。
+func TestWriteHTTPErrorNilHTTPErrorIsNoop(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	if err := writeHTTPError(rr, httptest.NewRequest(http.MethodGet, "/", nil), nil); err != nil {
+		t.Fatalf("writeHTTPError() error = %v, want nil", err)
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want recorder default %d", rr.Code, http.StatusOK)
+	}
+	if rr.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty", rr.Body.String())
+	}
+}
+
 // details 降级后如果补写响应也失败，调用方会同时拿到降级错误和写出错误。
 func TestWriteErrorPayloadReturnsJoinedErrorWhenFallbackWriteFails(t *testing.T) {
 	w := &failingWriter{}

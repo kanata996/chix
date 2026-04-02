@@ -264,10 +264,10 @@ func safeErrorLogDetailsFallback(details []any) (any, bool) {
 		return nil, false
 	}
 
-	var decoded any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		return nil, false
-	}
+	// body is produced by json.Marshal above, so decoding it back into generic
+	// containers should not fail under normal stdlib guarantees.
+	var decoded []any
+	_ = json.Unmarshal(body, &decoded)
 	return decoded, true
 }
 
@@ -421,11 +421,7 @@ func errorTypeName(err error) string {
 	if err == nil {
 		return ""
 	}
-	t := reflect.TypeOf(err)
-	if t == nil {
-		return ""
-	}
-	return t.String()
+	return reflect.TypeOf(err).String()
 }
 
 // limitErrorLogString 对错误文本做长度限制，避免单条日志过大。

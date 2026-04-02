@@ -383,14 +383,19 @@ func TestSanitizeErrorLogContainersRespectBudget(t *testing.T) {
 		t.Fatalf("sanitizeErrorLogMap(low budget) = (_, %v, %v), want (_, false, true)", ok, handled)
 	}
 
-	budget = 4
+	budget = 5
 	if _, ok, handled := sanitizeErrorLogSlice([]any{"x", "y"}, &budget); !handled || ok {
 		t.Fatalf("sanitizeErrorLogSlice(second item over budget) = (_, %v, %v), want (_, false, true)", ok, handled)
 	}
 
-	budget = 7
+	budget = 9
 	if _, ok, handled := sanitizeErrorLogMap(map[string]any{"a": "x", "b": "y"}, &budget); !handled || ok {
 		t.Fatalf("sanitizeErrorLogMap(second item over budget) = (_, %v, %v), want (_, false, true)", ok, handled)
+	}
+
+	budget = 3
+	if _, ok, handled := sanitizeErrorLogMap(map[string]any{"a": "x"}, &budget); !handled || ok {
+		t.Fatalf("sanitizeErrorLogMap(key over budget) = (_, %v, %v), want (_, false, true)", ok, handled)
 	}
 }
 
