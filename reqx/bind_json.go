@@ -27,9 +27,15 @@ func BindBody[T any](r *http.Request, dst *T, opts ...BindBodyOption) error {
 	}
 
 	cfg := applyBindOptions(opts...)
-	return bindJSONWithConfig(r, dst, cfg.body, bodyBindMode{
+	bound := cloneBindingTarget(dst)
+	if err := bindJSONWithConfig(r, bound, cfg.body, bodyBindMode{
 		validateContentTypeOnEmpty: true,
-	})
+	}); err != nil {
+		return err
+	}
+
+	*dst = *bound
+	return nil
 }
 
 func bindJSONWithConfig[T any](r *http.Request, dst *T, cfg bindBodyConfig, mode bodyBindMode) error {

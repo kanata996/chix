@@ -78,11 +78,15 @@ func bindTaggedValues[T any](r *http.Request, dst *T, source valueSource, cfg bi
 		return err
 	}
 
-	violations, err := decodeValuesInto(dstValue, sourceValues(r, source), plan, cfg)
+	bound := cloneBindingTarget(dst)
+	boundValue := reflect.ValueOf(bound).Elem()
+
+	violations, err := decodeValuesInto(boundValue, sourceValues(r, source), plan, cfg)
 	if err != nil {
 		return err
 	}
 	if len(violations) == 0 {
+		*dst = *bound
 		return nil
 	}
 
