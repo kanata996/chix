@@ -114,6 +114,37 @@ func TestWriteErrorNilErrorIsNoop(t *testing.T) {
 	}
 }
 
+// request 为空时，WriteError 也应写出稳定的公共错误响应而不是 panic。
+func TestWriteErrorNilRequestStillWritesErrorResponse(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("WriteError() panicked: %v", recovered)
+		}
+	}()
+
+	if err := WriteError(rr, nil, errors.New("db timeout")); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+
+	payload := decodePayload(t, rr.Body.Bytes())
+	body, ok := payload["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error body = %#v, want object", payload["error"])
+	}
+	if got := body["code"]; got != "internal_error" {
+		t.Fatalf("error.code = %#v, want internal_error", got)
+	}
+	if got := body["message"]; got != "Internal Server Error" {
+		t.Fatalf("error.message = %#v, want Internal Server Error", got)
+	}
+}
+
 // HEAD 请求写错误时只写状态和头，不写响应体。
 func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodHead, "/", nil)
@@ -481,6 +512,46 @@ func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 	}
 }
 
+// HTTPError 自身没有 cause 时，请求日志诊断会回退到原始包装错误而不是公开消息。
+func TestWriteErrorEnrichesRequestLogFromWrappedHTTPErrorWithoutCause(t *testing.T) {
+	var buf bytes.Buffer
+
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	r := chi.NewRouter()
+	r.Use(httplog.RequestLogger(logger, &httplog.Options{
+		Level:         slog.LevelInfo,
+		Schema:        httplog.SchemaECS,
+		RecoverPanics: true,
+	}))
+	r.Get("/wrapped", func(w http.ResponseWriter, r *http.Request) {
+		err := fmt.Errorf("handler failed: %w", NewError(
+			http.StatusInternalServerError,
+			"internal_error",
+			"",
+		))
+		_ = WriteError(w, r, err)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/wrapped", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+
+	logEntry := decodePayload(t, buf.Bytes())
+	if got := logEntry["error.message"]; got != "handler failed: Internal Server Error" {
+		t.Fatalf("error.message = %#v, want wrapped original error", got)
+	}
+	if got := logEntry["error.root_message"]; got != "Internal Server Error" {
+		t.Fatalf("error.root_message = %#v, want Internal Server Error", got)
+	}
+	if got := logEntry["error.root_type"]; got != "*resp.HTTPError" {
+		t.Fatalf("error.root_type = %#v, want *resp.HTTPError", got)
+	}
+}
+
 // 5xx 请求日志会显式标记超时错误，便于和普通内部错误区分。
 func TestWriteErrorEnrichesRequestLogWithTimeoutFlag(t *testing.T) {
 	var buf bytes.Buffer
@@ -668,6 +739,35 @@ func TestLogErrorResponseWriteFailureUsesRequestLogger(t *testing.T) {
 	}
 	if got := failureLog["resp.public_response_preserved"]; got != true {
 		t.Fatalf("resp.public_response_preserved = %#v, want true", got)
+	}
+}
+
+// request 为空且错误响应写出失败时，独立错误日志仍会回退到默认 logger。
+func TestWriteErrorWithNilRequestLogsWriteFailureToDefaultLogger(t *testing.T) {
+	var defaultBuf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
+	defer slog.SetDefault(previousDefault)
+
+	w := &failingWriter{}
+	err := WriteError(w, nil, NewError(http.StatusInternalServerError, "internal_error", "Internal Server Error"))
+	if err == nil {
+		t.Fatal("expected write error, got nil")
+	}
+	if w.status != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.status, http.StatusInternalServerError)
+	}
+
+	if defaultBuf.Len() == 0 {
+		t.Fatal("default logger did not capture output")
+	}
+
+	logEntry := decodePayload(t, defaultBuf.Bytes())
+	if got := logEntry["msg"]; got != "resp: failed to write error response" {
+		t.Fatalf("msg = %#v, want resp: failed to write error response", got)
+	}
+	if got := logEntry["error.code"]; got != "internal_error" {
+		t.Fatalf("error.code = %#v, want internal_error", got)
 	}
 }
 
