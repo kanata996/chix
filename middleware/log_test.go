@@ -141,6 +141,37 @@ func TestRequestLogger_DoesNotDuplicateTraceIDForTraceAwareLogger(t *testing.T) 
 	}
 }
 
+// traceId logger helper 在 nil、普通 handler 和 trace-aware handler 上都应给出稳定结果。
+func TestTraceIDLoggerHelpers(t *testing.T) {
+	if got := ensureTraceIDLogger(nil); got != nil {
+		t.Fatalf("ensureTraceIDLogger(nil) = %v, want nil", got)
+	}
+	if handlerSupportsTraceID(nil) {
+		t.Fatal("handlerSupportsTraceID(nil) = true, want false")
+	}
+
+	plainLogger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	if handlerSupportsTraceID(plainLogger.Handler()) {
+		t.Fatal("handlerSupportsTraceID(plain) = true, want false")
+	}
+
+	wrappedLogger := ensureTraceIDLogger(plainLogger)
+	if wrappedLogger == plainLogger {
+		t.Fatal("ensureTraceIDLogger(plain) returned original logger, want wrapped logger")
+	}
+	if !handlerSupportsTraceID(wrappedLogger.Handler()) {
+		t.Fatal("handlerSupportsTraceID(wrapped) = false, want true")
+	}
+
+	traceAwareLogger := NewLogger(LoggerOptions{
+		Output: io.Discard,
+		Level:  slog.LevelInfo,
+	})
+	if got := ensureTraceIDLogger(traceAwareLogger); got != traceAwareLogger {
+		t.Fatalf("ensureTraceIDLogger(traceAware) = %p, want %p", got, traceAwareLogger)
+	}
+}
+
 // RequestLogger 在成功请求上会注入稳定的基础请求日志字段。
 func TestRequestLogger_InjectsBaseRequestAttrsOnSuccess(t *testing.T) {
 	var buf bytes.Buffer
