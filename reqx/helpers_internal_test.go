@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	ut "github.com/go-playground/universal-translator"
@@ -84,6 +86,7 @@ func (f fakeFieldError) Type() reflect.Type             { return f.typ }
 func (f fakeFieldError) Translate(ut.Translator) string { return f.Error() }
 func (f fakeFieldError) Error() string                  { return "fake field error" }
 
+// Bind、BindBody 和底层值绑定都会拒绝空目标对象。
 func TestBindAndBindBodyRejectNilDestination(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
@@ -102,6 +105,7 @@ func TestBindAndBindBodyRejectNilDestination(t *testing.T) {
 	}
 }
 
+// 非结构体目标不允许参与标签值绑定。
 func TestBindTaggedValuesRejectsNonStructDestination(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	value := 1
@@ -112,6 +116,7 @@ func TestBindTaggedValuesRejectsNonStructDestination(t *testing.T) {
 	}
 }
 
+// readBody 会覆盖空 body 和底层读取失败分支。
 func TestReadBodyBranches(t *testing.T) {
 	data, err := readBody(nil, 10)
 	if err != nil || data != nil {
@@ -125,6 +130,107 @@ func TestReadBodyBranches(t *testing.T) {
 	}
 }
 
+// headerValues 会忽略规范化后为空的 header key，并保留合法键值。
+func TestHeaderValuesSkipsBlankHeaderKey(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header = http.Header{
+		" ":      {"ignored"},
+		"x-name": {"kanata"},
+	}
+
+	values := headerValues(req)
+	if got := values.Get("X-Name"); got != "kanata" {
+		t.Fatalf("X-Name = %q, want kanata", got)
+	}
+	if _, exists := values[""]; exists {
+		t.Fatalf("blank header key unexpectedly present: %#v", values[""])
+	}
+}
+
+// deepCloneValue 会覆盖 invalid、指针、接口、切片、数组、map 和 nil 容器分支。
+func TestDeepCloneValueBranches(t *testing.T) {
+	t.Run("invalid source", func(t *testing.T) {
+		dst := reflect.New(reflect.TypeOf(0)).Elem()
+		deepCloneValue(dst, reflect.Value{})
+		if got := dst.Int(); got != 0 {
+			t.Fatalf("dst = %d, want 0", got)
+		}
+	})
+
+	t.Run("nested containers", func(t *testing.T) {
+		type inner struct {
+			Value int
+		}
+		type sample struct {
+			Ptr      *inner
+			Any      any
+			Slice    []int
+			Array    [2]*inner
+			Map      map[string][]int
+			NilPtr   *inner
+			NilAny   any
+			NilSlice []int
+			NilMap   map[string]int
+		}
+
+		src := sample{
+			Ptr:   &inner{Value: 1},
+			Any:   []int{2, 3},
+			Slice: []int{4, 5},
+			Array: [2]*inner{&inner{Value: 6}, &inner{Value: 7}},
+			Map: map[string][]int{
+				"k": []int{8, 9},
+			},
+		}
+
+		cloned := cloneBindingTarget(&src)
+
+		src.Ptr.Value = 10
+		src.Any.([]int)[0] = 11
+		src.Slice[0] = 12
+		src.Array[0].Value = 13
+		src.Map["k"][0] = 14
+
+		if cloned.Ptr == src.Ptr || cloned.Ptr.Value != 1 {
+			t.Fatalf("cloned.Ptr = %#v, want independent copy", cloned.Ptr)
+		}
+		if got := cloned.Any.([]int)[0]; got != 2 {
+			t.Fatalf("cloned.Any[0] = %d, want 2", got)
+		}
+		if got := cloned.Slice[0]; got != 4 {
+			t.Fatalf("cloned.Slice[0] = %d, want 4", got)
+		}
+		if cloned.Array[0] == src.Array[0] || cloned.Array[0].Value != 6 {
+			t.Fatalf("cloned.Array[0] = %#v, want independent copy", cloned.Array[0])
+		}
+		if got := cloned.Map["k"][0]; got != 8 {
+			t.Fatalf("cloned.Map[\"k\"][0] = %d, want 8", got)
+		}
+		if cloned.NilPtr != nil || cloned.NilAny != nil || cloned.NilSlice != nil || cloned.NilMap != nil {
+			t.Fatalf("nil containers = %#v, want preserved nils", cloned)
+		}
+	})
+
+	t.Run("nan map key preserves value", func(t *testing.T) {
+		src := map[float64]string{
+			math.NaN(): "present-in-source",
+		}
+
+		var dst map[float64]string
+		deepCloneValue(reflect.ValueOf(&dst).Elem(), reflect.ValueOf(src))
+
+		if len(dst) != 1 {
+			t.Fatalf("len(dst) = %d, want 1", len(dst))
+		}
+		for _, value := range dst {
+			if value != "present-in-source" {
+				t.Fatalf("map value = %q, want present-in-source", value)
+			}
+		}
+	})
+}
+
+// 空 body 且不允许为空时返回空 body 错误。
 func TestBindJSONWithConfigRejectsEmptyBodyWhenNotAllowed(t *testing.T) {
 	req := newJSONRequest(http.MethodPost, "/", "")
 
@@ -135,6 +241,7 @@ func TestBindJSONWithConfigRejectsEmptyBodyWhenNotAllowed(t *testing.T) {
 	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
 }
 
+// 空 body 场景下也可以按配置校验 Content-Type。
 func TestBindJSONWithConfigRejectsInvalidContentTypeOnEmptyBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
 	req.Header.Set("Content-Type", "text/plain")
@@ -148,6 +255,7 @@ func TestBindJSONWithConfigRejectsInvalidContentTypeOnEmptyBody(t *testing.T) {
 	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
 }
 
+// body 读取失败时直接透传底层错误。
 func TestBindJSONWithConfigPropagatesReadError(t *testing.T) {
 	wantErr := errors.New("read failed")
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -163,6 +271,7 @@ func TestBindJSONWithConfigPropagatesReadError(t *testing.T) {
 	}
 }
 
+// 禁止未知字段时会返回未知字段 violation。
 func TestBindJSONWithConfigRejectsUnknownFieldWhenDisabled(t *testing.T) {
 	req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata","extra":1}`)
 
@@ -176,6 +285,7 @@ func TestBindJSONWithConfigRejectsUnknownFieldWhenDisabled(t *testing.T) {
 	}
 }
 
+// +json 后缀和空 Content-Type 都被视为合法。
 func TestValidateJSONContentTypeAllowsJSONSuffix(t *testing.T) {
 	if err := validateJSONContentType("application/merge-patch+json"); err != nil {
 		t.Fatalf("validateJSONContentType() error = %v", err)
@@ -185,6 +295,7 @@ func TestValidateJSONContentTypeAllowsJSONSuffix(t *testing.T) {
 	}
 }
 
+// mapDecodeError 会覆盖语法、类型、EOF、未知字段等分支。
 func TestMapDecodeErrorBranches(t *testing.T) {
 	t.Run("syntax", func(t *testing.T) {
 		err := mapDecodeError(&json.SyntaxError{})
@@ -228,6 +339,7 @@ func TestMapDecodeErrorBranches(t *testing.T) {
 	})
 }
 
+// parseUnknownField 只解析标准未知字段错误消息。
 func TestParseUnknownField(t *testing.T) {
 	if field, ok := parseUnknownField(errors.New(`json: unknown field "extra"`)); !ok || field != "extra" {
 		t.Fatalf("parseUnknownField() = (%q, %v), want (extra, true)", field, ok)
@@ -237,6 +349,7 @@ func TestParseUnknownField(t *testing.T) {
 	}
 }
 
+// describeJSONType 会把 Go 类型映射为对外错误描述。
 func TestDescribeJSONType(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -266,11 +379,13 @@ func TestDescribeJSONType(t *testing.T) {
 	}
 }
 
+// emptyBodyError 会生成标准空 body HTTP 错误。
 func TestEmptyBodyError(t *testing.T) {
 	err := emptyBodyError()
 	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
 }
 
+// pathValues 在空请求或无路由上下文时返回空结果。
 func TestPathValuesBranches(t *testing.T) {
 	if got := pathValues(nil); len(got) != 0 {
 		t.Fatalf("pathValues(nil) = %#v, want empty", got)
@@ -282,6 +397,7 @@ func TestPathValuesBranches(t *testing.T) {
 	}
 }
 
+// 单个空白 path 参数值会被视为缺失。
 func TestRequiredPathParamValuesRejectsSingleEmptyValue(t *testing.T) {
 	req := requestWithPathParams(map[string][]string{
 		"id": {"   "},
@@ -294,6 +410,7 @@ func TestRequiredPathParamValuesRejectsSingleEmptyValue(t *testing.T) {
 	}
 }
 
+// 解码计划会写入并复用缓存。
 func TestLoadValueDecodePlanUsesCache(t *testing.T) {
 	type request struct {
 		Page int `query:"page"`
@@ -312,6 +429,7 @@ func TestLoadValueDecodePlanUsesCache(t *testing.T) {
 	}
 }
 
+// 字段标签解析会裁剪空白并忽略跳过标签。
 func TestValueFieldNameAndTagValue(t *testing.T) {
 	type request struct {
 		Page int `query:" page ,omitempty "`
@@ -336,6 +454,7 @@ func TestValueFieldNameAndTagValue(t *testing.T) {
 	}
 }
 
+// 字段类型校验和 TextUnmarshaler 识别覆盖常见分支。
 func TestValidateValueFieldTypeAndSupportsTextUnmarshaler(t *testing.T) {
 	if err := validateValueFieldType(reflect.TypeOf(new(int)), "Age", "query"); err != nil {
 		t.Fatalf("validateValueFieldType(pointer) error = %v", err)
@@ -357,6 +476,7 @@ func TestValidateValueFieldTypeAndSupportsTextUnmarshaler(t *testing.T) {
 	}
 }
 
+// 底层 query 解码会覆盖未知字段、空值、切片和指针分支。
 func TestDecodeValuesIntoAndDecodeQueryFieldBranches(t *testing.T) {
 	type request struct {
 		Page int `query:"page"`
@@ -418,6 +538,62 @@ func TestDecodeValuesIntoAndDecodeQueryFieldBranches(t *testing.T) {
 	}
 }
 
+// 解码到不支持的字段类型时，decodeValuesInto 会返回底层错误。
+func TestDecodeValuesIntoReturnsDecodeError(t *testing.T) {
+	type request struct {
+		Data struct{}
+	}
+
+	dst := reflect.ValueOf(&request{}).Elem()
+	plan := &valueDecodePlan{
+		fields:      []valueFieldSpec{{index: 0, name: "data"}},
+		knownFields: map[string]struct{}{"data": {}},
+	}
+
+	violations, err := decodeValuesInto(dst, url.Values{"data": {"x"}}, plan, bindValuesConfig{})
+	if err == nil {
+		t.Fatal("decodeValuesInto() error = nil")
+	}
+	if len(violations) != 0 {
+		t.Fatalf("violations = %#v, want empty", violations)
+	}
+	if got := err.Error(); !strings.Contains(got, "unsupported destination type") {
+		t.Fatalf("error = %q, want unsupported destination type", got)
+	}
+}
+
+// 计划命中缓存后，如果解码阶段失败，bindTaggedValues 会直接返回错误。
+func TestBindTaggedValuesReturnsDecodeErrorFromCachedPlan(t *testing.T) {
+	type request struct {
+		Data struct{} `query:"data"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/?data=x", nil)
+	var dst request
+
+	var cache sync.Map
+	cache.Store(reflect.TypeOf(request{}), valueDecodePlanResult{
+		plan: &valueDecodePlan{
+			fields:      []valueFieldSpec{{index: 0, name: "data"}},
+			knownFields: map[string]struct{}{"data": {}},
+		},
+	})
+
+	err := bindTaggedValues(req, &dst, valueSource{
+		name:         "query",
+		tag:          querySource.tag,
+		cache:        &cache,
+		normalizeKey: normalizeIdentity,
+	}, bindValuesConfig{})
+	if err == nil {
+		t.Fatal("bindTaggedValues() error = nil")
+	}
+	if got := err.Error(); !strings.Contains(got, "unsupported destination type") {
+		t.Fatalf("error = %q, want unsupported destination type", got)
+	}
+}
+
+// 标量解码会覆盖布尔、无符号整数、浮点数和不支持类型分支。
 func TestDecodeScalarValueBranches(t *testing.T) {
 	var boolValue bool
 	if violation, err := decodeScalarValue(reflect.ValueOf(&boolValue).Elem(), "maybe", "enabled"); err != nil {
@@ -451,6 +627,7 @@ func TestDecodeScalarValueBranches(t *testing.T) {
 	}
 }
 
+// nospace 校验只接受不含空格的字符串。
 func TestValidateNoSpace(t *testing.T) {
 	if !validateNoSpace(fakeFieldLevel{field: reflect.ValueOf("kanata")}) {
 		t.Fatal("validateNoSpace(string without space) = false, want true")
@@ -463,6 +640,7 @@ func TestValidateNoSpace(t *testing.T) {
 	}
 }
 
+// validateTarget 和 errorsf 会返回标准化错误信息。
 func TestValidateTargetAndErrorsf(t *testing.T) {
 	if err := validateTarget(nil); err == nil || err.Error() != "reqx: target must not be nil" {
 		t.Fatalf("validateTarget(nil) error = %v", err)
@@ -480,6 +658,7 @@ func TestValidateTargetAndErrorsf(t *testing.T) {
 	}
 }
 
+// validateStruct 在非法输入上返回 InvalidValidationError。
 func TestValidateStructInvalidValidationError(t *testing.T) {
 	_, err := validateStruct(1, sourceBody)
 	var invalidValidationErr *validator.InvalidValidationError
@@ -488,6 +667,7 @@ func TestValidateStructInvalidValidationError(t *testing.T) {
 	}
 }
 
+// 注册非法校验器名称时会触发 panic。
 func TestMustRegisterValidationPanicsOnInvalidRegistration(t *testing.T) {
 	defer func() {
 		if recover() == nil {
@@ -498,6 +678,7 @@ func TestMustRegisterValidationPanicsOnInvalidRegistration(t *testing.T) {
 	mustRegisterValidation(validator.New(), "", validateNoSpace)
 }
 
+// 校验辅助函数会处理去重、排序和字段路径回退。
 func TestValidationHelpers(t *testing.T) {
 	if got := violationsFromValidation(sourceBody, nil); got != nil {
 		t.Fatalf("violationsFromValidation(nil) = %#v, want nil", got)
@@ -533,6 +714,7 @@ func TestValidationHelpers(t *testing.T) {
 	}
 }
 
+// fieldAlias 会按来源选择别名并回退到字段名。
 func TestFieldAlias(t *testing.T) {
 	type request struct {
 		RequestID string `header:"x-request-id"`

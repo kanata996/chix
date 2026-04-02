@@ -64,6 +64,16 @@ func bindTaggedValues[T any](r *http.Request, dst *T, source valueSource, cfg bi
 		return fmt.Errorf("reqx: destination must not be nil")
 	}
 
+	bound := cloneBindingTarget(dst)
+	if err := bindTaggedValuesInPlace(r, bound, source, cfg); err != nil {
+		return err
+	}
+
+	*dst = *bound
+	return nil
+}
+
+func bindTaggedValuesInPlace[T any](r *http.Request, dst *T, source valueSource, cfg bindValuesConfig) error {
 	dstValue := reflect.ValueOf(dst).Elem()
 	if dstValue.Kind() != reflect.Struct {
 		return fmt.Errorf("reqx: destination must point to a struct")
@@ -246,15 +256,32 @@ func queryValues(r *http.Request) url.Values {
 }
 
 func headerValues(r *http.Request) url.Values {
+	if r == nil || len(r.Header) == 0 {
+		return url.Values{}
+	}
+	if headerKeysAreCanonical(r.Header) {
+		return url.Values(r.Header)
+	}
+
 	values := url.Values{}
 
 	for key, rawValues := range r.Header {
 		normalizedKey := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(key))
-		for _, rawValue := range rawValues {
-			values.Add(normalizedKey, rawValue)
+		if normalizedKey == "" {
+			continue
 		}
+		values[normalizedKey] = append(values[normalizedKey], rawValues...)
 	}
 	return values
+}
+
+func headerKeysAreCanonical(header http.Header) bool {
+	for key := range header {
+		if key != textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(key)) {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeIdentity(value string) string {

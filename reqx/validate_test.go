@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// Header 标量字段重复出现时返回重复值错误。
 func TestBindHeaders_RejectsRepeatedScalar(t *testing.T) {
 	type request struct {
 		RequestID string `header:"x-request-id"`
@@ -24,6 +25,7 @@ func TestBindHeaders_RejectsRepeatedScalar(t *testing.T) {
 	}
 }
 
+// Header 校验错误字段名使用规范化后的 header 名称。
 func TestBindAndValidateHeaders_UsesCanonicalHeaderTagName(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
@@ -37,6 +39,7 @@ func TestBindAndValidateHeaders_UsesCanonicalHeaderTagName(t *testing.T) {
 	}
 }
 
+// Body 校验错误字段名优先使用 json tag。
 func TestValidateBody_UsesJSONTagName(t *testing.T) {
 	var dst struct {
 		DisplayName string `json:"display_name" validate:"required,nospace"`
@@ -49,6 +52,7 @@ func TestValidateBody_UsesJSONTagName(t *testing.T) {
 	}
 }
 
+// Path 校验错误字段名优先使用 param tag。
 func TestValidatePath_UsesParamTagName(t *testing.T) {
 	var dst struct {
 		UUID string `param:"uuid" validate:"required,uuid"`
@@ -61,6 +65,7 @@ func TestValidatePath_UsesParamTagName(t *testing.T) {
 	}
 }
 
+// 自定义校验返回的 violation 会被补齐默认错误信息。
 func TestValidate_CustomValidationNormalizesViolation(t *testing.T) {
 	dst := struct {
 		Name string
@@ -75,6 +80,7 @@ func TestValidate_CustomValidationNormalizesViolation(t *testing.T) {
 	}
 }
 
+// 自定义 Validate 在目标对象为空时返回参数错误。
 func TestValidate_NilDestinationReturnsError(t *testing.T) {
 	err := Validate[struct{}](nil, func(_ *struct{}) []Violation { return nil })
 	if err == nil {
@@ -85,6 +91,7 @@ func TestValidate_NilDestinationReturnsError(t *testing.T) {
 	}
 }
 
+// BadRequest 会构造带 violation 详情的 HTTP 错误。
 func TestBadRequest_ReturnsHTTPError(t *testing.T) {
 	err := BadRequest(RequiredField("name"))
 	httpErr := assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidRequest, "request contains invalid fields")
@@ -103,6 +110,7 @@ func TestBadRequest_ReturnsHTTPError(t *testing.T) {
 	}
 }
 
+// applyBindOptions 会保留默认标志并应用 body 大小限制。
 func TestApplyBindOptions_SetsAllFlags(t *testing.T) {
 	cfg := applyBindOptions(WithMaxBodyBytes(8))
 
@@ -123,6 +131,7 @@ func TestApplyBindOptions_SetsAllFlags(t *testing.T) {
 	}
 }
 
+// 不支持的校验来源会触发 panic。
 func TestValidatorFor_PanicsOnUnsupportedSource(t *testing.T) {
 	defer func() {
 		if recover() == nil {
@@ -133,6 +142,7 @@ func TestValidatorFor_PanicsOnUnsupportedSource(t *testing.T) {
 	_ = validatorFor(sourceKind("unsupported"))
 }
 
+// 不支持的标签来源优先级会触发 panic。
 func TestSourceTagPriority_PanicsOnUnsupportedSource(t *testing.T) {
 	defer func() {
 		if recover() == nil {
@@ -143,6 +153,7 @@ func TestSourceTagPriority_PanicsOnUnsupportedSource(t *testing.T) {
 	_ = sourceTagPriority(sourceKind("unsupported"))
 }
 
+// body 校验来源的标签优先级顺序固定。
 func TestSourceTagPriority_UsesBodyPriority(t *testing.T) {
 	got := sourceTagPriority(sourceBody)
 	want := []string{"json", "query", "param", "header"}

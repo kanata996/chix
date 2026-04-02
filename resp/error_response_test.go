@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// nil 的 HTTPError 接收者应返回一组安全默认值，避免调用方二次判空。
 func TestHTTPErrorNilReceiverUsesSafeDefaults(t *testing.T) {
 	var err *HTTPError
 
@@ -29,6 +30,7 @@ func TestHTTPErrorNilReceiverUsesSafeDefaults(t *testing.T) {
 	}
 }
 
+// HTTPError 会优先暴露底层 cause，并对 details 做防御性拷贝。
 func TestHTTPErrorUsesCauseAndClonesDetails(t *testing.T) {
 	cause := errors.New("db timeout")
 	err := wrapError(http.StatusConflict, "", "", cause, "detail")
@@ -59,6 +61,7 @@ func TestHTTPErrorUsesCauseAndClonesDetails(t *testing.T) {
 	}
 }
 
+// 没有 cause 时，HTTPError.Error 会回退为公开消息本身。
 func TestHTTPErrorErrorReturnsMessageWithoutCause(t *testing.T) {
 	err := NewError(http.StatusBadRequest, "bad_request", "bad request")
 
@@ -67,6 +70,7 @@ func TestHTTPErrorErrorReturnsMessageWithoutCause(t *testing.T) {
 	}
 }
 
+// 各个常用错误构造器都会生成稳定的状态码、错误码和公开消息。
 func TestHTTPErrorConstructors(t *testing.T) {
 	testCases := []struct {
 		name       string
@@ -152,6 +156,7 @@ func TestHTTPErrorConstructors(t *testing.T) {
 	}
 }
 
+// 错误码标准化会裁剪显式值，并按状态码回退到约定错误码。
 func TestNormalizeErrorCode(t *testing.T) {
 	testCases := []struct {
 		name   string
@@ -183,6 +188,7 @@ func TestNormalizeErrorCode(t *testing.T) {
 	}
 }
 
+// 错误消息标准化会优先使用显式消息，否则回退到合适的状态文本。
 func TestNormalizeErrorMessage(t *testing.T) {
 	testCases := []struct {
 		name    string

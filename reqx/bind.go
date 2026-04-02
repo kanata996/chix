@@ -1,19 +1,28 @@
 package reqx
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 )
 
 // Bind 按 Echo 的默认顺序绑定请求数据：path -> query(GET/DELETE) -> body。
 func Bind[T any](r *http.Request, dst *T, opts ...BindOption) error {
-	cfg := applyBindOptions(opts...)
+	if r == nil {
+		return fmt.Errorf("reqx: request must not be nil")
+	}
+	if dst == nil {
+		return fmt.Errorf("reqx: destination must not be nil")
+	}
 
-	if err := bindTaggedValues(r, dst, pathSource, bindValuesConfig{allowUnknownFields: true}); err != nil {
+	cfg := applyBindOptions(opts...)
+	bound := cloneBindingTarget(dst)
+
+	if err := bindTaggedValuesInPlace(r, bound, pathSource, bindValuesConfig{allowUnknownFields: true}); err != nil {
 		return err
 	}
 	if shouldBindQueryParams(r.Method) {
-		if err := bindTaggedValues(r, dst, querySource, cfg.query); err != nil {
+		if err := bindTaggedValuesInPlace(r, bound, querySource, cfg.query); err != nil {
 			return err
 		}
 	}
@@ -21,10 +30,15 @@ func Bind[T any](r *http.Request, dst *T, opts ...BindOption) error {
 	bodyCfg := cfg.body
 	bodyCfg.allowEmptyBody = true
 
-	return bindJSONWithConfig(r, dst, bodyCfg, bodyBindMode{
+	if err := bindJSONWithConfig(r, bound, bodyCfg, bodyBindMode{
 		ignoreEmptyBody:            true,
 		validateContentTypeOnEmpty: false,
-	})
+	}); err != nil {
+		return err
+	}
+
+	*dst = *bound
+	return nil
 }
 
 func shouldBindQueryParams(method string) bool {

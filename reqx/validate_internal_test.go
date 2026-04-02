@@ -1,11 +1,16 @@
 package reqx
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/go-playground/validator/v10"
 )
 
+// 各个 BindAndValidate 包装器会优先返回绑定阶段错误。
 func TestBindAndValidateWrappersReturnBindErrors(t *testing.T) {
 	var dst struct{}
 
@@ -26,6 +31,7 @@ func TestBindAndValidateWrappersReturnBindErrors(t *testing.T) {
 	}
 }
 
+// 各个 BindAndValidate 包装器在正常输入下都能顺利通过。
 func TestBindAndValidateWrappersSuccessPaths(t *testing.T) {
 	type bodyRequest struct {
 		Name string `json:"name" validate:"required"`
@@ -76,7 +82,8 @@ func TestBindAndValidateWrappersSuccessPaths(t *testing.T) {
 	}
 }
 
-func TestValidateAndNormalizeHelpers(t *testing.T) {
+// 自定义 Validate 在空函数和无 violation 场景下直接成功。
+func TestValidateAllowsNilFuncAndNoViolations(t *testing.T) {
 	type request struct {
 		Name string
 	}
@@ -89,6 +96,7 @@ func TestValidateAndNormalizeHelpers(t *testing.T) {
 	}
 }
 
+// validate 会覆盖成功、typed nil 和非结构体目标分支。
 func TestValidateBranches(t *testing.T) {
 	type request struct {
 		Name string `validate:"required"`
@@ -109,6 +117,7 @@ func TestValidateBranches(t *testing.T) {
 	}
 }
 
+// validateStruct 返回的校验错误会被转换为 violation 列表。
 func TestValidateStructValidationErrors(t *testing.T) {
 	target := &struct {
 		Name string `json:"name" validate:"required"`
@@ -126,6 +135,46 @@ func TestValidateStructValidationErrors(t *testing.T) {
 	}
 }
 
+// 直接传入 nil 接口值时返回空目标错误。
+func TestValidateTargetRejectsNilTarget(t *testing.T) {
+	err := validateTarget(nil)
+	if err == nil {
+		t.Fatal("validateTarget() error = nil")
+	}
+	if got := err.Error(); got != "reqx: target must not be nil" {
+		t.Fatalf("error = %q", got)
+	}
+}
+
+// 非法的校验目标会透传 validator 的 InvalidValidationError。
+func TestValidateStructReturnsInvalidValidationError(t *testing.T) {
+	_, err := validateStruct(1, sourceBody)
+	if err == nil {
+		t.Fatal("validateStruct() error = nil")
+	}
+
+	var invalidErr *validator.InvalidValidationError
+	if !errors.As(err, &invalidErr) {
+		t.Fatalf("error = %T, want *validator.InvalidValidationError", err)
+	}
+}
+
+// validator 拒绝 time.Time 时，validate 会直接透传该错误。
+func TestValidateReturnsInvalidValidationError(t *testing.T) {
+	now := time.Now()
+
+	err := validate(&now, sourceBody)
+	if err == nil {
+		t.Fatal("validate() error = nil")
+	}
+
+	var invalidErr *validator.InvalidValidationError
+	if !errors.As(err, &invalidErr) {
+		t.Fatalf("error = %T, want *validator.InvalidValidationError", err)
+	}
+}
+
+// normalizeViolation 会按错误码补齐默认错误信息。
 func TestNormalizeViolationBranches(t *testing.T) {
 	testCases := []struct {
 		name string
