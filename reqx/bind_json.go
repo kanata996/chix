@@ -58,7 +58,11 @@ func bindJSONWithConfig[T any](r *http.Request, dst *T, cfg bindBodyConfig, mode
 		return emptyBodyError()
 	}
 
-	if err := validateJSONContentType(r.Header.Get("Content-Type")); err != nil {
+	contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
+	if contentType == "" {
+		return unsupportedMediaTypeError()
+	}
+	if err := validateJSONContentType(contentType); err != nil {
 		return err
 	}
 

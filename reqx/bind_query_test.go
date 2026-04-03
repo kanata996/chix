@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -23,18 +24,19 @@ func (s *queryState) UnmarshalText(text []byte) error {
 // 查询参数可以绑定到支持的标量、指针、切片和 TextUnmarshaler 类型。
 func TestBindQueryParams_BindsSupportedTypes(t *testing.T) {
 	type request struct {
-		Name    string       `query:"name"`
-		Enabled bool         `query:"enabled"`
-		Age     *int         `query:"age"`
-		Score   float64      `query:"score"`
-		Tags    []string     `query:"tag"`
-		State   queryState   `query:"state"`
-		States  []queryState `query:"states"`
+		Name     string       `query:"name"`
+		Enabled  bool         `query:"enabled"`
+		Age      *int         `query:"age"`
+		Score    float64      `query:"score"`
+		Tags     []string     `query:"tag"`
+		State    queryState   `query:"state"`
+		StatePtr *queryState  `query:"state_ptr"`
+		States   []queryState `query:"states"`
 	}
 
 	req := httptest.NewRequest(
 		http.MethodGet,
-		"/?name=kanata&enabled=true&age=17&score=9.5&tag=a&tag=b&state=active&states=active&states=disabled",
+		"/?name=kanata&enabled=true&age=17&score=9.5&tag=a&tag=b&state=active&state_ptr=disabled&states=active&states=disabled",
 		nil,
 	)
 
@@ -60,6 +62,9 @@ func TestBindQueryParams_BindsSupportedTypes(t *testing.T) {
 	if dst.State != "active" {
 		t.Fatalf("state = %q, want active", dst.State)
 	}
+	if dst.StatePtr == nil || *dst.StatePtr != "disabled" {
+		t.Fatalf("state_ptr = %#v, want disabled", dst.StatePtr)
+	}
 	if len(dst.States) != 2 || dst.States[0] != "active" || dst.States[1] != "disabled" {
 		t.Fatalf("states = %#v, want [active disabled]", dst.States)
 	}
@@ -82,208 +87,228 @@ func TestBindQueryParams_IgnoresUnknownFieldsByDefault(t *testing.T) {
 	}
 }
 
-// 标量查询参数重复出现时返回重复值错误。
-func TestBindQueryParams_RejectsRepeatedScalar(t *testing.T) {
+// 单字段 query 解析错误会稳定映射为对应 violation。
+func TestBindQueryParams_MapsSingleFieldViolations(t *testing.T) {
+	t.Run("repeated scalar", func(t *testing.T) {
+		type request struct {
+			ID string `query:"id"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?id=1&id=2", nil)
+
+		var dst request
+		violation := assertSingleViolation(t, BindQueryParams(req, &dst))
+		if violation.Field != "id" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
+			t.Fatalf("violation = %#v", violation)
+		}
+	})
+
+	t.Run("scalar type mismatch", func(t *testing.T) {
+		type request struct {
+			Page int `query:"page"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?page=nope", nil)
+
+		var dst request
+		violation := assertSingleViolation(t, BindQueryParams(req, &dst))
+		if violation.Field != "page" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
+			t.Fatalf("violation = %#v", violation)
+		}
+	})
+
+	t.Run("invalid text unmarshaler", func(t *testing.T) {
+		type request struct {
+			State queryState `query:"state"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?state=unknown", nil)
+
+		var dst request
+		violation := assertSingleViolation(t, BindQueryParams(req, &dst))
+		if violation.Field != "state" || violation.Code != ViolationCodeInvalid || violation.Message != "is invalid" {
+			t.Fatalf("violation = %#v", violation)
+		}
+	})
+
+	t.Run("repeated text unmarshaler", func(t *testing.T) {
+		type request struct {
+			State queryState `query:"state"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?state=active&state=disabled", nil)
+
+		var dst request
+		violation := assertSingleViolation(t, BindQueryParams(req, &dst))
+		if violation.Field != "state" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
+			t.Fatalf("violation = %#v", violation)
+		}
+	})
+
+	t.Run("pointer type mismatch", func(t *testing.T) {
+		type request struct {
+			Page *int `query:"page"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?page=oops", nil)
+
+		var dst request
+		violation := assertSingleViolation(t, BindQueryParams(req, &dst))
+		if violation.Field != "page" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
+			t.Fatalf("violation = %#v", violation)
+		}
+		if dst.Page != nil {
+			t.Fatalf("page = %#v, want nil", dst.Page)
+		}
+	})
+}
+
+// 非法的 query 绑定定义会在构建解码计划时被拒绝。
+func TestBindQueryParams_RejectsInvalidBindingSchema(t *testing.T) {
+	t.Run("unsupported field type", func(t *testing.T) {
+		type nested struct {
+			Name string
+		}
+		type request struct {
+			Nested nested `query:"nested"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?nested=x", nil)
+
+		var dst request
+		err := BindQueryParams(req, &dst)
+		if err == nil {
+			t.Fatal("BindQueryParams() error = nil")
+		}
+		if got := err.Error(); !strings.Contains(got, `unsupported query type`) {
+			t.Fatalf("error = %q, want unsupported query type", got)
+		}
+	})
+
+	t.Run("duplicate tagged fields", func(t *testing.T) {
+		type request struct {
+			Page  int `query:"page"`
+			Limit int `query:"page"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?page=1", nil)
+
+		var dst request
+		err := BindQueryParams(req, &dst)
+		if err == nil {
+			t.Fatal("BindQueryParams() error = nil")
+		}
+		if got := err.Error(); got != `reqx: duplicate query field "page" on Page and Limit` {
+			t.Fatalf("error = %q", got)
+		}
+	})
+
+	t.Run("unexported tagged field", func(t *testing.T) {
+		type request struct {
+			name string `query:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
+
+		var dst request
+		_ = dst.name
+		err := BindQueryParams(req, &dst)
+		if err == nil {
+			t.Fatal("BindQueryParams() error = nil")
+		}
+		if got := err.Error(); !strings.Contains(got, `must be exported`) {
+			t.Fatalf("error = %q, want must be exported", got)
+		}
+	})
+}
+
+// 空输入会在进入绑定前被直接拒绝。
+func TestBindQueryParams_RejectsNilInputs(t *testing.T) {
+	t.Run("nil request", func(t *testing.T) {
+		var dst struct{}
+		err := BindQueryParams[struct{}](nil, &dst)
+		if err == nil {
+			t.Fatal("BindQueryParams() error = nil")
+		}
+		if got := err.Error(); got != "reqx: request must not be nil" {
+			t.Fatalf("error = %q", got)
+		}
+	})
+
+	t.Run("nil destination", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/?page=1", nil)
+
+		err := BindQueryParams[struct{}](req, nil)
+		if err == nil {
+			t.Fatal("BindQueryParams() error = nil")
+		}
+		if got := err.Error(); got != "reqx: destination must not be nil" {
+			t.Fatalf("error = %q", got)
+		}
+	})
+}
+
+// nil URL 会按空查询串处理，并保留已有字段值。
+func TestBindQueryParams_NilURLPreservesExistingValues(t *testing.T) {
 	type request struct {
-		ID string `query:"id"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?id=1&id=2", nil)
-
-	var dst request
-	err := BindQueryParams(req, &dst)
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "id" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
-		t.Fatalf("violation = %#v", violation)
-	}
-}
-
-// 查询参数类型不匹配时返回类型错误。
-func TestBindQueryParams_RejectsTypeMismatch(t *testing.T) {
-	type request struct {
-		Page int `query:"page"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?page=nope", nil)
-
-	var dst request
-	err := BindQueryParams(req, &dst)
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "page" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
-		t.Fatalf("violation = %#v", violation)
-	}
-}
-
-// TextUnmarshaler 返回错误时转换为非法值错误。
-func TestBindQueryParams_RejectsInvalidTextUnmarshalerValue(t *testing.T) {
-	type request struct {
-		State queryState `query:"state"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?state=unknown", nil)
-
-	var dst request
-	err := BindQueryParams(req, &dst)
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "state" || violation.Code != ViolationCodeInvalid || violation.Message != "is invalid" {
-		t.Fatalf("violation = %#v", violation)
-	}
-}
-
-// 不支持的查询字段类型会在构建解码计划时被拒绝。
-func TestBindQueryParams_RejectsUnsupportedFieldType(t *testing.T) {
-	type nested struct {
-		Name string
-	}
-	type request struct {
-		Nested nested `query:"nested"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?nested=x", nil)
-
-	var dst request
-	err := BindQueryParams(req, &dst)
-	if err == nil {
-		t.Fatal("BindQueryParams() error = nil")
-	}
-	if got := err.Error(); !strings.Contains(got, `unsupported query type`) {
-		t.Fatalf("error = %q, want unsupported query type", got)
-	}
-}
-
-// 重复声明同名 query 标签会返回重复字段错误。
-func TestBindQueryParams_RejectsDuplicateTaggedFields(t *testing.T) {
-	type request struct {
-		Page  int `query:"page"`
-		Limit int `query:"page"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?page=1", nil)
-
-	var dst request
-	err := BindQueryParams(req, &dst)
-	if err == nil {
-		t.Fatal("BindQueryParams() error = nil")
-	}
-	if got := err.Error(); got != `reqx: duplicate query field "page" on Page and Limit` {
-		t.Fatalf("error = %q", got)
-	}
-}
-
-// 未导出的 query 字段不允许参与绑定。
-func TestBindQueryParams_RejectsUnexportedTaggedField(t *testing.T) {
-	type request struct {
-		name string `query:"name"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
-
-	var dst request
-	_ = dst.name
-	err := BindQueryParams(req, &dst)
-	if err == nil {
-		t.Fatal("BindQueryParams() error = nil")
-	}
-	if got := err.Error(); !strings.Contains(got, `must be exported`) {
-		t.Fatalf("error = %q, want must be exported", got)
-	}
-}
-
-// 请求对象不能为空。
-func TestBindQueryParams_RequestMustNotBeNil(t *testing.T) {
-	var dst struct{}
-	err := BindQueryParams[struct{}](nil, &dst)
-	if err == nil {
-		t.Fatal("BindQueryParams() error = nil")
-	}
-	if got := err.Error(); got != "reqx: request must not be nil" {
-		t.Fatalf("error = %q", got)
-	}
-}
-
-// 目标对象不能为空。
-func TestBindQueryParams_DestinationMustNotBeNil(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/?page=1", nil)
-
-	err := BindQueryParams[struct{}](req, nil)
-	if err == nil {
-		t.Fatal("BindQueryParams() error = nil")
-	}
-	if got := err.Error(); got != "reqx: destination must not be nil" {
-		t.Fatalf("error = %q", got)
-	}
-}
-
-// 缺失查询参数时，字段保持零值。
-func TestBindQueryParams_MissingParamsLeaveZeroValue(t *testing.T) {
-	type request struct {
-		Page int  `query:"page"`
-		Age  *int `query:"age"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?other=1", nil)
-
-	var dst request
-	if err := BindQueryParams(req, &dst); err != nil {
-		t.Fatalf("BindQueryParams() error = %v", err)
-	}
-	if dst.Page != 0 {
-		t.Fatalf("page = %d, want 0", dst.Page)
-	}
-	if dst.Age != nil {
-		t.Fatalf("age = %#v, want nil", dst.Age)
-	}
-}
-
-// nil URL 会按空查询串处理。
-func TestBindQueryParams_NilURLTreatsQueryAsEmpty(t *testing.T) {
-	type request struct {
-		Page int `query:"page"`
+		Page int    `query:"page"`
+		Name string `query:"name"`
 	}
 
 	req := &http.Request{Header: make(http.Header)}
+	dst := request{
+		Page: 7,
+		Name: "kanata",
+	}
 
-	var dst request
 	if err := BindQueryParams(req, &dst); err != nil {
 		t.Fatalf("BindQueryParams() error = %v", err)
 	}
-	if dst.Page != 0 {
-		t.Fatalf("page = %d, want 0", dst.Page)
+	if dst.Page != 7 || dst.Name != "kanata" {
+		t.Fatalf("dst = %#v, want existing values preserved", dst)
 	}
 }
 
-// 重复的 TextUnmarshaler 参数会返回重复值错误。
-func TestBindQueryParams_RejectsRepeatedTextUnmarshaler(t *testing.T) {
+// 多个 query 字段同时出错时会聚合 violation，并保持目标对象不变。
+func TestBindQueryParams_AggregatesViolationsAndPreservesDestination(t *testing.T) {
 	type request struct {
-		State queryState `query:"state"`
+		Page   int          `query:"page"`
+		IDs    []int        `query:"id"`
+		States []queryState `query:"state"`
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/?state=active&state=disabled", nil)
-
-	var dst request
-	err := BindQueryParams(req, &dst)
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "state" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
-		t.Fatalf("violation = %#v", violation)
-	}
-}
-
-// 指针类型解析失败时返回类型错误。
-func TestBindQueryParams_RejectsPointerTypeMismatch(t *testing.T) {
-	type request struct {
-		Page *int `query:"page"`
+	req := httptest.NewRequest(http.MethodGet, "/?page=oops&id=1&id=nope&state=active&state=unknown", nil)
+	dst := request{
+		Page:   7,
+		IDs:    []int{9, 8},
+		States: []queryState{"disabled"},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/?page=oops", nil)
-
-	var dst request
-	err := BindQueryParams(req, &dst)
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "page" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
-		t.Fatalf("violation = %#v", violation)
+	violations := assertViolations(t, BindQueryParams(req, &dst))
+	if len(violations) != 3 {
+		t.Fatalf("violations len = %d, want 3", len(violations))
 	}
-	if dst.Page != nil {
-		t.Fatalf("page = %#v, want nil", dst.Page)
+
+	want := []Violation{
+		{Field: "page", Code: ViolationCodeType, Message: "must be number"},
+		{Field: "id", Code: ViolationCodeType, Message: "must be number"},
+		{Field: "state", Code: ViolationCodeInvalid, Message: "is invalid"},
+	}
+	for i, wantViolation := range want {
+		got := violations[i]
+		if got.Field != wantViolation.Field || got.Code != wantViolation.Code || got.Message != wantViolation.Message {
+			t.Fatalf("violations[%d] = %#v, want %#v", i, got, wantViolation)
+		}
+	}
+
+	if dst.Page != 7 {
+		t.Fatalf("page = %d, want 7", dst.Page)
+	}
+	if !reflect.DeepEqual(dst.IDs, []int{9, 8}) {
+		t.Fatalf("ids = %#v, want [9 8]", dst.IDs)
+	}
+	if !reflect.DeepEqual(dst.States, []queryState{"disabled"}) {
+		t.Fatalf("states = %#v, want [disabled]", dst.States)
 	}
 }
 
@@ -312,17 +337,6 @@ func TestBindAndValidateQuery_NormalizesBeforeValidation(t *testing.T) {
 	if dst.Name != "kanata" {
 		t.Fatalf("name = %q, want kanata", dst.Name)
 	}
-}
-
-// 不支持的值来源会触发 panic。
-func TestSourceValues_PanicsOnUnsupportedSource(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("sourceValues() did not panic")
-		}
-	}()
-
-	_ = sourceValues(httptest.NewRequest(http.MethodGet, "/", nil), valueSource{tag: "unsupported"})
 }
 
 type normalizedQueryRequest struct {

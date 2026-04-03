@@ -53,12 +53,15 @@ func TestBindQueryParams_MissingParamsPreserveExistingValues(t *testing.T) {
 	type request struct {
 		Page int    `query:"page"`
 		Name string `query:"name"`
+		Age  *int   `query:"age"`
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/?other=1", nil)
+	age := 17
 	dst := request{
 		Page: 3,
 		Name: "kanata",
+		Age:  &age,
 	}
 
 	if err := BindQueryParams(req, &dst); err != nil {
@@ -66,6 +69,9 @@ func TestBindQueryParams_MissingParamsPreserveExistingValues(t *testing.T) {
 	}
 	if dst.Page != 3 || dst.Name != "kanata" {
 		t.Fatalf("dst = %#v, want existing values preserved", dst)
+	}
+	if dst.Age == nil || *dst.Age != 17 {
+		t.Fatalf("age = %#v, want 17", dst.Age)
 	}
 }
 

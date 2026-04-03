@@ -4,10 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/kanata996/chix/resp"
 )
 
 // 绑定后会先裁剪 path 参数再做校验。
@@ -29,32 +29,62 @@ func TestBindAndValidatePath_BindsTrimmedParams(t *testing.T) {
 	}
 }
 
-// 请求对象不能为空。
-func TestBindPathValues_RequestMustNotBeNil(t *testing.T) {
-	var dst struct{}
+// BindAndValidatePath 会使用 path 校验器，错误字段名应来自 param tag。
+func TestBindAndValidatePath_UsesParamTagName(t *testing.T) {
+	req := requestWithPathParams(nil)
 
-	err := BindPathValues[struct{}](nil, &dst)
-	if err == nil {
-		t.Fatal("BindPathValues() error = nil")
+	var dst struct {
+		UUID string `param:"uuid" validate:"required,uuid"`
 	}
-	if got := err.Error(); got != "reqx: request must not be nil" {
-		t.Fatalf("error = %q", got)
+	err := BindAndValidatePath(req, &dst)
+	violation := assertSingleViolation(t, err)
+	if violation.Field != "uuid" || violation.In != ViolationInPath || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+		t.Fatalf("violation = %#v", violation)
 	}
 }
 
-// 目标对象不能为空。
-func TestBindPathValues_DestinationMustNotBeNil(t *testing.T) {
+// 绑定后会先做标准化，再进入 path 校验。
+func TestBindAndValidatePath_NormalizesBeforeValidation(t *testing.T) {
 	req := requestWithPathParams(map[string][]string{
-		"id": {"1"},
+		"state": {" ACTIVE "},
 	})
 
-	err := BindPathValues[struct{}](req, nil)
-	if err == nil {
-		t.Fatal("BindPathValues() error = nil")
+	var dst normalizedPathRequest
+	if err := BindAndValidatePath(req, &dst); err != nil {
+		t.Fatalf("BindAndValidatePath() error = %v", err)
 	}
-	if got := err.Error(); got != "reqx: destination must not be nil" {
-		t.Fatalf("error = %q", got)
+	if dst.State != "active" {
+		t.Fatalf("state = %q, want active", dst.State)
 	}
+}
+
+// 空输入会在进入 path 绑定前被直接拒绝。
+func TestBindPathValues_RejectsNilInputs(t *testing.T) {
+	t.Run("nil request", func(t *testing.T) {
+		var dst struct{}
+
+		err := BindPathValues[struct{}](nil, &dst)
+		if err == nil {
+			t.Fatal("BindPathValues() error = nil")
+		}
+		if got := err.Error(); got != "reqx: request must not be nil" {
+			t.Fatalf("error = %q", got)
+		}
+	})
+
+	t.Run("nil destination", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{
+			"id": {"1"},
+		})
+
+		err := BindPathValues[struct{}](req, nil)
+		if err == nil {
+			t.Fatal("BindPathValues() error = nil")
+		}
+		if got := err.Error(); got != "reqx: destination must not be nil" {
+			t.Fatalf("error = %q", got)
+		}
+	})
 }
 
 // 默认配置下，未知路径参数会被忽略。
@@ -77,22 +107,20 @@ func TestBindPathValues_IgnoresUnknownFieldsByDefault(t *testing.T) {
 	}
 }
 
-// 缺失路径参数时，绑定阶段保持字段零值。
-func TestBindPathValues_MissingTaggedParamLeavesZeroValue(t *testing.T) {
+// 没有 chi route context 时，path 绑定应退化为 no-op，而不是报错或清空已有值。
+func TestBindPathValues_NoRouteContextPreservesExistingValues(t *testing.T) {
 	type pathRequest struct {
-		ID int `param:"id"`
+		ID string `param:"id"`
 	}
 
-	req := requestWithPathParams(map[string][]string{
-		"other": {"1"},
-	})
+	req := httptest.NewRequest(http.MethodGet, "/items/42", nil)
+	dst := pathRequest{ID: "existing-id"}
 
-	var path pathRequest
-	if err := BindPathValues(req, &path); err != nil {
+	if err := BindPathValues(req, &dst); err != nil {
 		t.Fatalf("BindPathValues() error = %v", err)
 	}
-	if path.ID != 0 {
-		t.Fatalf("BindPathValues() id = %d, want 0", path.ID)
+	if dst.ID != "existing-id" {
+		t.Fatalf("BindPathValues() id = %q, want existing-id", dst.ID)
 	}
 }
 
@@ -108,27 +136,7 @@ func TestBindPathValues_TypeMismatchReturnsViolation(t *testing.T) {
 
 	var path pathRequest
 	err := BindPathValues(req, &path)
-	if err == nil {
-		t.Fatal("BindPathValues() error = nil")
-	}
-
-	httpErr, ok := err.(*resp.HTTPError)
-	if !ok {
-		t.Fatalf("BindPathValues() error type = %T", err)
-	}
-	if httpErr.Status() != http.StatusUnprocessableEntity {
-		t.Fatalf("BindPathValues() status = %d", httpErr.Status())
-	}
-
-	details := httpErr.Details()
-	if len(details) != 1 {
-		t.Fatalf("BindPathValues() details len = %d", len(details))
-	}
-
-	violation, ok := details[0].(Violation)
-	if !ok {
-		t.Fatalf("BindPathValues() detail type = %T", details[0])
-	}
+	violation := assertSingleViolation(t, err)
 	if violation.Field != "id" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
 		t.Fatalf("BindPathValues() violation = %#v", violation)
 	}
@@ -146,213 +154,192 @@ func TestBindPathValues_RepeatedParamsReturnViolation(t *testing.T) {
 
 	var path pathRequest
 	err := BindPathValues(req, &path)
-	if err == nil {
-		t.Fatal("BindPathValues() error = nil")
-	}
-
-	httpErr, ok := err.(*resp.HTTPError)
-	if !ok {
-		t.Fatalf("BindPathValues() error type = %T", err)
-	}
-
-	details := httpErr.Details()
-	if len(details) != 1 {
-		t.Fatalf("BindPathValues() details len = %d", len(details))
-	}
-
-	violation, ok := details[0].(Violation)
-	if !ok {
-		t.Fatalf("BindPathValues() detail type = %T", details[0])
-	}
+	violation := assertSingleViolation(t, err)
 	if violation.Field != "id" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
 		t.Fatalf("BindPathValues() violation = %#v", violation)
 	}
 }
 
-// 不支持的 path 字段类型会在构建解码计划时被拒绝。
-func TestBindPathValues_RejectsUnsupportedFieldType(t *testing.T) {
-	type nested struct {
-		Name string
-	}
-	type pathRequest struct {
-		Nested nested `param:"nested"`
-	}
+// 非法的 path 绑定定义会在构建解码计划时被拒绝。
+func TestBindPathValues_RejectsInvalidBindingSchema(t *testing.T) {
+	t.Run("unsupported field type", func(t *testing.T) {
+		type nested struct {
+			Name string
+		}
+		type pathRequest struct {
+			Nested nested `param:"nested"`
+		}
 
-	req := requestWithPathParams(map[string][]string{
-		"nested": {"x"},
+		req := requestWithPathParams(map[string][]string{
+			"nested": {"x"},
+		})
+
+		var path pathRequest
+		err := BindPathValues(req, &path)
+		if err == nil {
+			t.Fatal("BindPathValues() error = nil")
+		}
+		if got := err.Error(); got != `reqx: field "Nested" has unsupported path type reqx.nested` {
+			t.Fatalf("error = %q", got)
+		}
 	})
 
-	var path pathRequest
-	err := BindPathValues(req, &path)
-	if err == nil {
-		t.Fatal("BindPathValues() error = nil")
-	}
-	if got := err.Error(); got != `reqx: field "Nested" has unsupported path type reqx.nested` {
-		t.Fatalf("error = %q", got)
-	}
-}
+	t.Run("unexported tagged field", func(t *testing.T) {
+		type pathRequest struct {
+			id string `param:"id"`
+		}
 
-// 未导出的 path 字段不允许参与绑定。
-func TestBindPathValues_RejectsUnexportedTaggedField(t *testing.T) {
-	type pathRequest struct {
-		id string `param:"id"`
-	}
+		req := requestWithPathParams(map[string][]string{
+			"id": {"1"},
+		})
 
-	req := requestWithPathParams(map[string][]string{
-		"id": {"1"},
+		var path pathRequest
+		_ = path.id
+		err := BindPathValues(req, &path)
+		if err == nil {
+			t.Fatal("BindPathValues() error = nil")
+		}
+		if got := err.Error(); got != `reqx: path field "id" must be exported` {
+			t.Fatalf("error = %q", got)
+		}
 	})
 
-	var path pathRequest
-	_ = path.id
-	err := BindPathValues(req, &path)
-	if err == nil {
-		t.Fatal("BindPathValues() error = nil")
-	}
-	if got := err.Error(); got != `reqx: path field "id" must be exported` {
-		t.Fatalf("error = %q", got)
-	}
+	t.Run("duplicate tagged fields", func(t *testing.T) {
+		type pathRequest struct {
+			ID   string `param:"id"`
+			UUID string `param:"id"`
+		}
+
+		req := requestWithPathParams(map[string][]string{
+			"id": {"1"},
+		})
+
+		var path pathRequest
+		err := BindPathValues(req, &path)
+		if err == nil {
+			t.Fatal("BindPathValues() error = nil")
+		}
+		if got := err.Error(); got != `reqx: duplicate path field "id" on ID and UUID` {
+			t.Fatalf("error = %q", got)
+		}
+	})
 }
 
-// 重复声明同名 path 标签会返回重复字段错误。
-func TestBindPathValues_RejectsDuplicateTaggedFields(t *testing.T) {
-	type pathRequest struct {
-		ID   string `param:"id"`
-		UUID string `param:"id"`
-	}
+// path helper 会裁剪输入，并在需要时做解析或规范化。
+func TestPathHelpers_ParseAndNormalizeValues(t *testing.T) {
+	t.Run("ParamString trims value", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{
+			"name": {"  kanata  "},
+		})
 
-	req := requestWithPathParams(map[string][]string{
-		"id": {"1"},
+		value, err := ParamString(req, "name")
+		if err != nil {
+			t.Fatalf("ParamString() error = %v", err)
+		}
+		if value != "kanata" {
+			t.Fatalf("ParamString() value = %q", value)
+		}
 	})
 
-	var path pathRequest
-	err := BindPathValues(req, &path)
-	if err == nil {
-		t.Fatal("BindPathValues() error = nil")
-	}
-	if got := err.Error(); got != `reqx: duplicate path field "id" on ID and UUID` {
-		t.Fatalf("error = %q", got)
-	}
-}
+	t.Run("ParamInt parses trimmed value", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{
+			"id": {" 42 "},
+		})
 
-// ParamString 会裁剪前后空白。
-func TestParamString_TrimsValue(t *testing.T) {
-	req := requestWithPathParams(map[string][]string{
-		"name": {"  kanata  "},
+		value, err := ParamInt(req, "id")
+		if err != nil {
+			t.Fatalf("ParamInt() error = %v", err)
+		}
+		if value != 42 {
+			t.Fatalf("ParamInt() value = %d", value)
+		}
 	})
 
-	value, err := ParamString(req, "name")
-	if err != nil {
-		t.Fatalf("ParamString() error = %v", err)
-	}
-	if value != "kanata" {
-		t.Fatalf("ParamString() value = %q", value)
-	}
+	t.Run("ParamUUID normalizes value", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{
+			"uuid": {" 550E8400-E29B-41D4-A716-446655440000 "},
+		})
+
+		value, err := ParamUUID(req, "uuid")
+		if err != nil {
+			t.Fatalf("ParamUUID() error = %v", err)
+		}
+		if value != "550e8400-e29b-41d4-a716-446655440000" {
+			t.Fatalf("ParamUUID() value = %q", value)
+		}
+	})
 }
 
-// ParamInt 会把字符串解析为整数。
-func TestParamInt_ParsesValue(t *testing.T) {
-	req := requestWithPathParams(map[string][]string{
-		"id": {"42"},
+// ParamInt 会把类型错误和缺失参数都映射为稳定的 violation。
+func TestParamInt_MapsLookupAndDecodeFailures(t *testing.T) {
+	t.Run("invalid value", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{
+			"id": {"oops"},
+		})
+
+		_, err := ParamInt(req, "id")
+		violation := assertSingleViolation(t, err)
+		if violation.Field != "id" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
+			t.Fatalf("violation = %#v", violation)
+		}
 	})
 
-	value, err := ParamInt(req, "id")
-	if err != nil {
-		t.Fatalf("ParamInt() error = %v", err)
-	}
-	if value != 42 {
-		t.Fatalf("ParamInt() value = %d", value)
-	}
+	t.Run("missing value", func(t *testing.T) {
+		req := requestWithPathParams(nil)
+
+		_, err := ParamInt(req, "id")
+		violation := assertSingleViolation(t, err)
+		if violation.Field != "id" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+			t.Fatalf("violation = %#v", violation)
+		}
+	})
 }
 
-// ParamUUID 会校验并规范化 UUID 格式。
-func TestParamUUID_NormalizesValue(t *testing.T) {
-	req := requestWithPathParams(map[string][]string{
-		"uuid": {" 550E8400-E29B-41D4-A716-446655440000 "},
+// ParamString 会把 path 查找阶段的各种失败统一映射为稳定的错误契约。
+func TestParamString_MapsLookupFailures(t *testing.T) {
+	t.Run("repeated value", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{
+			"id": {"1", "2"},
+		})
+
+		_, err := ParamString(req, "id")
+		violation := assertSingleViolation(t, err)
+		if violation.Field != "id" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
+			t.Fatalf("violation = %#v", violation)
+		}
 	})
 
-	value, err := ParamUUID(req, "uuid")
-	if err != nil {
-		t.Fatalf("ParamUUID() error = %v", err)
-	}
-	if value != "550e8400-e29b-41d4-a716-446655440000" {
-		t.Fatalf("ParamUUID() value = %q", value)
-	}
-}
+	t.Run("whitespace only value", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{
+			"id": {"   "},
+		})
 
-// ParamInt 解析失败时返回类型错误。
-func TestParamInt_InvalidValueReturnsViolation(t *testing.T) {
-	req := requestWithPathParams(map[string][]string{
-		"id": {"oops"},
+		_, err := ParamString(req, "id")
+		violation := assertSingleViolation(t, err)
+		if violation.Field != "id" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+			t.Fatalf("violation = %#v", violation)
+		}
 	})
 
-	_, err := ParamInt(req, "id")
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "id" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
-		t.Fatalf("violation = %#v", violation)
-	}
-}
+	t.Run("missing value", func(t *testing.T) {
+		req := requestWithPathParams(nil)
 
-// 缺失的整数 path 参数会返回必填错误。
-func TestParamInt_MissingValueReturnsRequired(t *testing.T) {
-	req := requestWithPathParams(nil)
-
-	_, err := ParamInt(req, "id")
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "id" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
-		t.Fatalf("violation = %#v", violation)
-	}
-}
-
-// ParamString 遇到重复值时返回重复字段错误。
-func TestParamString_RepeatedValueReturnsViolation(t *testing.T) {
-	req := requestWithPathParams(map[string][]string{
-		"id": {"1", "2"},
+		_, err := ParamString(req, "uuid")
+		violation := assertSingleViolation(t, err)
+		if violation.Field != "uuid" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+			t.Fatalf("ParamString() violation = %#v", violation)
+		}
 	})
 
-	_, err := ParamString(req, "id")
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "id" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
-		t.Fatalf("violation = %#v", violation)
-	}
-}
+	t.Run("no route context", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items/42", nil)
 
-// 仅包含空白字符的路径参数会被视为缺失。
-func TestParamString_WhitespaceOnlyValueReturnsRequired(t *testing.T) {
-	req := requestWithPathParams(map[string][]string{
-		"id": {"   "},
+		_, err := ParamString(req, "id")
+		violation := assertSingleViolation(t, err)
+		if violation.Field != "id" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+			t.Fatalf("violation = %#v", violation)
+		}
 	})
-
-	_, err := ParamString(req, "id")
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "id" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
-		t.Fatalf("violation = %#v", violation)
-	}
-}
-
-// 缺失的字符串 path 参数会返回必填错误。
-func TestParamString_MissingValueReturnsRequired(t *testing.T) {
-	req := requestWithPathParams(nil)
-
-	_, err := ParamString(req, "uuid")
-	if err == nil {
-		t.Fatal("ParamString() error = nil")
-	}
-
-	httpErr, ok := err.(*resp.HTTPError)
-	if !ok {
-		t.Fatalf("ParamString() error type = %T", err)
-	}
-	details := httpErr.Details()
-	if len(details) != 1 {
-		t.Fatalf("ParamString() details len = %d", len(details))
-	}
-	violation, ok := details[0].(Violation)
-	if !ok {
-		t.Fatalf("ParamString() detail type = %T", details[0])
-	}
-	if violation.Field != "uuid" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
-		t.Fatalf("ParamString() violation = %#v", violation)
-	}
 }
 
 // 空白参数名会直接返回参数名错误。
@@ -370,59 +357,44 @@ func TestParamString_EmptyNameReturnsError(t *testing.T) {
 	}
 }
 
-// 非法 UUID 会返回非法值错误。
-func TestParamUUID_InvalidValueReturnsViolation(t *testing.T) {
-	req := requestWithPathParams(map[string][]string{
-		"uuid": {"not-a-uuid"},
+// ParamUUID 会把字符串查找失败和 UUID 语义校验失败都映射为稳定的错误契约。
+func TestParamUUID_MapsLookupAndValidationFailures(t *testing.T) {
+	t.Run("invalid value", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{
+			"uuid": {"not-a-uuid"},
+		})
+
+		_, err := ParamUUID(req, "uuid")
+		violation := assertSingleViolation(t, err)
+		if violation.Field != "uuid" || violation.Code != ViolationCodeInvalid || violation.Message != "is invalid" {
+			t.Fatalf("ParamUUID() violation = %#v", violation)
+		}
 	})
 
-	_, err := ParamUUID(req, "uuid")
-	if err == nil {
-		t.Fatal("ParamUUID() error = nil")
-	}
+	t.Run("repeated value", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{
+			"uuid": {
+				"550e8400-e29b-41d4-a716-446655440000",
+				"f47ac10b-58cc-4372-a567-0e02b2c3d479",
+			},
+		})
 
-	httpErr, ok := err.(*resp.HTTPError)
-	if !ok {
-		t.Fatalf("ParamUUID() error type = %T", err)
-	}
-	details := httpErr.Details()
-	if len(details) != 1 {
-		t.Fatalf("ParamUUID() details len = %d", len(details))
-	}
-	violation, ok := details[0].(Violation)
-	if !ok {
-		t.Fatalf("ParamUUID() detail type = %T", details[0])
-	}
-	if violation.Field != "uuid" || violation.Code != ViolationCodeInvalid || violation.Message != "is invalid" {
-		t.Fatalf("ParamUUID() violation = %#v", violation)
-	}
-}
-
-// 重复的 UUID 路径参数会直接返回重复值错误。
-func TestParamUUID_RepeatedValueReturnsViolation(t *testing.T) {
-	req := requestWithPathParams(map[string][]string{
-		"uuid": {
-			"550e8400-e29b-41d4-a716-446655440000",
-			"f47ac10b-58cc-4372-a567-0e02b2c3d479",
-		},
+		_, err := ParamUUID(req, "uuid")
+		violation := assertSingleViolation(t, err)
+		if violation.Field != "uuid" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
+			t.Fatalf("violation = %#v", violation)
+		}
 	})
 
-	_, err := ParamUUID(req, "uuid")
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "uuid" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
-		t.Fatalf("violation = %#v", violation)
-	}
-}
+	t.Run("missing value", func(t *testing.T) {
+		req := requestWithPathParams(nil)
 
-// 缺失的 UUID path 参数会返回必填错误。
-func TestParamUUID_MissingValueReturnsRequired(t *testing.T) {
-	req := requestWithPathParams(nil)
-
-	_, err := ParamUUID(req, "uuid")
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "uuid" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
-		t.Fatalf("violation = %#v", violation)
-	}
+		_, err := ParamUUID(req, "uuid")
+		violation := assertSingleViolation(t, err)
+		if violation.Field != "uuid" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+			t.Fatalf("violation = %#v", violation)
+		}
+	})
 }
 
 func requestWithPathParams(params map[string][]string) *http.Request {
@@ -434,4 +406,12 @@ func requestWithPathParams(params map[string][]string) *http.Request {
 		}
 	}
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+type normalizedPathRequest struct {
+	State string `param:"state" validate:"required,oneof=active disabled"`
+}
+
+func (r *normalizedPathRequest) Normalize() {
+	r.State = strings.ToLower(strings.TrimSpace(r.State))
 }

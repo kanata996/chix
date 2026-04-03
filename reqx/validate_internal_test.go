@@ -175,6 +175,38 @@ func TestValidateReturnsInvalidValidationError(t *testing.T) {
 	}
 }
 
+// 内部校验器和标签优先级 helper 对不支持的来源会 panic。
+func TestValidatorHelpers_PanicOnUnsupportedSource(t *testing.T) {
+	t.Run("validatorFor", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("validatorFor() did not panic")
+			}
+		}()
+
+		_ = validatorFor(sourceKind("unsupported"))
+	})
+
+	t.Run("sourceTagPriority", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("sourceTagPriority() did not panic")
+			}
+		}()
+
+		_ = sourceTagPriority(sourceKind("unsupported"))
+	})
+}
+
+// body 来源的标签优先级顺序固定，用于字段别名解析。
+func TestSourceTagPriority_UsesBodyPriority(t *testing.T) {
+	got := sourceTagPriority(sourceBody)
+	want := []string{"json", "query", "param", "header"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sourceTagPriority(sourceBody) = %#v, want %#v", got, want)
+	}
+}
+
 // normalizeViolation 会按错误码补齐默认错误信息。
 func TestNormalizeViolationBranches(t *testing.T) {
 	testCases := []struct {

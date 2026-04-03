@@ -34,7 +34,7 @@ func assertHTTPError(t *testing.T, err error, wantStatus int, wantCode, wantMess
 	return httpErr
 }
 
-func assertSingleViolation(t *testing.T, err error) Violation {
+func assertViolations(t *testing.T, err error) []Violation {
 	t.Helper()
 
 	httpErr := assertHTTPError(
@@ -46,13 +46,23 @@ func assertSingleViolation(t *testing.T, err error) Violation {
 	)
 
 	details := httpErr.Details()
-	if len(details) != 1 {
-		t.Fatalf("details len = %d, want 1", len(details))
+	violations := make([]Violation, 0, len(details))
+	for i, detail := range details {
+		violation, ok := detail.(Violation)
+		if !ok {
+			t.Fatalf("detail[%d] type = %T, want reqx.Violation", i, detail)
+		}
+		violations = append(violations, violation)
 	}
+	return violations
+}
 
-	violation, ok := details[0].(Violation)
-	if !ok {
-		t.Fatalf("detail type = %T, want reqx.Violation", details[0])
+func assertSingleViolation(t *testing.T, err error) Violation {
+	t.Helper()
+
+	violations := assertViolations(t, err)
+	if len(violations) != 1 {
+		t.Fatalf("details len = %d, want 1", len(violations))
 	}
-	return violation
+	return violations[0]
 }
