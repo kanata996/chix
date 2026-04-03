@@ -7,7 +7,7 @@
 //
 // 职责：
 //   - 从 error / HTTPError 提取更适合排障的结构化字段。
-//   - 在不泄露不可控内部对象的前提下，尽量保留原始错误文本、类型、错误链和安全细节。
+//   - 在不泄露不可控内部对象的前提下，尽量保留原始错误文本、类型以及首层/根因摘要。
 //   - 仅在“错误响应自身写出失败”这类基础设施异常时，额外输出一条独立 error 日志。
 //
 // 要点：
@@ -18,14 +18,11 @@ package resp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"reflect"
-	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/go-chi/httplog/v3"
 	chixmw "github.com/kanata996/chix/middleware"
@@ -34,7 +31,6 @@ import (
 const (
 	maxLoggedErrorChainDepth  = 8
 	maxLoggedErrorStringBytes = 1024
-	maxLoggedErrorDetailsSize = 4096
 )
 
 type errorChainInfo struct {
@@ -237,183 +233,6 @@ func unwrapErrors(err error) []error {
 		}
 		return nil
 	}
-}
-
-// safeErrorLogDetails 尝试把响应 details 收敛为“可安全写日志”的结构化值。
-// 只有当 details 可 JSON 编码且大小受控时才落日志，否则宁可丢弃并打 dropped 标记。
-func safeErrorLogDetails(details []any) (any, bool) {
-	if len(details) == 0 {
-		return nil, false
-	}
-
-	budget := maxLoggedErrorDetailsSize
-	safeDetails, ok, handled := sanitizeErrorLogSlice(details, &budget)
-	if handled {
-		if !ok {
-			return nil, false
-		}
-		return safeDetails, true
-	}
-
-	return safeErrorLogDetailsFallback(details)
-}
-
-func safeErrorLogDetailsFallback(details []any) (any, bool) {
-	body, err := json.Marshal(normalizeDetails(details))
-	if err != nil || len(body) > maxLoggedErrorDetailsSize {
-		return nil, false
-	}
-
-	// body is produced by json.Marshal above, so decoding it back into generic
-	// containers should not fail under normal stdlib guarantees.
-	var decoded []any
-	_ = json.Unmarshal(body, &decoded)
-	return decoded, true
-}
-
-func sanitizeErrorLogSlice(values []any, budget *int) ([]any, bool, bool) {
-	if !consumeErrorLogBudget(budget, 2) {
-		return nil, false, true
-	}
-
-	out := make([]any, 0, len(values))
-	for i, value := range values {
-		if i > 0 && !consumeErrorLogBudget(budget, 1) {
-			return nil, false, true
-		}
-		safeValue, ok, handled := sanitizeErrorLogValue(value, budget)
-		if !handled {
-			return nil, false, false
-		}
-		if !ok {
-			return nil, false, true
-		}
-		out = append(out, safeValue)
-	}
-	return out, true, true
-}
-
-func sanitizeErrorLogMap(values map[string]any, budget *int) (map[string]any, bool, bool) {
-	if !consumeErrorLogBudget(budget, 2) {
-		return nil, false, true
-	}
-
-	out := make(map[string]any, len(values))
-	index := 0
-	for key, value := range values {
-		if index > 0 && !consumeErrorLogBudget(budget, 1) {
-			return nil, false, true
-		}
-		index++
-		if !consumeErrorLogBudget(budget, jsonStringSize(key)+1) {
-			return nil, false, true
-		}
-
-		safeValue, ok, handled := sanitizeErrorLogValue(value, budget)
-		if !handled {
-			return nil, false, false
-		}
-		if !ok {
-			return nil, false, true
-		}
-		out[key] = safeValue
-	}
-	return out, true, true
-}
-
-func sanitizeErrorLogValue(value any, budget *int) (any, bool, bool) {
-	switch current := value.(type) {
-	case nil:
-		return nil, consumeErrorLogBudget(budget, 4), true
-	case string:
-		return current, consumeErrorLogBudget(budget, jsonStringSize(current)), true
-	case bool:
-		if current {
-			return current, consumeErrorLogBudget(budget, 4), true
-		}
-		return current, consumeErrorLogBudget(budget, 5), true
-	case int:
-		return current, consumeErrorLogBudget(budget, len(strconv.FormatInt(int64(current), 10))), true
-	case int8:
-		return current, consumeErrorLogBudget(budget, len(strconv.FormatInt(int64(current), 10))), true
-	case int16:
-		return current, consumeErrorLogBudget(budget, len(strconv.FormatInt(int64(current), 10))), true
-	case int32:
-		return current, consumeErrorLogBudget(budget, len(strconv.FormatInt(int64(current), 10))), true
-	case int64:
-		return current, consumeErrorLogBudget(budget, len(strconv.FormatInt(current, 10))), true
-	case uint:
-		return current, consumeErrorLogBudget(budget, len(strconv.FormatUint(uint64(current), 10))), true
-	case uint8:
-		return current, consumeErrorLogBudget(budget, len(strconv.FormatUint(uint64(current), 10))), true
-	case uint16:
-		return current, consumeErrorLogBudget(budget, len(strconv.FormatUint(uint64(current), 10))), true
-	case uint32:
-		return current, consumeErrorLogBudget(budget, len(strconv.FormatUint(uint64(current), 10))), true
-	case uint64:
-		return current, consumeErrorLogBudget(budget, len(strconv.FormatUint(current, 10))), true
-	case float32:
-		return current, consumeErrorLogBudget(budget, len(strconv.FormatFloat(float64(current), 'g', -1, 32))), true
-	case float64:
-		return current, consumeErrorLogBudget(budget, len(strconv.FormatFloat(current, 'g', -1, 64))), true
-	case json.Number:
-		return current, consumeErrorLogBudget(budget, len(current.String())), true
-	case []any:
-		safeSlice, ok, handled := sanitizeErrorLogSlice(current, budget)
-		return safeSlice, ok, handled
-	case map[string]any:
-		safeMap, ok, handled := sanitizeErrorLogMap(current, budget)
-		return safeMap, ok, handled
-	default:
-		return nil, false, false
-	}
-}
-
-func consumeErrorLogBudget(budget *int, cost int) bool {
-	if budget == nil || cost < 0 {
-		return false
-	}
-	if *budget < cost {
-		return false
-	}
-	*budget -= cost
-	return true
-}
-
-func jsonStringSize(value string) int {
-	size := 2
-	for len(value) > 0 {
-		if value[0] < utf8.RuneSelf {
-			switch value[0] {
-			case '\\', '"', '\b', '\f', '\n', '\r', '\t':
-				size += 2
-			case '<', '>', '&':
-				size += 6
-			default:
-				if value[0] < 0x20 {
-					size += 6
-				} else {
-					size++
-				}
-			}
-			value = value[1:]
-			continue
-		}
-
-		r, width := utf8.DecodeRuneInString(value)
-		if r == utf8.RuneError && width == 1 {
-			size += 6
-			value = value[1:]
-			continue
-		}
-		if r == '\u2028' || r == '\u2029' {
-			size += 6
-		} else {
-			size += width
-		}
-		value = value[width:]
-	}
-	return size
 }
 
 // errorTypeName 返回 error 的 Go 运行时类型名，便于按类型聚合和检索。

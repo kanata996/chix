@@ -704,10 +704,7 @@ func TestLogErrorResponseWriteFailureUsesRequestLogger(t *testing.T) {
 	defer slog.SetDefault(previousDefault)
 
 	r := chi.NewRouter()
-	r.Use(chixmw.RequestLogger(chixmw.RequestLoggerOptions{
-		Logger: requestLogger,
-		Level:  slog.LevelInfo,
-	}))
+	r.Use(chixmw.RequestLogger(requestLogger, slog.LevelInfo))
 	r.Get("/failure", func(w http.ResponseWriter, r *http.Request) {
 		logErrorResponseWriteFailure(r,
 			NewError(http.StatusInternalServerError, "internal_error", "Internal Server Error"),

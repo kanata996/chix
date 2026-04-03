@@ -132,7 +132,7 @@ func main() {
 
 `middleware` 当前提供一套组合好的请求日志链路：
 
-- `RequestLogger(...)`：统一装配 `RequestID`、`traceid`、`httplog.RequestLogger` 与基础请求日志字段
+- `RequestLogger(logger, level)`：统一装配 `RequestID`、`traceid`、`httplog.RequestLogger` 与基础请求日志字段
 - `NewLogger(...)`：构造适配上述中间件的 `slog.Logger`
 
 ## 包结构
