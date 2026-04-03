@@ -1,5 +1,12 @@
 package reqx
 
+// 用例清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// - [✓] 缺失的 body/query/path/header 输入不会清空目标对象已有值。
+// - [✓] `Bind` 在 path/query/body 任一阶段失败时不会留下部分更新。
+// - [✓] `BindBody` 失败时不会污染引用类型字段。
+// - [✓] `BindAndValidate` 绑定失败时不会修改目标对象，也不会继续执行校验。
+
 import (
 	"net/http"
 	"net/http/httptest"

@@ -13,6 +13,13 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// 测试清单：
+// [✓] 错误链摘要兼容 nil、普通包装、不可比较 error、typed-nil 和 panic Error()
+// [✓] 错误链展开兼容深度限制、errors.Join、多分支 unwrap 和循环引用
+// [✓] 诊断起点优先使用 HTTPError 的内部 cause，没有 cause 时回退原始 error
+// [✓] 请求日志字段仅在 5xx 场景补充诊断信息，并正确提取 route / root cause
+// [✓] 错误类型名与错误文本裁剪对 nil、空白、超长输入保持稳定
+
 type cycleTestError struct{}
 
 type multiUnwrapTestError struct {
@@ -215,6 +222,9 @@ func TestRequestErrorLogAttrs(t *testing.T) {
 	if got := values["error.code"]; got != "internal_error" {
 		t.Fatalf("error.code = %#v, want internal_error", got)
 	}
+	if got := values["http.route"]; got != "/users/{id}" {
+		t.Fatalf("http.route = %#v, want /users/{id}", got)
+	}
 	if got := values["error.root_message"]; got != "db timeout" {
 		t.Fatalf("error.root_message = %#v, want db timeout", got)
 	}
@@ -222,6 +232,21 @@ func TestRequestErrorLogAttrs(t *testing.T) {
 	clientErr := BadRequest("bad_request", "bad request")
 	if got := requestErrorLogAttrs(req, clientErr, clientErr); got != nil {
 		t.Fatalf("requestErrorLogAttrs(4xx) = %#v, want nil", got)
+	}
+}
+
+func TestErrorForDiagnostics(t *testing.T) {
+	original := errors.New("original")
+	cause := errors.New("db timeout")
+	httpErr := wrapError(http.StatusInternalServerError, "", "", cause)
+
+	if got := errorForDiagnostics(original, httpErr); !errors.Is(got, cause) {
+		t.Fatalf("errorForDiagnostics() = %v, want cause %v", got, cause)
+	}
+
+	withoutCause := NewError(http.StatusInternalServerError, "", "")
+	if got := errorForDiagnostics(original, withoutCause); !errors.Is(got, original) {
+		t.Fatalf("errorForDiagnostics() without cause = %v, want original %v", got, original)
 	}
 }
 

@@ -1,5 +1,13 @@
 package reqx
 
+// 用例清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// - [✓] `BindQueryParams` 能绑定支持的标量、指针、切片和 `encoding.TextUnmarshaler` 类型。
+// - [✓] `BindQueryParams` 的未知字段、空输入、nil URL 与非法绑定定义契约。
+// - [✓] `BindQueryParams` 会把重复值、类型错误和无效文本解码稳定映射为 violation。
+// - [✓] 多字段同时失败时会聚合 violation 且保持目标对象不变。
+// - [✓] `BindAndValidateQuery` 会在校验前执行 `Normalize()`，并使用 `query` tag 字段名。
+
 import (
 	"errors"
 	"net/http"

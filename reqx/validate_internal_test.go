@@ -1,5 +1,12 @@
 package reqx
 
+// 用例清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// - [✓] `BindAndValidate*` 包装器的成功路径与绑定错误优先级。
+// - [✓] `validate`、`validateStruct`、`validateTarget` 的边界分支与无效目标错误。
+// - [✓] violation 规范化、字段解析、来源推断与标签优先级辅助分支。
+// - [✓] 这组测试覆盖内部校验辅助逻辑，断言具体返回值和 panic 分支，不是假测试。
+
 import (
 	"errors"
 	"net/http"

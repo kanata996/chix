@@ -1,5 +1,8 @@
 package reqx
 
+// 用例清单：
+// - [✓] 测试辅助文件：提供 JSON 请求构造与 HTTP/violation 断言辅助，无独立业务用例。
+
 import (
 	"net/http"
 	"net/http/httptest"

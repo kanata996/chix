@@ -1,5 +1,12 @@
 package reqx
 
+// 用例清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// - [✓] `BindPathValues` 的空输入、未知字段、无路由上下文、重复值与类型错误契约。
+// - [✓] 非法 path 绑定定义会在解码计划阶段被拒绝。
+// - [✓] `ParamString`、`ParamInt`、`ParamUUID` 的裁剪、解析与错误映射行为。
+// - [✓] `BindAndValidatePath` 会在校验前执行 `Normalize()`，并使用 `param` tag 字段名。
+
 import (
 	"context"
 	"net/http"

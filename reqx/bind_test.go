@@ -1,5 +1,12 @@
 package reqx
 
+// 用例清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// - [✓] `Bind` 的阶段顺序、覆盖优先级与按 HTTP 方法启用/跳过规则。
+// - [✓] `Bind` 在空 body 时会把 body 阶段视为 no-op，并忽略该场景的 Content-Type。
+// - [✓] `BindHeaders` 会规范化请求头键名，并拒绝重复的标量 header。
+// - [✓] `Bind`/`BindAndValidate` 会透传阶段错误，并使用请求级字段名。
+
 import (
 	"io"
 	"net/http"

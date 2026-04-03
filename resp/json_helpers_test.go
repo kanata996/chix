@@ -8,6 +8,13 @@ import (
 	"testing"
 )
 
+// 测试清单：
+// [✓] responseWriteError 在 nil、普通错误、panic Error()、空白错误文本下都稳定
+// [✓] writeJSONBytes 校验 writer、状态码，以及不允许响应体的状态
+// [✓] writeStatus 校验 writer、状态码，并只写状态不写 body / Content-Type
+// [✓] encodeJSON 对不支持的值和 MarshalJSON panic 都返回普通 error
+// [✓] HTTP 状态码校验接受标准范围并拒绝越界值
+
 type panicSuccessJSONValue struct{}
 type panicWriteCause struct{}
 type blankWriteCause struct{}
@@ -151,6 +158,27 @@ func TestWriteStatusRejectsInvalidStatus(t *testing.T) {
 	err := writeStatus(rr, 1000)
 	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
 		t.Fatalf("writeStatus() error = %v, want invalid status", err)
+	}
+}
+
+// 仅写状态码的辅助函数成功时不写 body，也不擅自设置 Content-Type。
+func TestWriteStatusWritesStatusWithoutBodyOrContentType(t *testing.T) {
+	w := &trackingResponseWriter{}
+
+	if err := writeStatus(w, http.StatusNoContent); err != nil {
+		t.Fatalf("writeStatus() error = %v", err)
+	}
+	if w.writeHeaderCalls != 1 {
+		t.Fatalf("writeHeaderCalls = %d, want 1", w.writeHeaderCalls)
+	}
+	if w.writeCalls != 0 {
+		t.Fatalf("writeCalls = %d, want 0", w.writeCalls)
+	}
+	if w.status != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", w.status, http.StatusNoContent)
+	}
+	if got := w.Header().Get("Content-Type"); got != "" {
+		t.Fatalf("Content-Type = %q, want empty", got)
 	}
 }
 

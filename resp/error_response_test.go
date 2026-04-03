@@ -6,6 +6,13 @@ import (
 	"testing"
 )
 
+// 测试清单：
+// [✓] nil 接收者返回安全默认值
+// [✓] cause、Error、Unwrap、Message、Details 的公开语义稳定
+// [✓] Detail 和 Errors 对外暴露标准化后的字段，并在构造时与读取时都做防御性切片拷贝
+// [✓] 常用错误构造器输出稳定的状态码、错误码和公开消息
+// [✓] 状态码、错误码、标题、详情、消息标准化包含 499 特例
+
 // nil 的 HTTPError 接收者应返回一组安全默认值，避免调用方二次判空。
 func TestHTTPErrorNilReceiverUsesSafeDefaults(t *testing.T) {
 	var err *HTTPError
@@ -27,6 +34,12 @@ func TestHTTPErrorNilReceiverUsesSafeDefaults(t *testing.T) {
 	}
 	if got := err.Message(); got != http.StatusText(http.StatusInternalServerError) {
 		t.Fatalf("Message() = %q, want %q", got, http.StatusText(http.StatusInternalServerError))
+	}
+	if got := err.Detail(); got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf("Detail() = %q, want %q", got, http.StatusText(http.StatusInternalServerError))
+	}
+	if got := err.Errors(); got != nil {
+		t.Fatalf("Errors() = %#v, want nil", got)
 	}
 	if got := err.Details(); got != nil {
 		t.Fatalf("Details() = %#v, want nil", got)
@@ -61,6 +74,37 @@ func TestHTTPErrorUsesCauseAndClonesDetails(t *testing.T) {
 	details[0] = "changed"
 	if got := err.Details()[0]; got != "detail" {
 		t.Fatalf("Details() after mutation = %#v, want detail", got)
+	}
+}
+
+// Detail/Errors 会暴露公共字段，并返回独立的切片副本给调用方修改。
+func TestHTTPErrorDetailAndErrorsExposePublicFields(t *testing.T) {
+	err := NewError(http.StatusBadRequest, " invalid_json ", " invalid payload ", "detail")
+
+	if got := err.Detail(); got != "invalid payload" {
+		t.Fatalf("Detail() = %q, want %q", got, "invalid payload")
+	}
+
+	gotErrors := err.Errors()
+	if len(gotErrors) != 1 || gotErrors[0] != "detail" {
+		t.Fatalf("Errors() = %#v, want [detail]", gotErrors)
+	}
+	gotErrors[0] = "changed"
+	if got := err.Errors()[0]; got != "detail" {
+		t.Fatalf("Errors() after mutation = %#v, want detail", got)
+	}
+}
+
+// 构造 HTTPError 时会立刻拷贝 errors 入参，避免调用方后续修改原切片影响错误对象。
+func TestNewErrorClonesInputErrorsSlice(t *testing.T) {
+	input := []any{"detail"}
+	err := NewError(http.StatusBadRequest, "bad_request", "bad request", input...)
+
+	input[0] = "changed"
+
+	gotErrors := err.Errors()
+	if len(gotErrors) != 1 || gotErrors[0] != "detail" {
+		t.Fatalf("Errors() = %#v, want original [detail]", gotErrors)
 	}
 }
 
@@ -230,6 +274,28 @@ func TestNormalizeErrorTitleSupports499(t *testing.T) {
 	}
 	if got := normalizeErrorTitle(509); got != http.StatusText(http.StatusInternalServerError) {
 		t.Fatalf("normalizeErrorTitle(509) = %q, want %q", got, http.StatusText(http.StatusInternalServerError))
+	}
+}
+
+func TestNormalizeErrorDetail(t *testing.T) {
+	testCases := []struct {
+		name   string
+		status int
+		detail string
+		want   string
+	}{
+		{name: "explicit", status: http.StatusBadRequest, detail: " invalid payload ", want: "invalid payload"},
+		{name: "status text fallback", status: http.StatusBadRequest, want: http.StatusText(http.StatusBadRequest)},
+		{name: "client closed request", status: 499, want: "Client Closed Request"},
+		{name: "invalid status fallback", status: 777, want: http.StatusText(http.StatusInternalServerError)},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeErrorDetail(tc.status, tc.detail); got != tc.want {
+				t.Fatalf("normalizeErrorDetail(%d, %q) = %q, want %q", tc.status, tc.detail, got, tc.want)
+			}
+		})
 	}
 }
 

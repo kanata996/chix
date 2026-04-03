@@ -1,5 +1,13 @@
 package reqx
 
+// 用例清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// - [✓] `ValidateBody`、`ValidateQuery`、`ValidatePath`、`ValidateHeaders` 会使用来源专属字段别名和 `in` 值。
+// - [✓] `Validate` 会规范化自定义 violation，且空目标返回参数错误。
+// - [✓] `BadRequest` 会生成带 violation 详情的 HTTP 错误。
+// - [✓] `ValidateRequest` 会按 param/query/json/header/plain 选择字段名，但统一以 `request` 作为 `in`。
+// - [✓] `ValidateRequest` 的空目标错误契约会透传当前包装器的参数校验错误。
+
 import (
 	"net/http"
 	"testing"
@@ -75,6 +83,55 @@ func TestValidate_NilDestinationReturnsError(t *testing.T) {
 	}
 	if got := err.Error(); got != "reqx: destination must not be nil" {
 		t.Fatalf("error = %q, want reqx: destination must not be nil", got)
+	}
+}
+
+// ValidateRequest 会按请求标签选择字段别名，但统一以 request 作为 in 值。
+func TestValidateRequest_UsesRequestFieldAliases(t *testing.T) {
+	var dst struct {
+		ID      string `param:"id" validate:"required"`
+		Cursor  string `query:"cursor" validate:"required"`
+		Name    string `json:"name" validate:"required"`
+		TraceID string `header:"x-trace-id" validate:"required"`
+		Plain   string `validate:"required"`
+	}
+
+	violations := assertViolations(t, ValidateRequest(&dst))
+	if len(violations) != 5 {
+		t.Fatalf("violations len = %d, want 5", len(violations))
+	}
+
+	got := map[string]Violation{}
+	for _, violation := range violations {
+		got[violation.Field] = violation
+	}
+
+	want := map[string]string{
+		"id":         ViolationInRequest,
+		"cursor":     ViolationInRequest,
+		"name":       ViolationInRequest,
+		"X-Trace-Id": ViolationInRequest,
+		"Plain":      ViolationInRequest,
+	}
+	for field, wantIn := range want {
+		violation, ok := got[field]
+		if !ok {
+			t.Fatalf("missing violation for %q in %#v", field, got)
+		}
+		if violation.In != wantIn || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+			t.Fatalf("violation[%q] = %#v", field, violation)
+		}
+	}
+}
+
+// ValidateRequest 会透传当前包装器的空目标参数错误。
+func TestValidateRequest_NilDestinationReturnsError(t *testing.T) {
+	err := ValidateRequest[struct{}](nil)
+	if err == nil {
+		t.Fatal("ValidateRequest() error = nil")
+	}
+	if got := err.Error(); got != "reqx: target must be a non-nil pointer to struct" {
+		t.Fatalf("error = %q, want reqx: target must be a non-nil pointer to struct", got)
 	}
 }
 

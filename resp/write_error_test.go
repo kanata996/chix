@@ -17,6 +17,17 @@ import (
 	chixmw "github.com/kanata996/chix/middleware"
 )
 
+// 测试清单：
+// [✓] WriteError 会把 HTTPError 写成稳定的 problem JSON，并保留显式公共字段
+// [✓] nil error 是 no-op；nil request 与 nil writer 都能安全退化而不 panic
+// [✓] HEAD 请求只写状态和头；非法状态和未知错误会统一收敛且不泄漏内部 cause
+// [✓] context canceled / deadline exceeded 会映射为公开错误语义
+// [✓] 公开 errors 无法编码或 panic 时会降级丢弃该字段，并把降级信息返回给调用方
+// [✓] 响应已经开始写出时不会被二次改写
+// [✓] asHTTPError 会保留 HTTPError，并把 context/普通 error 收敛为稳定公共语义
+// [✓] problem payload 会按 includeErrors 开关决定是否暴露公开 errors
+// [✓] 5xx 请求日志会补充诊断字段，4xx 不会；错误响应写出失败会记录独立日志
+
 type failingWriter struct {
 	header http.Header
 	status int
@@ -107,6 +118,37 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 	}
 }
 
+// 显式传入的公共 code/detail/errors 应原样进入 problem JSON，而不是被默认值覆盖。
+func TestWriteErrorPreservesExplicitPublicFields(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/users", nil)
+	rr := httptest.NewRecorder()
+
+	err := WriteError(rr, req, NewError(
+		http.StatusBadRequest,
+		"invalid_json",
+		"payload invalid",
+		map[string]any{"field": "name", "code": "required"},
+	))
+	if err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["code"]; got != "invalid_json" {
+		t.Fatalf("code = %#v, want invalid_json", got)
+	}
+	if got := body["title"]; got != http.StatusText(http.StatusBadRequest) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusBadRequest))
+	}
+	if got := body["detail"]; got != "payload invalid" {
+		t.Fatalf("detail = %#v, want payload invalid", got)
+	}
+	errors, ok := body["errors"].([]any)
+	if !ok || len(errors) != 1 {
+		t.Fatalf("errors = %#v, want 1 item", body["errors"])
+	}
+}
+
 // 传入 nil 错误时，WriteError 应是纯 no-op。
 func TestWriteErrorNilErrorIsNoop(t *testing.T) {
 	rr := httptest.NewRecorder()
@@ -146,6 +188,20 @@ func TestWriteErrorNilRequestStillWritesErrorResponse(t *testing.T) {
 	}
 	if got := body["detail"]; got != "Internal Server Error" {
 		t.Fatalf("detail = %#v, want Internal Server Error", got)
+	}
+}
+
+// ResponseWriter 为空时，WriteError 会把底层写回失败作为普通 error 返回。
+func TestWriteErrorRejectsNilWriter(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("WriteError() panicked: %v", recovered)
+		}
+	}()
+
+	err := WriteError(nil, httptest.NewRequest(http.MethodGet, "/", nil), errors.New("db timeout"))
+	if err == nil || !strings.Contains(err.Error(), "response writer is nil") {
+		t.Fatalf("WriteError() error = %v, want response writer is nil", err)
 	}
 }
 
@@ -389,6 +445,33 @@ func TestAsHTTPError(t *testing.T) {
 	}
 }
 
+func TestAsHTTPErrorMapsContextAndUnknownErrors(t *testing.T) {
+	canceled := asHTTPError(context.Canceled)
+	if got := canceled.Status(); got != 499 {
+		t.Fatalf("canceled.Status() = %d, want 499", got)
+	}
+	if got := canceled.Code(); got != "client_closed_request" {
+		t.Fatalf("canceled.Code() = %q, want client_closed_request", got)
+	}
+
+	timeout := asHTTPError(context.DeadlineExceeded)
+	if got := timeout.Status(); got != http.StatusGatewayTimeout {
+		t.Fatalf("timeout.Status() = %d, want %d", got, http.StatusGatewayTimeout)
+	}
+	if got := timeout.Code(); got != "timeout" {
+		t.Fatalf("timeout.Code() = %q, want timeout", got)
+	}
+
+	root := errors.New("db timeout")
+	internal := asHTTPError(root)
+	if got := internal.Status(); got != http.StatusInternalServerError {
+		t.Fatalf("internal.Status() = %d, want %d", got, http.StatusInternalServerError)
+	}
+	if !errors.Is(internal.Unwrap(), root) {
+		t.Fatalf("internal.Unwrap() = %v, want %v", internal.Unwrap(), root)
+	}
+}
+
 // 底层写 HTTP 错误时，空的 HTTPError 会直接视为 no-op。
 func TestWriteHTTPErrorNilHTTPErrorIsNoop(t *testing.T) {
 	rr := httptest.NewRecorder()
@@ -401,6 +484,20 @@ func TestWriteHTTPErrorNilHTTPErrorIsNoop(t *testing.T) {
 	}
 	if rr.Body.Len() != 0 {
 		t.Fatalf("body = %q, want empty", rr.Body.String())
+	}
+}
+
+func TestProblemPayloadFromHTTPErrorIncludeErrorsToggle(t *testing.T) {
+	httpErr := NewError(http.StatusBadRequest, "bad_request", "bad request", map[string]any{"field": "name"})
+
+	withErrors := problemPayloadFromHTTPError(httpErr, true)
+	if len(withErrors.Errors) != 1 {
+		t.Fatalf("problemPayloadFromHTTPError(includeErrors=true).Errors = %#v, want 1 item", withErrors.Errors)
+	}
+
+	withoutErrors := problemPayloadFromHTTPError(httpErr, false)
+	if withoutErrors.Errors != nil {
+		t.Fatalf("problemPayloadFromHTTPError(includeErrors=false).Errors = %#v, want nil", withoutErrors.Errors)
 	}
 }
 

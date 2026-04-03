@@ -1,14 +1,14 @@
-// Package reqx provides request-side helpers for chi-based JSON APIs.
+// Package reqx 为基于 chi 的 JSON API 提供请求侧辅助能力。
 //
-// It focuses on HTTP input boundaries:
-//   - bind JSON/query/path values into structs
-//   - validate bound values with validator/v10
-//   - normalize common request violations into consistent HTTP errors
+// 它聚焦在 HTTP 输入边界：
+//   - 将 JSON / query / path 值绑定到结构体
+//   - 使用 validator/v10 校验绑定后的输入
+//   - 将常见请求违规统一收敛为稳定的 HTTP 错误
 //
-// Typical usage:
-//   - BindAndValidate for Echo-style path/query/body binding
-//   - BindBody or BindAndValidateBody for JSON request bodies
-//   - BindQueryParams + ValidateQuery for query DTOs
-//   - BindPathValues / BindHeaders for direct-source binding
-//   - ParamString/ParamInt/ParamUUID for simple path params
+// 典型用法：
+//   - 使用 BindAndValidate 处理 path/query/body 综合绑定
+//   - 使用 BindBody 或 BindAndValidateBody 处理 JSON 请求体
+//   - 使用 BindQueryParams + ValidateQuery 处理 query DTO
+//   - 使用 BindPathValues / BindHeaders 处理单一来源绑定
+//   - 使用 ParamString / ParamInt / ParamUUID 读取简单 path 参数
 package reqx

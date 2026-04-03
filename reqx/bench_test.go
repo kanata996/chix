@@ -1,5 +1,12 @@
 package reqx
 
+// 用例清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// - [✓] `BindBody` 在小型 JSON 请求上的基准性能。
+// - [✓] `BindQueryParams` 的典型查询绑定基准性能。
+// - [✓] `BindPathValues`、`BindHeaders` 的典型绑定基准性能。
+// - [✓] `Bind`、`BindAndValidate` 在 GET 请求场景下的整体基准性能。
+
 import (
 	"io"
 	"net/http"

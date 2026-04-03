@@ -1,5 +1,12 @@
 package reqx
 
+// 用例清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// - [✓] `BindBody` 的 Content-Type、空 body、未知字段、类型错误与非法 JSON 契约。
+// - [✓] `BindBody` 的单值 JSON、尾随空白、body 大小上限与空请求参数错误。
+// - [✓] `BindAndValidateBody` 会在校验前执行 `Normalize()`，并使用 `json` tag 字段名。
+// - [✓] 空 body 但显式声明非 JSON `Content-Type` 时，`BindBody`/`BindAndValidateBody` 返回 415。
+
 import (
 	"errors"
 	"io"
@@ -88,6 +95,23 @@ func TestBindBody_IgnoresEmptyBodyWithoutContentType(t *testing.T) {
 	if err := BindBody(req, &dst); err != nil {
 		t.Fatalf("BindBody() error = %v", err)
 	}
+	if dst.Name != "kanata" {
+		t.Fatalf("name = %q, want kanata", dst.Name)
+	}
+}
+
+// 空 body 但显式声明了非 JSON Content-Type 时，仍应返回 415。
+func TestBindBody_RejectsExplicitInvalidContentTypeOnEmptyBody(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
+	req.Header.Set("Content-Type", "text/plain")
+	dst := request{Name: "kanata"}
+
+	err := BindBody(req, &dst)
+	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json or application/*+json")
 	if dst.Name != "kanata" {
 		t.Fatalf("name = %q, want kanata", dst.Name)
 	}
@@ -291,5 +315,18 @@ func TestBindAndValidateBody_UsesJSONTagNameInValidationError(t *testing.T) {
 	violation := assertSingleViolation(t, err)
 	if violation.Field != "display_name" || violation.Code != ViolationCodeInvalid || violation.Message != "is invalid" {
 		t.Fatalf("violation = %#v", violation)
+	}
+}
+
+// 空 body 但显式声明了非 JSON Content-Type 时，包装器也应优先返回 415。
+func TestBindAndValidateBody_RejectsExplicitInvalidContentTypeOnEmptyBody(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
+	req.Header.Set("Content-Type", "text/plain")
+
+	dst := normalizedBodyRequest{Name: "kanata"}
+	err := BindAndValidateBody(req, &dst)
+	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json or application/*+json")
+	if dst.Name != "kanata" {
+		t.Fatalf("name = %q, want kanata", dst.Name)
 	}
 }

@@ -1,5 +1,9 @@
 package reqx
 
+// 用例清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// - [✓] `WithMaxBodyBytes` 会覆盖 body 限制，同时保留其余默认绑定配置。
+
 import "testing"
 
 // applyBindOptions 会保留默认标志并应用 body 大小限制。
