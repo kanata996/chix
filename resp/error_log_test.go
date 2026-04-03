@@ -19,6 +19,18 @@ type multiUnwrapTestError struct {
 	errs []error
 }
 
+type nonComparableWrappedTestError struct {
+	op     string
+	frames []string
+	err    error
+}
+
+type nilUnsafeTestError struct {
+	err error
+}
+
+type blankMessageTestError struct{}
+
 func (e *cycleTestError) Error() string {
 	return "cycle"
 }
@@ -33,6 +45,26 @@ func (e *multiUnwrapTestError) Error() string {
 
 func (e *multiUnwrapTestError) Unwrap() []error {
 	return e.errs
+}
+
+func (e nonComparableWrappedTestError) Error() string {
+	return fmt.Sprintf("%s: %v", e.op, e.err)
+}
+
+func (e nonComparableWrappedTestError) Unwrap() error {
+	return e.err
+}
+
+func (e *nilUnsafeTestError) Error() string {
+	return e.err.Error()
+}
+
+func (e *nilUnsafeTestError) Unwrap() error {
+	return e.err
+}
+
+func (blankMessageTestError) Error() string {
+	return "   "
 }
 
 // 错误链摘要会在 nil 输入时返回零值，并对多层包装提取首尾信息。
@@ -60,6 +92,57 @@ func TestBuildErrorChainInfo(t *testing.T) {
 	}
 }
 
+// 不可比较的 error 值不能作为 map key；错误链诊断应安全退化，而不是在去重阶段 panic。
+func TestBuildErrorChainInfoWithNonComparableError(t *testing.T) {
+	root := errors.New("db timeout")
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("buildErrorChainInfo(non-comparable) panicked: %v", recovered)
+		}
+	}()
+
+	info := buildErrorChainInfo(nonComparableWrappedTestError{
+		op:     "query user",
+		frames: []string{"users", "repo"},
+		err:    root,
+	})
+	if got := info.message; got != "query user: db timeout" {
+		t.Fatalf("message = %q, want wrapped message", got)
+	}
+	if got := info.rootMessage; got != "db timeout" {
+		t.Fatalf("rootMessage = %q, want db timeout", got)
+	}
+	if !info.wrapped {
+		t.Fatal("wrapped = false, want true")
+	}
+}
+
+// typed-nil 或不安全的 Error()/Unwrap() 实现不应把日志注解路径打崩。
+func TestBuildErrorChainInfoWithTypedNilError(t *testing.T) {
+	var err error = (*nilUnsafeTestError)(nil)
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("buildErrorChainInfo(typed nil) panicked: %v", recovered)
+		}
+	}()
+
+	info := buildErrorChainInfo(err)
+	if got := info.errorType; got != "*resp.nilUnsafeTestError" {
+		t.Fatalf("errorType = %q, want *resp.nilUnsafeTestError", got)
+	}
+	if got := info.rootType; got != "*resp.nilUnsafeTestError" {
+		t.Fatalf("rootType = %q, want *resp.nilUnsafeTestError", got)
+	}
+	if got := info.message; !strings.Contains(got, "panic calling Error()") {
+		t.Fatalf("message = %q, want panic fallback text", got)
+	}
+	if got := info.rootMessage; !strings.Contains(got, "panic calling Error()") {
+		t.Fatalf("rootMessage = %q, want panic fallback text", got)
+	}
+}
+
 // 错误链展开会兼容 nil、深度限制、errors.Join 和循环引用。
 func TestFlattenErrorChain(t *testing.T) {
 	if got := flattenErrorChain(nil, maxLoggedErrorChainDepth); got != nil {
@@ -72,6 +155,15 @@ func TestFlattenErrorChain(t *testing.T) {
 	joined := errors.Join(errors.New("a"), fmt.Errorf("wrap: %w", errors.New("b")))
 	if got := flattenErrorChain(joined, 2); len(got) != 2 {
 		t.Fatalf("flattenErrorChain(joined, 2) len = %d, want 2", len(got))
+	}
+
+	wideJoin := errors.Join(errors.New("a"), errors.New("b"), errors.New("c"))
+	gotWideJoin := flattenErrorChain(wideJoin, 2)
+	if len(gotWideJoin) != 2 {
+		t.Fatalf("flattenErrorChain(wideJoin, 2) len = %d, want 2", len(gotWideJoin))
+	}
+	if got := gotWideJoin[1].Error(); got != "a" {
+		t.Fatalf("flattenErrorChain(wideJoin, 2)[1] = %q, want first child a", got)
 	}
 
 	cycle := &cycleTestError{}
@@ -137,6 +229,12 @@ func TestRequestErrorLogAttrs(t *testing.T) {
 func TestErrorTypeNameAndLimitErrorLogString(t *testing.T) {
 	if got := errorTypeName(nil); got != "" {
 		t.Fatalf("errorTypeName(nil) = %q, want empty", got)
+	}
+	if got := isComparableError(nil); got {
+		t.Fatalf("isComparableError(nil) = true, want false")
+	}
+	if got := safeErrorString(nil); got != "" {
+		t.Fatalf("safeErrorString(nil) = %q, want empty", got)
 	}
 
 	var typedNil error = (*rawTestError)(nil)

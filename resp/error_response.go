@@ -9,20 +9,27 @@ import (
 // cause 仅用于内部保留原始错误链，真正返回给客户端的是
 // title/status/detail/code/errors。
 type HTTPError struct {
+	// status 始终收敛到“可公开返回的错误状态码”范围内。
 	status int
-	code   string
+	// code 是机器可读错误码；构造时会做 trim 和缺省补齐。
+	code string
+	// detail 是公开错误详情；缺省时会回退到稳定的标题文案。
 	detail string
+	// errors 是公开结构化错误详情列表；这里只做切片浅拷贝，不尝试深拷贝元素。
 	errors []any
-	cause  error
+	// cause 仅用于内部错误链，不直接暴露给客户端。
+	cause error
 }
 
 // NewError 构造一个不带底层 cause 的公共 HTTP 错误。
+// 它会统一补齐默认 status/code/detail，并对 errors 做防御性浅拷贝。
 func NewError(status int, code, detail string, errors ...any) *HTTPError {
 	return wrapError(status, code, detail, nil, errors...)
 }
 
 // wrapError 基于给定 cause 构造公共 HTTP 错误。
 // 非法状态码会被归一化，缺省 code/detail 也会按状态码补全。
+// 这里在入口一次性做标准化，保证后续写响应时不会因为原始输入脏数据而漂移。
 func wrapError(status int, code, detail string, cause error, errors ...any) *HTTPError {
 	status = normalizeErrorStatus(status)
 	return &HTTPError{
@@ -34,6 +41,9 @@ func wrapError(status int, code, detail string, cause error, errors ...any) *HTT
 	}
 }
 
+// Error 实现 error 接口。
+// 若保留了底层 cause，则优先返回 cause 的文本，便于日志和 errors.Is/As 诊断；
+// 否则回退为当前对象稳定的公开 Detail。
 func (e *HTTPError) Error() string {
 	if e == nil {
 		return ""
@@ -41,9 +51,10 @@ func (e *HTTPError) Error() string {
 	if e.cause != nil {
 		return e.cause.Error()
 	}
-	return e.detail
+	return e.Detail()
 }
 
+// Unwrap 暴露底层 cause，便于调用方继续使用 errors.Is / errors.As。
 func (e *HTTPError) Unwrap() error {
 	if e == nil {
 		return nil
@@ -51,6 +62,8 @@ func (e *HTTPError) Unwrap() error {
 	return e.cause
 }
 
+// Status 返回可公开返回的 HTTP 错误状态码。
+// 即使内部字段被错误写入，也会再次收敛到安全范围。
 func (e *HTTPError) Status() int {
 	if e == nil {
 		return http.StatusInternalServerError
@@ -58,6 +71,8 @@ func (e *HTTPError) Status() int {
 	return normalizeErrorStatus(e.status)
 }
 
+// Code 返回机器可读错误码。
+// 若构造时未显式提供，或内部字段被写成空白值，会按最终状态码补齐默认值。
 func (e *HTTPError) Code() string {
 	if e == nil {
 		return normalizeErrorCode(http.StatusInternalServerError, "")
@@ -65,6 +80,8 @@ func (e *HTTPError) Code() string {
 	return normalizeErrorCode(e.Status(), e.code)
 }
 
+// Title 返回公开错误标题。
+// 这里不读取 detail/cause，只取“状态码对应的稳定标题”。
 func (e *HTTPError) Title() string {
 	if e == nil {
 		return normalizeErrorTitle(http.StatusInternalServerError)
@@ -72,6 +89,8 @@ func (e *HTTPError) Title() string {
 	return normalizeErrorTitle(e.Status())
 }
 
+// Detail 返回公开错误详情。
+// 若 detail 为空白，则回退到与 Title 对齐的稳定默认文案。
 func (e *HTTPError) Detail() string {
 	if e == nil {
 		return normalizeErrorDetail(http.StatusInternalServerError, "")
@@ -79,6 +98,8 @@ func (e *HTTPError) Detail() string {
 	return normalizeErrorDetail(e.Status(), e.detail)
 }
 
+// Errors 返回公开结构化错误详情列表的防御性浅拷贝。
+// 调用方修改返回切片时，不会影响已构造的 HTTPError。
 func (e *HTTPError) Errors() []any {
 	if e == nil || len(e.errors) == 0 {
 		return nil
@@ -86,44 +107,52 @@ func (e *HTTPError) Errors() []any {
 	return cloneErrors(e.errors)
 }
 
-// Message 保留为 Detail 的兼容别名。
+// Message 保留为 Detail 的兼容别名，便于复用 Echo 风格调用习惯。
 func (e *HTTPError) Message() string {
 	return e.Detail()
 }
 
-// Details 保留为 Errors 的兼容别名。
+// Details 保留为 Errors 的兼容别名，便于兼容旧调用方。
 func (e *HTTPError) Details() []any {
 	return e.Errors()
 }
 
+// BadRequest 构造 400 Bad Request 公共错误。
 func BadRequest(code, detail string, errors ...any) *HTTPError {
 	return NewError(http.StatusBadRequest, code, detail, errors...)
 }
 
+// Unauthorized 构造 401 Unauthorized 公共错误。
 func Unauthorized(code, detail string, errors ...any) *HTTPError {
 	return NewError(http.StatusUnauthorized, code, detail, errors...)
 }
 
+// Forbidden 构造 403 Forbidden 公共错误。
 func Forbidden(code, detail string, errors ...any) *HTTPError {
 	return NewError(http.StatusForbidden, code, detail, errors...)
 }
 
+// NotFound 构造 404 Not Found 公共错误。
 func NotFound(code, detail string, errors ...any) *HTTPError {
 	return NewError(http.StatusNotFound, code, detail, errors...)
 }
 
+// MethodNotAllowed 构造 405 Method Not Allowed 公共错误。
 func MethodNotAllowed(code, detail string, errors ...any) *HTTPError {
 	return NewError(http.StatusMethodNotAllowed, code, detail, errors...)
 }
 
+// Conflict 构造 409 Conflict 公共错误。
 func Conflict(code, detail string, errors ...any) *HTTPError {
 	return NewError(http.StatusConflict, code, detail, errors...)
 }
 
+// UnprocessableEntity 构造 422 Unprocessable Entity 公共错误。
 func UnprocessableEntity(code, detail string, errors ...any) *HTTPError {
 	return NewError(http.StatusUnprocessableEntity, code, detail, errors...)
 }
 
+// TooManyRequests 构造 429 Too Many Requests 公共错误。
 func TooManyRequests(code, detail string, errors ...any) *HTTPError {
 	return NewError(http.StatusTooManyRequests, code, detail, errors...)
 }
@@ -138,7 +167,8 @@ func cloneErrors(errors []any) []any {
 	return cloned
 }
 
-// normalizeErrorStatus 把非法或越界状态码收敛到 500，避免下游 WriteHeader panic。
+// normalizeErrorStatus 把非法或越界状态码收敛到 500。
+// 这里仅允许错误语义下的 4xx/5xx；像 499 这类非标准但常用的错误状态也允许保留。
 func normalizeErrorStatus(status int) int {
 	if status < 400 || status > 599 {
 		return http.StatusInternalServerError
@@ -151,8 +181,11 @@ func normalizeErrorCode(status int, code string) string {
 	if trimmed := strings.TrimSpace(code); trimmed != "" {
 		return trimmed
 	}
+	status = normalizeErrorStatus(status)
 
 	switch status {
+	case 499:
+		return "client_closed_request"
 	case http.StatusBadRequest:
 		return "bad_request"
 	case http.StatusUnauthorized:
@@ -182,6 +215,7 @@ func normalizeErrorCode(status int, code string) string {
 }
 
 // normalizeErrorTitle 根据状态码生成公开错误标题。
+// 对标准状态优先使用 net/http 的状态文本；对 499 等非标准状态做显式补齐。
 func normalizeErrorTitle(status int) string {
 	status = normalizeErrorStatus(status)
 	switch status {
@@ -195,6 +229,7 @@ func normalizeErrorTitle(status int) string {
 }
 
 // normalizeErrorDetail 根据状态码补齐默认公共错误详情。
+// 显式 detail 优先；若为空白则与 Title 保持一致，避免对外响应出现空 detail。
 func normalizeErrorDetail(status int, detail string) string {
 	if trimmed := strings.TrimSpace(detail); trimmed != "" {
 		return trimmed
@@ -203,6 +238,7 @@ func normalizeErrorDetail(status int, detail string) string {
 }
 
 // normalizeErrorMessage 保留为 normalizeErrorDetail 的兼容别名。
+// 兼容仍在使用 “message” 命名的内部测试和旧代码。
 func normalizeErrorMessage(status int, message string) string {
 	return normalizeErrorDetail(status, message)
 }

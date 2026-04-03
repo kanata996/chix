@@ -73,6 +73,15 @@ func TestHTTPErrorErrorReturnsMessageWithoutCause(t *testing.T) {
 	}
 }
 
+// 即使内部 detail 字段为空，Error 也应与公开 Detail 保持一致，不返回空串。
+func TestHTTPErrorErrorFallsBackToNormalizedDetail(t *testing.T) {
+	err := &HTTPError{status: http.StatusBadRequest}
+
+	if got := err.Error(); got != http.StatusText(http.StatusBadRequest) {
+		t.Fatalf("Error() = %q, want %q", got, http.StatusText(http.StatusBadRequest))
+	}
+}
+
 // 各个常用错误构造器都会生成稳定的状态码、错误码和公开消息。
 func TestHTTPErrorConstructors(t *testing.T) {
 	testCases := []struct {
@@ -178,8 +187,10 @@ func TestNormalizeErrorCode(t *testing.T) {
 		{name: "too many requests", status: http.StatusTooManyRequests, want: "too_many_requests"},
 		{name: "service unavailable", status: http.StatusServiceUnavailable, want: "service_unavailable"},
 		{name: "gateway timeout", status: http.StatusGatewayTimeout, want: "timeout"},
+		{name: "client closed request", status: 499, want: "client_closed_request"},
 		{name: "internal error", status: http.StatusInternalServerError, want: "internal_error"},
 		{name: "other client error", status: http.StatusTeapot, want: "client_error"},
+		{name: "invalid status normalized to internal", status: 200, want: "internal_error"},
 	}
 
 	for _, tc := range testCases {
@@ -219,5 +230,22 @@ func TestNormalizeErrorTitleSupports499(t *testing.T) {
 	}
 	if got := normalizeErrorTitle(509); got != http.StatusText(http.StatusInternalServerError) {
 		t.Fatalf("normalizeErrorTitle(509) = %q, want %q", got, http.StatusText(http.StatusInternalServerError))
+	}
+}
+
+func TestNewErrorSupports499Defaults(t *testing.T) {
+	err := NewError(499, "", "")
+
+	if got := err.Status(); got != 499 {
+		t.Fatalf("Status() = %d, want 499", got)
+	}
+	if got := err.Code(); got != "client_closed_request" {
+		t.Fatalf("Code() = %q, want client_closed_request", got)
+	}
+	if got := err.Title(); got != "Client Closed Request" {
+		t.Fatalf("Title() = %q, want Client Closed Request", got)
+	}
+	if got := err.Detail(); got != "Client Closed Request" {
+		t.Fatalf("Detail() = %q, want Client Closed Request", got)
 	}
 }

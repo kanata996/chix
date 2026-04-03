@@ -351,6 +351,12 @@ func TestMarshalProblemPayloadNilHTTPError(t *testing.T) {
 	}
 }
 
+func TestProblemPayloadFromHTTPErrorNil(t *testing.T) {
+	if got := problemPayloadFromHTTPError(nil, true); got.Title != "" || got.Status != 0 || got.Detail != "" || got.Code != "" || got.Errors != nil {
+		t.Fatalf("problemPayloadFromHTTPError(nil) = %#v, want zero value", got)
+	}
+}
+
 // ErrorWriteDegraded 在 nil 接收者和普通错误场景下都应提供稳定的错误语义。
 func TestErrorWriteDegradedMethods(t *testing.T) {
 	var nilErr *ErrorWriteDegraded
@@ -402,7 +408,7 @@ func TestWriteHTTPErrorNilHTTPErrorIsNoop(t *testing.T) {
 func TestWriteErrorPayloadReturnsJoinedErrorWhenFallbackWriteFails(t *testing.T) {
 	w := &failingWriter{}
 
-	err := writeErrorPayload(w, http.StatusBadRequest, "bad_request", "bad request", []any{func() {}})
+	err := writeErrorPayload(w, NewError(http.StatusBadRequest, "bad_request", "bad request", func() {}))
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
