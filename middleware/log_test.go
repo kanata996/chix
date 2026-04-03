@@ -196,7 +196,11 @@ func TestRequestLogger_InjectsBaseRequestAttrsOnSuccess(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNoContent)
 	}
 
-	logEntry := decodeLogEntry(t, lastLogLine(t, buf.Bytes()))
+	rawLogEntry := lastLogLine(t, buf.Bytes())
+	assertJSONKeyOccursOnce(t, rawLogEntry, "request.id")
+	assertJSONKeyOccursOnce(t, rawLogEntry, "http.route")
+
+	logEntry := decodeLogEntry(t, rawLogEntry)
 	if got := logEntry["request.id"]; got != "req-123" {
 		t.Fatalf("request.id = %#v, want req-123", got)
 	}
@@ -229,7 +233,11 @@ func TestRequestLogger_InjectsBaseRequestAttrsOnPanic(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
 	}
 
-	logEntry := decodeLogEntry(t, lastLogLine(t, buf.Bytes()))
+	rawLogEntry := lastLogLine(t, buf.Bytes())
+	assertJSONKeyOccursOnce(t, rawLogEntry, "request.id")
+	assertJSONKeyOccursOnce(t, rawLogEntry, "http.route")
+
+	logEntry := decodeLogEntry(t, rawLogEntry)
 	if got := logEntry["request.id"]; got != "req-456" {
 		t.Fatalf("request.id = %#v, want req-456", got)
 	}
@@ -556,6 +564,14 @@ func lastLogLine(t *testing.T, payload []byte) []byte {
 		t.Fatal("no log lines captured")
 	}
 	return lines[len(lines)-1]
+}
+
+func assertJSONKeyOccursOnce(t *testing.T, payload []byte, key string) {
+	t.Helper()
+
+	if got := bytes.Count(payload, []byte(`"`+key+`"`)); got != 1 {
+		t.Fatalf("%s count = %d, want 1, payload = %s", key, got, payload)
+	}
 }
 
 func attrsToMap(attrs []slog.Attr) map[string]any {
