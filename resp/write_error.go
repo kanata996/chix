@@ -7,13 +7,13 @@
 //
 // 职责：
 //   - 统一 error -> HTTPError 的收敛规则。
-//   - 统一错误 JSON 包络的编码与写回。
-//   - 处理 HEAD 请求、响应已开始写出、details 序列化失败等边界。
+//   - 统一错误 JSON 对象的编码与写回。
+//   - 处理 HEAD 请求、响应已开始写出、errors 序列化失败等边界。
 //
 // 要点：
 //   - 对外响应契约稳定优先，不泄露内部原始错误对象。
 //   - 普通 4xx / 5xx 只写统一错误响应，不额外输出重复业务错误日志。
-//   - 若 details 无法编码，则降级保留 status/code/message，尽量保证客户端仍收到有效错误响应。
+//   - 若 errors 无法编码，则降级保留 title/status/detail/code，尽量保证客户端仍收到有效错误响应。
 package resp
 
 import (
@@ -24,23 +24,19 @@ import (
 	"net/http"
 )
 
-// errorEnvelope 是统一错误响应的内部包裹结构。
-// 对外始终以 {"error": ...} 形式输出，避免不同 handler 各自拼装错误 JSON。
-type errorEnvelope struct {
-	Error errorPayload `json:"error"`
-}
-
-// errorPayload 是最终写入响应体的公共错误字段。
+// problemPayload 是最终写入响应体的公共错误字段。
 // 这里不包含内部原始 error，避免把服务端细节泄露给客户端。
-type errorPayload struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Details []any  `json:"details"`
+type problemPayload struct {
+	Title  string `json:"title"`
+	Status int    `json:"status"`
+	Detail string `json:"detail"`
+	Code   string `json:"code"`
+	Errors []any  `json:"errors,omitempty"`
 }
 
 // ErrorWriteDegraded 表示错误响应在写出时发生了“可恢复降级”。
-// 典型场景是 details 无法序列化，此时仍尽量保留 status/code/message，
-// 但会丢弃不可编码的 details，并把降级信息返回给调用方。
+// 典型场景是 errors 无法序列化，此时仍尽量保留 title/status/detail/code，
+// 但会丢弃不可编码的 errors，并把降级信息返回给调用方。
 type ErrorWriteDegraded struct {
 	Cause                   error
 	PreservedPublicResponse bool
@@ -55,7 +51,7 @@ type ErrorWriteDegraded struct {
 //
 // 约束：
 //   - 对 HEAD 请求仅写状态码，不写 body；
-//   - 若响应已经开始写出，则不再尝试二次改写响应；
+//   - 若能明确判断响应已经开始写出，则不再尝试二次改写响应；
 //   - 普通 4xx / 5xx 不在这里额外输出一条重复业务错误日志。
 func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 	if err == nil {
@@ -66,6 +62,9 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 	if errors.As(err, &responseStartedErr) && responseStartedErr != nil && responseStartedErr.responseStarted {
 		return err
 	}
+	if responseAlreadyStarted(w) {
+		return err
+	}
 
 	httpErr := asHTTPError(err)
 	annotateRequestErrorLog(r, err, httpErr)
@@ -74,8 +73,34 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 	return writeErr
 }
 
+// responseAlreadyStarted 仅在 writer 显式暴露响应状态时判断是否已经开始写出。
+// 对于通用 http.ResponseWriter，标准接口本身无法可靠探测“是否已发出 header/body”。
+func responseAlreadyStarted(w http.ResponseWriter) bool {
+	type responseStateWriter interface {
+		Status() int
+		BytesWritten() int
+	}
+	type responseUnwrapper interface {
+		Unwrap() http.ResponseWriter
+	}
+
+	for depth := 0; w != nil && depth < 8; depth++ {
+		if state, ok := w.(responseStateWriter); ok && (state.Status() != 0 || state.BytesWritten() > 0) {
+			return true
+		}
+
+		unwrapper, ok := w.(responseUnwrapper)
+		if !ok {
+			break
+		}
+		w = unwrapper.Unwrap()
+	}
+
+	return false
+}
+
 // asHTTPError 把任意 error 适配为 HTTPError。
-// 这是错误响应语义的收敛点，负责得到最终 status/code/message/details。
+// 这是错误响应语义的收敛点，负责得到最终 status/code/detail/errors。
 //
 // 适配顺序：
 //   - 已经是 HTTPError，直接返回；
@@ -104,9 +129,9 @@ func asHTTPError(err error) *HTTPError {
 // Error 返回降级错误的文本描述，便于上层记录或断言。
 func (e *ErrorWriteDegraded) Error() string {
 	if e == nil || e.Cause == nil {
-		return "resp: error response details were dropped"
+		return "resp: error response errors were dropped"
 	}
-	return "resp: error response details were dropped: " + e.Cause.Error()
+	return "resp: error response errors were dropped: " + e.Cause.Error()
 }
 
 // Unwrap 返回降级的底层原因，便于 errors.Is / errors.As 继续判断。
@@ -125,22 +150,27 @@ func writeHTTPError(w http.ResponseWriter, r *http.Request, httpErr *HTTPError) 
 	}
 	if r != nil && r.Method == http.MethodHead {
 		if w != nil {
-			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Type", problemJSONContentType)
 		}
 		return writeStatus(w, httpErr.Status())
 	}
 
-	return writeErrorPayload(w, httpErr.Status(), httpErr.Code(), httpErr.Message(), httpErr.Details())
+	return writeErrorPayload(w, httpErr.Status(), httpErr.Code(), httpErr.Detail(), httpErr.Errors())
 }
 
-// writeErrorPayload 负责真正把错误 envelope 编码并写到响应里。
-// 如果 details 序列化失败，会降级为只保留 code/message 的响应，
+// writeErrorPayload 负责真正把错误对象编码并写到响应里。
+// 如果 errors 序列化失败，会降级为只保留 title/status/detail/code 的响应，
 // 尽量避免整次错误响应完全失败。
-func writeErrorPayload(w http.ResponseWriter, status int, code, message string, details []any) error {
-	body, err := marshalErrorEnvelope(code, message, normalizeDetails(details))
+func writeErrorPayload(w http.ResponseWriter, status int, code, detail string, items []any) error {
+	httpErr := wrapError(status, code, detail, nil, items...)
+	body, err := marshalProblemPayload(httpErr)
 	if err != nil {
-		fallbackBody, _ := marshalErrorEnvelope(code, message, []any{})
-		if writeErr := writeJSONBytes(w, normalizeErrorStatus(status), fallbackBody); writeErr != nil {
+		fallbackBody, _ := marshalProblemPayload(&HTTPError{
+			status: httpErr.Status(),
+			code:   httpErr.Code(),
+			detail: httpErr.Detail(),
+		})
+		if writeErr := writeJSONBytesWithContentType(w, httpErr.Status(), problemJSONContentType, fallbackBody); writeErr != nil {
 			return errors.Join(&ErrorWriteDegraded{Cause: err}, writeErr)
 		}
 		return &ErrorWriteDegraded{
@@ -149,33 +179,36 @@ func writeErrorPayload(w http.ResponseWriter, status int, code, message string, 
 		}
 	}
 
-	return writeJSONBytes(w, normalizeErrorStatus(status), body)
+	return writeJSONBytesWithContentType(w, httpErr.Status(), problemJSONContentType, body)
 }
 
-// marshalErrorEnvelope 把公共错误字段编码为最终的 JSON 响应体。
+// marshalProblemPayload 把公共错误字段编码为最终的 JSON 响应体。
 // 该步骤只关心响应体结构，不处理日志、副作用或写出行为。
-func marshalErrorEnvelope(code, message string, details []any) (body []byte, err error) {
+func marshalProblemPayload(httpErr *HTTPError) (body []byte, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			body = nil
-			err = fmt.Errorf("resp: marshal error envelope panicked: %v", recovered)
+			err = fmt.Errorf("resp: marshal problem payload panicked: %v", recovered)
 		}
 	}()
 
-	return json.Marshal(errorEnvelope{
-		Error: errorPayload{
-			Code:    code,
-			Message: message,
-			Details: details,
-		},
+	if httpErr == nil {
+		return json.Marshal(problemPayload{})
+	}
+
+	return json.Marshal(problemPayload{
+		Title:  httpErr.Title(),
+		Status: httpErr.Status(),
+		Detail: httpErr.Detail(),
+		Code:   httpErr.Code(),
+		Errors: normalizeErrors(httpErr.Errors()),
 	})
 }
 
-// normalizeDetails 保证 details 在对外响应里至少是空数组，而不是 null。
-// 这样可以稳定前端和测试侧对错误结构的读取逻辑。
-func normalizeDetails(details []any) []any {
-	if len(details) == 0 {
-		return []any{}
+// normalizeErrors 保证 errors 在有内容时返回防御性拷贝。
+func normalizeErrors(items []any) []any {
+	if len(items) == 0 {
+		return nil
 	}
-	return cloneDetails(details)
+	return cloneErrors(items)
 }

@@ -123,7 +123,9 @@ func mapDecodeError(err error) error {
 	if errors.As(err, &typeErr) {
 		return invalidFieldError(Violation{
 			Field:   typeErr.Field,
+			In:      ViolationInBody,
 			Code:    ViolationCodeType,
+			Detail:  "must be " + describeJSONType(typeErr.Type),
 			Message: "must be " + describeJSONType(typeErr.Type),
 		})
 	}
@@ -140,7 +142,9 @@ func mapDecodeError(err error) error {
 	if field, ok := parseUnknownField(err); ok {
 		return invalidFieldError(Violation{
 			Field:   field,
+			In:      ViolationInBody,
 			Code:    ViolationCodeUnknown,
+			Detail:  "unknown field",
 			Message: "unknown field",
 		})
 	}

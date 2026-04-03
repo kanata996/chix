@@ -15,11 +15,21 @@ const (
 	ViolationCodeMultiple = "multiple"
 )
 
+const (
+	ViolationInBody    = "body"
+	ViolationInQuery   = "query"
+	ViolationInPath    = "path"
+	ViolationInHeader  = "header"
+	ViolationInRequest = "request"
+)
+
 // Violation 描述单个字段校验失败。
 type Violation struct {
 	Field   string `json:"field,omitempty"`
+	In      string `json:"in,omitempty"`
 	Code    string `json:"code"`
-	Message string `json:"message"`
+	Detail  string `json:"detail"`
+	Message string `json:"-"`
 }
 
 // ValidateFunc 校验已经解码好的请求值。
@@ -61,19 +71,24 @@ func normalizeViolation(violation Violation) Violation {
 	if violation.Code == "" {
 		violation.Code = ViolationCodeInvalid
 	}
-	if violation.Message != "" {
+	if violation.Detail == "" && violation.Message != "" {
+		violation.Detail = violation.Message
+	}
+	if violation.Detail != "" {
+		violation.Message = violation.Detail
 		return violation
 	}
 
 	switch violation.Code {
 	case ViolationCodeRequired:
-		violation.Message = "is required"
+		violation.Detail = "is required"
 	case ViolationCodeUnknown:
-		violation.Message = "unknown field"
+		violation.Detail = "unknown field"
 	case ViolationCodeType:
-		violation.Message = "has invalid type"
+		violation.Detail = "has invalid type"
 	default:
-		violation.Message = "is invalid"
+		violation.Detail = "is invalid"
 	}
+	violation.Message = violation.Detail
 	return violation
 }

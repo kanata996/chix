@@ -201,7 +201,7 @@ func TestBind_RejectsUnsupportedBodyContentTypeWhenBodyPresent(t *testing.T) {
 
 	var bound request
 	err := Bind(req, &bound)
-	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
+	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json or application/*+json")
 }
 
 // GET 请求中的 query 绑定错误会直接向上返回。

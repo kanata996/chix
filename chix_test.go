@@ -234,13 +234,12 @@ func TestWriteError_DelegatesToResp(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusGatewayTimeout)
 	}
 
-	payload := decodeRootPayload(t, rr.Body.Bytes())
-	body, ok := payload["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("error body = %#v, want object", payload["error"])
-	}
+	body := decodeRootPayload(t, rr.Body.Bytes())
 	if got := body["code"]; got != "timeout" {
-		t.Fatalf("error.code = %#v, want timeout", got)
+		t.Fatalf("code = %#v, want timeout", got)
+	}
+	if got := body["title"]; got != http.StatusText(http.StatusGatewayTimeout) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusGatewayTimeout))
 	}
 }
 

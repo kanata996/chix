@@ -113,9 +113,9 @@ curl -i \
 
 ```http
 HTTP/1.1 422 Unprocessable Entity
-Content-Type: application/json
+Content-Type: application/problem+json
 
-{"error":{"code":"invalid_request","message":"request contains invalid fields","details":[{"field":"name","code":"required","message":"is required"}]}}
+{"title":"Unprocessable Entity","status":422,"detail":"request contains invalid fields","code":"invalid_request","errors":[{"field":"name","in":"body","code":"required","detail":"is required"}]}
 ```
 
 ## 请求绑定与校验
@@ -177,7 +177,7 @@ func (r *listAccountsRequest) Normalize() {
 }
 ```
 
-校验错误中的字段名会优先使用请求侧 tag 名，而不是 Go struct 字段名。例如 `json:"name"` 失败时，返回的 detail 会是 `field: "name"`。
+校验错误中的字段名会优先使用请求侧 tag 名，而不是 Go struct 字段名。例如 `json:"name"` 失败时，返回的错误项会是 `field: "name", in: "body"`。
 
 ## 响应
 
@@ -194,19 +194,32 @@ func (r *listAccountsRequest) Normalize() {
 
 ```json
 {
-  "error": {
-    "code": "invalid_request",
-    "message": "request contains invalid fields",
-    "details": [
-      {
-        "field": "name",
-        "code": "required",
-        "message": "is required"
-      }
-    ]
-  }
+  "title": "Unprocessable Entity",
+  "status": 422,
+  "detail": "request contains invalid fields",
+  "code": "invalid_request",
+  "errors": [
+    {
+      "field": "name",
+      "in": "body",
+      "code": "required",
+      "detail": "is required"
+    }
+  ]
 }
 ```
+
+当前公开错误模型采用 problem 风格字段命名，但不返回 `type` 和 `instance`。字段约定如下：
+
+- 成功 JSON 响应使用 `application/json`
+- 错误 JSON 响应使用 `application/problem+json`
+- 顶层固定字段为 `title`、`status`、`detail`、`code`
+- `title` 始终由 HTTP status text 生成，例如 `422 -> "Unprocessable Entity"`
+- `detail` 承载对外公开的人类可读说明
+- `code` 承载稳定的机器错误码，便于客户端分支处理
+- `errors` 仅在存在结构化字段错误时出现
+- `errors[]` 子项固定为 `field`、`in`、`code`、`detail`
+- `in` 表示错误来源，当前可能为 `body`、`query`、`path`、`header`、`request`
 
 常见归一化规则：
 
@@ -217,8 +230,9 @@ func (r *listAccountsRequest) Normalize() {
 - `context.Canceled` 返回 `499 Client Closed Request`，错误码为 `client_closed_request`
 - `context.DeadlineExceeded` 返回 `504 Gateway Timeout`，错误码为 `timeout`
 - 未知错误默认返回 `500 Internal Server Error`，错误码为 `internal_error`
-- `HEAD` 请求只写状态码和 `Content-Type`，不写响应体
-- `details` 字段总是数组；没有明细时写空数组，不写 `null`
+- `HEAD` 错误响应只写状态码和 `application/problem+json`，不写响应体
+- `title` 始终由状态码生成，`detail` 承载公开说明，`code` 承载稳定机器码
+- `errors` 仅在存在结构化字段错误时出现；单个错误项使用 `field`、`in`、`code`、`detail`
 
 如果你需要可复用的公共错误值，可以直接使用 `resp.HTTPError`，以及 `resp.BadRequest(...)`、`resp.NotFound(...)`、`resp.UnprocessableEntity(...)` 等辅助构造函数。
 

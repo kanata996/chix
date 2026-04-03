@@ -20,7 +20,7 @@ func TestBindHeaders_RejectsRepeatedScalar(t *testing.T) {
 	var dst request
 	err := BindHeaders(req, &dst)
 	violation := assertSingleViolation(t, err)
-	if violation.Field != "X-Request-Id" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
+	if violation.Field != "X-Request-Id" || violation.In != ViolationInHeader || violation.Code != ViolationCodeMultiple || violation.Detail != "must not be repeated" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -34,7 +34,7 @@ func TestBindAndValidateHeaders_UsesCanonicalHeaderTagName(t *testing.T) {
 	}
 	err := BindAndValidateHeaders(req, &dst)
 	violation := assertSingleViolation(t, err)
-	if violation.Field != "X-Request-Id" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+	if violation.Field != "X-Request-Id" || violation.In != ViolationInHeader || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -47,7 +47,7 @@ func TestValidateBody_UsesJSONTagName(t *testing.T) {
 
 	err := ValidateBody(&dst)
 	violation := assertSingleViolation(t, err)
-	if violation.Field != "display_name" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+	if violation.Field != "display_name" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -60,7 +60,7 @@ func TestValidatePath_UsesParamTagName(t *testing.T) {
 
 	err := ValidatePath(&dst)
 	violation := assertSingleViolation(t, err)
-	if violation.Field != "uuid" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+	if violation.Field != "uuid" || violation.In != ViolationInPath || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -75,7 +75,7 @@ func TestValidate_CustomValidationNormalizesViolation(t *testing.T) {
 		return []Violation{{Field: "name"}}
 	})
 	violation := assertSingleViolation(t, err)
-	if violation.Field != "name" || violation.Code != ViolationCodeInvalid || violation.Message != "is invalid" {
+	if violation.Field != "name" || violation.Code != ViolationCodeInvalid || violation.Detail != "is invalid" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -105,7 +105,7 @@ func TestBadRequest_ReturnsHTTPError(t *testing.T) {
 	if !ok {
 		t.Fatalf("detail type = %T, want reqx.Violation", details[0])
 	}
-	if violation.Field != "name" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+	if violation.Field != "name" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }

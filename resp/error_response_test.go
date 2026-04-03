@@ -22,6 +22,9 @@ func TestHTTPErrorNilReceiverUsesSafeDefaults(t *testing.T) {
 	if got := err.Code(); got != "internal_error" {
 		t.Fatalf("Code() = %q, want internal_error", got)
 	}
+	if got := err.Title(); got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf("Title() = %q, want %q", got, http.StatusText(http.StatusInternalServerError))
+	}
 	if got := err.Message(); got != http.StatusText(http.StatusInternalServerError) {
 		t.Fatalf("Message() = %q, want %q", got, http.StatusText(http.StatusInternalServerError))
 	}
@@ -207,5 +210,14 @@ func TestNormalizeErrorMessage(t *testing.T) {
 				t.Fatalf("normalizeErrorMessage(%d, %q) = %q, want %q", tc.status, tc.message, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeErrorTitleSupports499(t *testing.T) {
+	if got := normalizeErrorTitle(499); got != "Client Closed Request" {
+		t.Fatalf("normalizeErrorTitle(499) = %q, want Client Closed Request", got)
+	}
+	if got := normalizeErrorTitle(509); got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf("normalizeErrorTitle(509) = %q, want %q", got, http.StatusText(http.StatusInternalServerError))
 	}
 }

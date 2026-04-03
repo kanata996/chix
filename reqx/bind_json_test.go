@@ -20,7 +20,7 @@ func TestBindBody_RejectsUnsupportedMediaType(t *testing.T) {
 
 	var dst request
 	err := BindBody(req, &dst)
-	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
+	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json or application/*+json")
 }
 
 // 非法的媒体类型头会被拒绝。
@@ -34,7 +34,7 @@ func TestBindBody_RejectsInvalidMediaTypeHeader(t *testing.T) {
 
 	var dst request
 	err := BindBody(req, &dst)
-	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
+	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json or application/*+json")
 }
 
 // 默认配置下，空 body 会被忽略。

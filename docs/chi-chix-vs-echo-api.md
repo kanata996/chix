@@ -69,17 +69,18 @@
 
 ```json
 {
-  "error": {
-    "code": "invalid_request",
-    "message": "request contains invalid fields",
-    "details": [
-      {
-        "field": "name",
-        "code": "required",
-        "message": "is required"
-      }
-    ]
-  }
+  "title": "Unprocessable Entity",
+  "status": 422,
+  "detail": "request contains invalid fields",
+  "code": "invalid_request",
+  "errors": [
+    {
+      "field": "name",
+      "in": "body",
+      "code": "required",
+      "detail": "is required"
+    }
+  ]
 }
 ```
 
