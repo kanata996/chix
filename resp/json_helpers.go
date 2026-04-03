@@ -14,6 +14,8 @@ const (
 	defaultJSONIndent      = "  "
 )
 
+var errNilResponseWriter = errors.New("resp: response writer is nil")
+
 type responseWriteError struct {
 	cause           error
 	responseStarted bool
@@ -46,7 +48,7 @@ func writeJSONBytes(w http.ResponseWriter, status int, body []byte) error {
 // 调用方需要自行保证 body 已经是合法 JSON。
 func writeJSONBytesWithContentType(w http.ResponseWriter, status int, contentType string, body []byte) error {
 	if w == nil {
-		return errors.New("resp: response writer is nil")
+		return errNilResponseWriter
 	}
 	if err := validateHTTPStatus(status); err != nil {
 		return err
@@ -68,7 +70,7 @@ func writeJSONBytesWithContentType(w http.ResponseWriter, status int, contentTyp
 // writeStatus 仅写出状态码，不包含响应体。
 func writeStatus(w http.ResponseWriter, status int) error {
 	if w == nil {
-		return errors.New("resp: response writer is nil")
+		return errNilResponseWriter
 	}
 	if err := validateHTTPStatus(status); err != nil {
 		return err

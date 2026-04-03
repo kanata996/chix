@@ -18,6 +18,16 @@ var (
 	queryDecodePlanCache  sync.Map
 	pathDecodePlanCache   sync.Map
 	headerDecodePlanCache sync.Map
+	valueSourceReaders    = map[string]func(*http.Request) url.Values{
+		querySource.tag:  queryValues,
+		pathSource.tag:   pathValues,
+		headerSource.tag: headerValues,
+	}
+	valueSourceInputs = map[string]string{
+		querySource.tag:  ViolationInQuery,
+		pathSource.tag:   ViolationInPath,
+		headerSource.tag: ViolationInHeader,
+	}
 )
 
 type valueSource struct {
@@ -58,19 +68,12 @@ func BindQueryParams[T any](r *http.Request, dst *T, opts ...BindQueryParamsOpti
 
 func bindTaggedValues[T any](r *http.Request, dst *T, source valueSource, cfg bindValuesConfig) error {
 	if r == nil {
-		return fmt.Errorf("reqx: request must not be nil")
-	}
-	if dst == nil {
-		return fmt.Errorf("reqx: destination must not be nil")
+		return errorsf("request must not be nil")
 	}
 
-	bound := cloneBindingTarget(dst)
-	if err := bindTaggedValuesInPlace(r, bound, source, cfg); err != nil {
-		return err
-	}
-
-	*dst = *bound
-	return nil
+	return bindIntoClone(dst, func(bound *T) error {
+		return bindTaggedValuesInPlace(r, bound, source, cfg)
+	})
 }
 
 func bindTaggedValuesInPlace[T any](r *http.Request, dst *T, source valueSource, cfg bindValuesConfig) error {
@@ -225,29 +228,17 @@ func decodeValuesInto(dst reflect.Value, values url.Values, plan *valueDecodePla
 	sort.Strings(unknownKeys)
 
 	for _, key := range unknownKeys {
-		violations = append(violations, Violation{
-			Field:   key,
-			In:      input,
-			Code:    ViolationCodeUnknown,
-			Detail:  "unknown field",
-			Message: "unknown field",
-		})
+		violations = append(violations, newViolation(key, input, ViolationCodeUnknown, violationDetailUnknownField))
 	}
 
 	return violations, nil
 }
 
 func sourceValues(r *http.Request, source valueSource) url.Values {
-	switch source.tag {
-	case querySource.tag:
-		return queryValues(r)
-	case pathSource.tag:
-		return pathValues(r)
-	case headerSource.tag:
-		return headerValues(r)
-	default:
-		panic(fmt.Sprintf("reqx: unsupported value source %q", source.tag))
+	if readValues, ok := valueSourceReaders[source.tag]; ok {
+		return readValues(r)
 	}
+	panic(fmt.Sprintf("reqx: unsupported value source %q", source.tag))
 }
 
 func queryValues(r *http.Request) url.Values {
@@ -321,12 +312,12 @@ func decodeQueryField(dst reflect.Value, values []string, fieldName string, inpu
 	default:
 		if supportsTextUnmarshaler(dst.Type()) {
 			if len(values) > 1 {
-				return &Violation{Field: fieldName, In: input, Code: ViolationCodeMultiple, Detail: "must not be repeated", Message: "must not be repeated"}, nil
+				return multipleValueViolation(fieldName, input), nil
 			}
 			return decodeTextValue(dst, values[0], fieldName, input)
 		}
 		if len(values) > 1 {
-			return &Violation{Field: fieldName, In: input, Code: ViolationCodeMultiple, Detail: "must not be repeated", Message: "must not be repeated"}, nil
+			return multipleValueViolation(fieldName, input), nil
 		}
 		return decodeScalarValue(dst, values[0], fieldName, input)
 	}
@@ -380,7 +371,8 @@ func decodeTextValue(dst reflect.Value, rawValue string, fieldName string, input
 
 	unmarshaler := target.Interface().(encoding.TextUnmarshaler)
 	if err := unmarshaler.UnmarshalText([]byte(rawValue)); err != nil {
-		return &Violation{Field: fieldName, In: input, Code: ViolationCodeInvalid, Detail: "is invalid", Message: "is invalid"}, nil
+		violation := newViolation(fieldName, input, ViolationCodeInvalid, violationDetailInvalid)
+		return &violation, nil
 	}
 	return nil, nil
 }
@@ -396,26 +388,15 @@ func supportsTextUnmarshaler(t reflect.Type) bool {
 }
 
 func invalidValueType(fieldName, input string, t reflect.Type) *Violation {
-	return &Violation{
-		Field:   fieldName,
-		In:      input,
-		Code:    ViolationCodeType,
-		Detail:  "must be " + describeJSONType(t),
-		Message: "must be " + describeJSONType(t),
-	}
+	violation := newViolation(fieldName, input, ViolationCodeType, "must be "+describeJSONType(t))
+	return &violation
 }
 
 func violationInForValueSource(source valueSource) string {
-	switch source.tag {
-	case querySource.tag:
-		return ViolationInQuery
-	case pathSource.tag:
-		return ViolationInPath
-	case headerSource.tag:
-		return ViolationInHeader
-	default:
-		return ViolationInRequest
+	if input, ok := valueSourceInputs[source.tag]; ok {
+		return input
 	}
+	return ViolationInRequest
 }
 
 func firstViolationInput(inputs ...string) string {
@@ -425,4 +406,9 @@ func firstViolationInput(inputs ...string) string {
 		}
 	}
 	return ViolationInRequest
+}
+
+func multipleValueViolation(fieldName, input string) *Violation {
+	violation := newViolation(fieldName, input, ViolationCodeMultiple, violationDetailMustNotRepeat)
+	return &violation
 }

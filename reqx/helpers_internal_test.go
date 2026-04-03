@@ -715,7 +715,7 @@ func TestMustRegisterValidationPanicsOnInvalidRegistration(t *testing.T) {
 
 // 校验辅助函数会处理去重、排序和字段路径回退。
 func TestValidationHelpers(t *testing.T) {
-	if got := violationsFromValidation(sourceBody, nil); got != nil {
+	if got := violationsFromValidation(sourceBody, nil, nil); got != nil {
 		t.Fatalf("violationsFromValidation(nil) = %#v, want nil", got)
 	}
 
@@ -724,7 +724,7 @@ func TestValidationHelpers(t *testing.T) {
 		fakeFieldError{tag: "min", namespace: "Req.a", field: "a", typ: reflect.TypeOf("")},
 		fakeFieldError{tag: "required", namespace: "Req.a", field: "a", typ: reflect.TypeOf("")},
 	}
-	violations := violationsFromValidation(sourceRequest, errs)
+	violations := violationsFromValidation(sourceRequest, nil, errs)
 	if len(violations) != 2 {
 		t.Fatalf("violations len = %d, want 2", len(violations))
 	}

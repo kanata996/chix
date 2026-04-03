@@ -39,15 +39,12 @@ type errorChainInfo struct {
 	errorType   string
 	rootMessage string
 	rootType    string
-	chain       []string
-	typeChain   []string
-	wrapped     bool
 }
 
 // annotateRequestErrorLog 把错误诊断字段挂到当前请求日志上下文。
 // 这里不直接输出日志，只是补充 attrs，最终仍由外层 httplog 统一落日志。
 func annotateRequestErrorLog(r *http.Request, err error, httpErr *HTTPError) {
-	if r == nil || err == nil || httpErr == nil {
+	if r == nil {
 		return
 	}
 
@@ -143,18 +140,14 @@ func logErrorResponseWriteFailure(r *http.Request, httpErr *HTTPError, err error
 }
 
 // buildErrorChainInfo 把错误链整理成适合日志输出的摘要结构。
-// 它会同时保留当前错误、根错误以及整条错误链的 message / type 信息。
+// 它只保留请求日志会消费的首层/根因 message 与 type 摘要。
 func buildErrorChainInfo(err error) errorChainInfo {
 	chain := flattenErrorChain(err, maxLoggedErrorChainDepth)
 	if len(chain) == 0 {
 		return errorChainInfo{}
 	}
 
-	info := errorChainInfo{
-		chain:     make([]string, 0, len(chain)),
-		typeChain: make([]string, 0, len(chain)),
-		wrapped:   len(chain) > 1,
-	}
+	var info errorChainInfo
 	for _, item := range chain {
 		// 某些异常 error 实现（例如 typed-nil 或不安全的 Error()）可能在这里 panic。
 		// 日志诊断路径不能反向把主错误处理打崩，因此统一做恢复并降级为说明性文本。
@@ -165,14 +158,12 @@ func buildErrorChainInfo(err error) errorChainInfo {
 				info.message = message
 			}
 			info.rootMessage = message
-			info.chain = append(info.chain, message)
 		}
 		if errType != "" {
 			if info.errorType == "" {
 				info.errorType = errType
 			}
 			info.rootType = errType
-			info.typeChain = append(info.typeChain, errType)
 		}
 	}
 

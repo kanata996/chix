@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -20,22 +19,15 @@ type bodyBindMode struct {
 
 func BindBody[T any](r *http.Request, dst *T, opts ...BindBodyOption) error {
 	if r == nil {
-		return fmt.Errorf("reqx: request must not be nil")
-	}
-	if dst == nil {
-		return fmt.Errorf("reqx: destination must not be nil")
+		return errorsf("request must not be nil")
 	}
 
 	cfg := applyBindOptions(opts...)
-	bound := cloneBindingTarget(dst)
-	if err := bindJSONWithConfig(r, bound, cfg.body, bodyBindMode{
-		validateContentTypeOnEmpty: true,
-	}); err != nil {
-		return err
-	}
-
-	*dst = *bound
-	return nil
+	return bindIntoClone(dst, func(bound *T) error {
+		return bindJSONWithConfig(r, bound, cfg.body, bodyBindMode{
+			validateContentTypeOnEmpty: true,
+		})
+	})
 }
 
 func bindJSONWithConfig[T any](r *http.Request, dst *T, cfg bindBodyConfig, mode bodyBindMode) error {
@@ -125,13 +117,8 @@ func mapDecodeError(err error) error {
 
 	var typeErr *json.UnmarshalTypeError
 	if errors.As(err, &typeErr) {
-		return invalidFieldError(Violation{
-			Field:   typeErr.Field,
-			In:      ViolationInBody,
-			Code:    ViolationCodeType,
-			Detail:  "must be " + describeJSONType(typeErr.Type),
-			Message: "must be " + describeJSONType(typeErr.Type),
-		})
+		detail := "must be " + describeJSONType(typeErr.Type)
+		return invalidFieldError(newViolation(typeErr.Field, ViolationInBody, ViolationCodeType, detail))
 	}
 
 	var invalidUnmarshalErr *json.InvalidUnmarshalError
@@ -144,13 +131,7 @@ func mapDecodeError(err error) error {
 	}
 
 	if field, ok := parseUnknownField(err); ok {
-		return invalidFieldError(Violation{
-			Field:   field,
-			In:      ViolationInBody,
-			Code:    ViolationCodeUnknown,
-			Detail:  "unknown field",
-			Message: "unknown field",
-		})
+		return invalidFieldError(newViolation(field, ViolationInBody, ViolationCodeUnknown, violationDetailUnknownField))
 	}
 
 	return invalidJSONError("request body must be valid JSON")

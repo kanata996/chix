@@ -16,6 +16,14 @@ const (
 )
 
 const (
+	violationDetailInvalid       = "is invalid"
+	violationDetailRequired      = "is required"
+	violationDetailUnknownField  = "unknown field"
+	violationDetailInvalidType   = "has invalid type"
+	violationDetailMustNotRepeat = "must not be repeated"
+)
+
+const (
 	ViolationInBody    = "body"
 	ViolationInQuery   = "query"
 	ViolationInPath    = "path"
@@ -67,6 +75,16 @@ func invalidFieldsError(violations []Violation) error {
 	)
 }
 
+func newViolation(field, input, code, detail string) Violation {
+	return Violation{
+		Field:   field,
+		In:      input,
+		Code:    code,
+		Detail:  detail,
+		Message: detail,
+	}
+}
+
 func normalizeViolation(violation Violation) Violation {
 	if violation.Code == "" {
 		violation.Code = ViolationCodeInvalid
@@ -74,21 +92,24 @@ func normalizeViolation(violation Violation) Violation {
 	if violation.Detail == "" && violation.Message != "" {
 		violation.Detail = violation.Message
 	}
-	if violation.Detail != "" {
-		violation.Message = violation.Detail
-		return violation
-	}
-
-	switch violation.Code {
-	case ViolationCodeRequired:
-		violation.Detail = "is required"
-	case ViolationCodeUnknown:
-		violation.Detail = "unknown field"
-	case ViolationCodeType:
-		violation.Detail = "has invalid type"
-	default:
-		violation.Detail = "is invalid"
+	if violation.Detail == "" {
+		violation.Detail = violationDetailForCode(violation.Code)
 	}
 	violation.Message = violation.Detail
 	return violation
+}
+
+func violationDetailForCode(code string) string {
+	switch code {
+	case ViolationCodeRequired:
+		return violationDetailRequired
+	case ViolationCodeUnknown:
+		return violationDetailUnknownField
+	case ViolationCodeType:
+		return violationDetailInvalidType
+	case ViolationCodeMultiple:
+		return violationDetailMustNotRepeat
+	default:
+		return violationDetailInvalid
+	}
 }

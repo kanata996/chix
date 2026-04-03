@@ -237,6 +237,11 @@ func TestNormalizeViolationBranches(t *testing.T) {
 			want: Violation{Field: "name", Code: ViolationCodeType, Detail: "has invalid type", Message: "has invalid type"},
 		},
 		{
+			name: "multiple",
+			in:   Violation{Field: "name", Code: ViolationCodeMultiple},
+			want: Violation{Field: "name", Code: ViolationCodeMultiple, Detail: "must not be repeated", Message: "must not be repeated"},
+		},
+		{
 			name: "default",
 			in:   Violation{Field: "name"},
 			want: Violation{Field: "name", Code: ViolationCodeInvalid, Detail: "is invalid", Message: "is invalid"},

@@ -246,28 +246,6 @@ func TestNormalizeErrorCode(t *testing.T) {
 	}
 }
 
-// 错误消息标准化会优先使用显式消息，否则回退到合适的状态文本。
-func TestNormalizeErrorMessage(t *testing.T) {
-	testCases := []struct {
-		name    string
-		status  int
-		message string
-		want    string
-	}{
-		{name: "explicit", status: http.StatusBadRequest, message: " custom ", want: "custom"},
-		{name: "status text", status: http.StatusBadRequest, want: http.StatusText(http.StatusBadRequest)},
-		{name: "fallback internal server error", status: 777, want: http.StatusText(http.StatusInternalServerError)},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := normalizeErrorMessage(tc.status, tc.message); got != tc.want {
-				t.Fatalf("normalizeErrorMessage(%d, %q) = %q, want %q", tc.status, tc.message, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestNormalizeErrorTitleSupports499(t *testing.T) {
 	if got := normalizeErrorTitle(499); got != "Client Closed Request" {
 		t.Fatalf("normalizeErrorTitle(499) = %q, want Client Closed Request", got)

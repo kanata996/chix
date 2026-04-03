@@ -236,9 +236,3 @@ func normalizeErrorDetail(status int, detail string) string {
 	}
 	return normalizeErrorTitle(status)
 }
-
-// normalizeErrorMessage 保留为 normalizeErrorDetail 的兼容别名。
-// 兼容仍在使用 “message” 命名的内部测试和旧代码。
-func normalizeErrorMessage(status int, message string) string {
-	return normalizeErrorDetail(status, message)
-}

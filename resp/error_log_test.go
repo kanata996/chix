@@ -76,7 +76,7 @@ func (blankMessageTestError) Error() string {
 
 // 错误链摘要会在 nil 输入时返回零值，并对多层包装提取首尾信息。
 func TestBuildErrorChainInfo(t *testing.T) {
-	if got := buildErrorChainInfo(nil); got.message != "" || got.errorType != "" || got.rootMessage != "" || got.rootType != "" || len(got.chain) != 0 || len(got.typeChain) != 0 || got.wrapped {
+	if got := buildErrorChainInfo(nil); got.message != "" || got.errorType != "" || got.rootMessage != "" || got.rootType != "" {
 		t.Fatalf("buildErrorChainInfo(nil) = %#v, want zero value fields", got)
 	}
 
@@ -90,12 +90,6 @@ func TestBuildErrorChainInfo(t *testing.T) {
 	}
 	if got := info.rootType; got != "*errors.errorString" {
 		t.Fatalf("rootType = %q, want *errors.errorString", got)
-	}
-	if !info.wrapped {
-		t.Fatal("wrapped = false, want true")
-	}
-	if len(info.chain) != 2 {
-		t.Fatalf("chain = %#v, want len 2", info.chain)
 	}
 }
 
@@ -119,9 +113,6 @@ func TestBuildErrorChainInfoWithNonComparableError(t *testing.T) {
 	}
 	if got := info.rootMessage; got != "db timeout" {
 		t.Fatalf("rootMessage = %q, want db timeout", got)
-	}
-	if !info.wrapped {
-		t.Fatal("wrapped = false, want true")
 	}
 }
 

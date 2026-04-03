@@ -1,7 +1,6 @@
 package resp
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 )
@@ -9,11 +8,7 @@ import (
 // JSON 按 Echo Response 的核心能力写出 JSON 响应。
 // 当请求 URL 带有 ?pretty 时，会自动输出 pretty JSON。
 func JSON(w http.ResponseWriter, r *http.Request, status int, data any) error {
-	indent := ""
-	if shouldPrettyJSON(r) {
-		indent = defaultJSONIndent
-	}
-	return writeJSON(w, status, data, indent)
+	return writeJSON(w, status, data, jsonIndent(r))
 }
 
 // JSONPretty 使用指定缩进写出 pretty JSON。
@@ -61,15 +56,10 @@ func writeSuccess(w http.ResponseWriter, r *http.Request, status int, data any) 
 		return err
 	}
 	if w == nil {
-		return errors.New("resp: response writer is nil")
+		return errNilResponseWriter
 	}
 
-	indent := ""
-	if shouldPrettyJSON(r) {
-		indent = defaultJSONIndent
-	}
-
-	dataJSON, err := encodeJSON(data, indent)
+	dataJSON, err := encodeJSON(data, jsonIndent(r))
 	if err != nil {
 		return err
 	}
@@ -80,10 +70,13 @@ func writeSuccess(w http.ResponseWriter, r *http.Request, status int, data any) 
 	return writeJSONBytes(w, status, dataJSON)
 }
 
-func shouldPrettyJSON(r *http.Request) bool {
+func jsonIndent(r *http.Request) string {
 	if r == nil || r.URL == nil {
-		return false
+		return ""
 	}
 	_, pretty := r.URL.Query()["pretty"]
-	return pretty
+	if pretty {
+		return defaultJSONIndent
+	}
+	return ""
 }
