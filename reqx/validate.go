@@ -98,17 +98,29 @@ func BadRequest(violations ...Violation) error {
 }
 
 func InvalidField(field string) Violation {
+	return InvalidFieldIn(ViolationInBody, field)
+}
+
+func InvalidFieldIn(input, field string) Violation {
 	return Violation{
 		Field:   field,
+		In:      input,
 		Code:    "invalid",
+		Detail:  "is invalid",
 		Message: "is invalid",
 	}
 }
 
 func RequiredField(field string) Violation {
+	return RequiredFieldIn(ViolationInBody, field)
+}
+
+func RequiredFieldIn(input, field string) Violation {
 	return Violation{
 		Field:   field,
+		In:      input,
 		Code:    "required",
+		Detail:  "is required",
 		Message: "is required",
 	}
 }
@@ -164,7 +176,7 @@ func validateStruct(target any, source sourceKind) ([]Violation, error) {
 	// validator/v10's Struct contract returns only nil,
 	// InvalidValidationError, or ValidationErrors.
 	validationErrs := err.(validator.ValidationErrors)
-	return violationsFromValidation(source, validationErrs), nil
+	return violationsFromValidation(source, target, validationErrs), nil
 }
 
 func validatorFor(source sourceKind) *validator.Validate {
@@ -208,7 +220,8 @@ func validateNoSpace(fl validator.FieldLevel) bool {
 	return !strings.ContainsRune(field.String(), ' ')
 }
 
-func violationsFromValidation(source sourceKind, errs validator.ValidationErrors) []Violation {
+func violationsFromValidation(source sourceKind, args ...any) []Violation {
+	target, errs := validationArgs(args...)
 	if len(errs) == 0 {
 		return nil
 	}
@@ -216,6 +229,7 @@ func violationsFromValidation(source sourceKind, errs validator.ValidationErrors
 	seen := make(map[string]struct{}, len(errs))
 	type entry struct {
 		field string
+		in    string
 		code  string
 	}
 	entries := make([]entry, 0, len(errs))
@@ -228,6 +242,7 @@ func violationsFromValidation(source sourceKind, errs validator.ValidationErrors
 		seen[field] = struct{}{}
 		entries = append(entries, entry{
 			field: field,
+			in:    validationInput(source, target, validationErr),
 			code:  validationCode(validationErr.Tag()),
 		})
 	}
@@ -240,11 +255,27 @@ func violationsFromValidation(source sourceKind, errs validator.ValidationErrors
 	for _, entry := range entries {
 		violations = append(violations, Violation{
 			Field:   entry.field,
+			In:      entry.in,
 			Code:    entry.code,
-			Message: validationMessage(entry.code),
+			Detail:  validationDetail(entry.code),
+			Message: validationDetail(entry.code),
 		})
 	}
 	return violations
+}
+
+func validationArgs(args ...any) (any, validator.ValidationErrors) {
+	switch len(args) {
+	case 1:
+		if errs, ok := args[0].(validator.ValidationErrors); ok {
+			return nil, errs
+		}
+	case 2:
+		if errs, ok := args[1].(validator.ValidationErrors); ok {
+			return args[0], errs
+		}
+	}
+	return nil, nil
 }
 
 func validationFieldPath(source sourceKind, err validator.FieldError) string {
@@ -281,11 +312,122 @@ func validationCode(tag string) string {
 	}
 }
 
-func validationMessage(code string) string {
+func validationDetail(code string) string {
 	if code == "required" {
 		return "is required"
 	}
 	return "is invalid"
+}
+
+func validationInput(source sourceKind, target any, err validator.FieldError) string {
+	if source != sourceRequest {
+		return violationInForSource(source)
+	}
+
+	field, ok := resolveValidationField(target, err.StructNamespace())
+	if !ok {
+		return ViolationInRequest
+	}
+
+	for _, tagName := range sourceTagPriority(sourceRequest) {
+		if name := tagValue(field, tagName); name != "" {
+			return violationInForTag(tagName)
+		}
+	}
+	return ViolationInRequest
+}
+
+func violationInForSource(source sourceKind) string {
+	switch source {
+	case sourceBody:
+		return ViolationInBody
+	case sourceQuery:
+		return ViolationInQuery
+	case sourcePath:
+		return ViolationInPath
+	case sourceHeader:
+		return ViolationInHeader
+	default:
+		return ViolationInRequest
+	}
+}
+
+func violationInForTag(tagName string) string {
+	switch tagName {
+	case "json":
+		return ViolationInBody
+	case "query":
+		return ViolationInQuery
+	case "param":
+		return ViolationInPath
+	case "header":
+		return ViolationInHeader
+	default:
+		return ViolationInRequest
+	}
+}
+
+func resolveValidationField(target any, structNamespace string) (reflect.StructField, bool) {
+	t := reflect.TypeOf(target)
+	for t != nil && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t == nil || t.Kind() != reflect.Struct {
+		return reflect.StructField{}, false
+	}
+
+	path := parseStructNamespace(structNamespace)
+	if len(path) == 0 {
+		return reflect.StructField{}, false
+	}
+
+	current := t
+	for _, name := range path[:len(path)-1] {
+		field, ok := current.FieldByName(name)
+		if !ok {
+			return reflect.StructField{}, false
+		}
+
+		next := field.Type
+		for next.Kind() == reflect.Pointer || next.Kind() == reflect.Slice || next.Kind() == reflect.Array {
+			next = next.Elem()
+		}
+		if next.Kind() != reflect.Struct {
+			return reflect.StructField{}, false
+		}
+		current = next
+	}
+
+	field, ok := current.FieldByName(path[len(path)-1])
+	if !ok {
+		return reflect.StructField{}, false
+	}
+	return field, true
+}
+
+func parseStructNamespace(namespace string) []string {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return nil
+	}
+
+	parts := strings.Split(namespace, ".")
+	if len(parts) <= 1 {
+		return nil
+	}
+
+	path := make([]string, 0, len(parts)-1)
+	for _, part := range parts[1:] {
+		if bracket := strings.Index(part, "["); bracket >= 0 {
+			part = part[:bracket]
+		}
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		path = append(path, part)
+	}
+	return path
 }
 
 func fieldAlias(field reflect.StructField, source sourceKind) string {

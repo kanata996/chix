@@ -66,7 +66,7 @@ func (w *failingWriter) Write(_ []byte) (int, error) {
 	return 0, errors.New("socket closed")
 }
 
-// WriteError 会把 HTTPError 写成标准 error envelope。
+// WriteError 会把 HTTPError 写成标准 problem JSON。
 func TestWriteErrorWritesEnvelope(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -85,20 +85,22 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusUnprocessableEntity)
 	}
 
-	payload := decodePayload(t, rr.Body.Bytes())
-	body, ok := payload["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("error body = %#v, want object", payload["error"])
-	}
+	body := decodePayload(t, rr.Body.Bytes())
 	if got := body["code"]; got != "unprocessable_entity" {
-		t.Fatalf("error.code = %#v, want unprocessable_entity", got)
+		t.Fatalf("code = %#v, want unprocessable_entity", got)
 	}
-	if got := body["message"]; got != "Unprocessable Entity" {
-		t.Fatalf("error.message = %#v, want Unprocessable Entity", got)
+	if got := body["title"]; got != "Unprocessable Entity" {
+		t.Fatalf("title = %#v, want Unprocessable Entity", got)
 	}
-	details, ok := body["details"].([]any)
-	if !ok || len(details) != 1 {
-		t.Fatalf("error.details = %#v, want 1 detail", body["details"])
+	if got := body["status"]; got != float64(http.StatusUnprocessableEntity) {
+		t.Fatalf("status = %#v, want %d", got, http.StatusUnprocessableEntity)
+	}
+	if got := body["detail"]; got != "Unprocessable Entity" {
+		t.Fatalf("detail = %#v, want Unprocessable Entity", got)
+	}
+	errors, ok := body["errors"].([]any)
+	if !ok || len(errors) != 1 {
+		t.Fatalf("errors = %#v, want 1 item", body["errors"])
 	}
 }
 
@@ -132,16 +134,15 @@ func TestWriteErrorNilRequestStillWritesErrorResponse(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
 	}
 
-	payload := decodePayload(t, rr.Body.Bytes())
-	body, ok := payload["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("error body = %#v, want object", payload["error"])
-	}
+	body := decodePayload(t, rr.Body.Bytes())
 	if got := body["code"]; got != "internal_error" {
-		t.Fatalf("error.code = %#v, want internal_error", got)
+		t.Fatalf("code = %#v, want internal_error", got)
 	}
-	if got := body["message"]; got != "Internal Server Error" {
-		t.Fatalf("error.message = %#v, want Internal Server Error", got)
+	if got := body["title"]; got != "Internal Server Error" {
+		t.Fatalf("title = %#v, want Internal Server Error", got)
+	}
+	if got := body["detail"]; got != "Internal Server Error" {
+		t.Fatalf("detail = %#v, want Internal Server Error", got)
 	}
 }
 
@@ -179,19 +180,15 @@ func TestWriteErrorNormalizesInvalidStatusAndHidesCause(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
 	}
 
-	payload := decodePayload(t, rr.Body.Bytes())
-	body, ok := payload["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("error body = %#v, want object", payload["error"])
-	}
+	body := decodePayload(t, rr.Body.Bytes())
 	if got := body["code"]; got != "internal_error" {
-		t.Fatalf("error.code = %#v, want internal_error", got)
+		t.Fatalf("code = %#v, want internal_error", got)
 	}
-	if got := body["message"]; got != "Internal Server Error" {
-		t.Fatalf("error.message = %#v, want Internal Server Error", got)
+	if got := body["title"]; got != "Internal Server Error" {
+		t.Fatalf("title = %#v, want Internal Server Error", got)
 	}
-	if details, ok := body["details"].([]any); !ok || len(details) != 0 {
-		t.Fatalf("error.details = %#v, want empty array", body["details"])
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
 	}
 	if bytes.Contains(rr.Body.Bytes(), []byte("db timeout")) {
 		t.Fatalf("body leaked internal cause: %q", rr.Body.String())
@@ -208,19 +205,15 @@ func TestWriteErrorMapsContextCanceled(t *testing.T) {
 		t.Fatalf("WriteError() error = %v", err)
 	}
 
-	payload := decodePayload(t, rr.Body.Bytes())
-	body, ok := payload["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("error body = %#v, want object", payload["error"])
-	}
+	body := decodePayload(t, rr.Body.Bytes())
 	if rr.Code != 499 {
 		t.Fatalf("status = %d, want 499", rr.Code)
 	}
 	if got := body["code"]; got != "client_closed_request" {
-		t.Fatalf("error.code = %#v, want client_closed_request", got)
+		t.Fatalf("code = %#v, want client_closed_request", got)
 	}
-	if got := body["message"]; got != "Client Closed Request" {
-		t.Fatalf("error.message = %#v, want Client Closed Request", got)
+	if got := body["title"]; got != "Client Closed Request" {
+		t.Fatalf("title = %#v, want Client Closed Request", got)
 	}
 }
 
@@ -234,19 +227,18 @@ func TestWriteErrorMapsContextDeadlineExceeded(t *testing.T) {
 		t.Fatalf("WriteError() error = %v", err)
 	}
 
-	payload := decodePayload(t, rr.Body.Bytes())
-	body, ok := payload["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("error body = %#v, want object", payload["error"])
-	}
+	body := decodePayload(t, rr.Body.Bytes())
 	if rr.Code != http.StatusGatewayTimeout {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusGatewayTimeout)
 	}
 	if got := body["code"]; got != "timeout" {
-		t.Fatalf("error.code = %#v, want timeout", got)
+		t.Fatalf("code = %#v, want timeout", got)
 	}
-	if got := body["message"]; got != http.StatusText(http.StatusGatewayTimeout) {
-		t.Fatalf("error.message = %#v, want %q", got, http.StatusText(http.StatusGatewayTimeout))
+	if got := body["title"]; got != http.StatusText(http.StatusGatewayTimeout) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusGatewayTimeout))
+	}
+	if got := body["detail"]; got != http.StatusText(http.StatusGatewayTimeout) {
+		t.Fatalf("detail = %#v, want %q", got, http.StatusText(http.StatusGatewayTimeout))
 	}
 }
 
@@ -264,16 +256,12 @@ func TestWriteErrorMapsUnknownErrorToInternalError(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
 	}
 
-	payload := decodePayload(t, rr.Body.Bytes())
-	body, ok := payload["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("error body = %#v, want object", payload["error"])
-	}
+	body := decodePayload(t, rr.Body.Bytes())
 	if got := body["code"]; got != "internal_error" {
-		t.Fatalf("error.code = %#v, want internal_error", got)
+		t.Fatalf("code = %#v, want internal_error", got)
 	}
-	if got := body["message"]; got != "Internal Server Error" {
-		t.Fatalf("error.message = %#v, want Internal Server Error", got)
+	if got := body["title"]; got != "Internal Server Error" {
+		t.Fatalf("title = %#v, want Internal Server Error", got)
 	}
 	if bytes.Contains(rr.Body.Bytes(), []byte("db timeout")) {
 		t.Fatalf("body leaked internal cause: %q", rr.Body.String())
@@ -303,13 +291,9 @@ func TestWriteErrorDropsUnencodableDetails(t *testing.T) {
 		t.Fatal("degraded.PreservedPublicResponse = false, want true")
 	}
 
-	payload := decodePayload(t, rr.Body.Bytes())
-	body, ok := payload["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("error body = %#v, want object", payload["error"])
-	}
-	if details, ok := body["details"].([]any); !ok || len(details) != 0 {
-		t.Fatalf("error.details = %#v, want empty array", body["details"])
+	body := decodePayload(t, rr.Body.Bytes())
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
 	}
 }
 
@@ -342,20 +326,26 @@ func TestWriteErrorDropsPanickingDetails(t *testing.T) {
 		t.Fatal("degraded.PreservedPublicResponse = false, want true")
 	}
 
-	payload := decodePayload(t, rr.Body.Bytes())
-	body, ok := payload["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("error body = %#v, want object", payload["error"])
+	body := decodePayload(t, rr.Body.Bytes())
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
 	}
-	if details, ok := body["details"].([]any); !ok || len(details) != 0 {
-		t.Fatalf("error.details = %#v, want empty array", body["details"])
+}
+
+func TestMarshalProblemPayloadNilHTTPError(t *testing.T) {
+	body, err := marshalProblemPayload(nil)
+	if err != nil {
+		t.Fatalf("marshalProblemPayload(nil) error = %v", err)
+	}
+	if got := string(body); got != `{"title":"","status":0,"detail":"","code":""}` {
+		t.Fatalf("body = %q", got)
 	}
 }
 
 // ErrorWriteDegraded 在 nil 接收者和普通错误场景下都应提供稳定的错误语义。
 func TestErrorWriteDegradedMethods(t *testing.T) {
 	var nilErr *ErrorWriteDegraded
-	if got := nilErr.Error(); got != "resp: error response details were dropped" {
+	if got := nilErr.Error(); got != "resp: error response errors were dropped" {
 		t.Fatalf("nil Error() = %q", got)
 	}
 	if got := nilErr.Unwrap(); got != nil {
@@ -364,7 +354,7 @@ func TestErrorWriteDegradedMethods(t *testing.T) {
 
 	cause := errors.New("json: unsupported type: func()")
 	err := &ErrorWriteDegraded{Cause: cause}
-	if got := err.Error(); got != "resp: error response details were dropped: "+cause.Error() {
+	if got := err.Error(); got != "resp: error response errors were dropped: "+cause.Error() {
 		t.Fatalf("Error() = %q", got)
 	}
 	if got := err.Unwrap(); !errors.Is(got, cause) {

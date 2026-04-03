@@ -115,7 +115,7 @@ curl -i \
 HTTP/1.1 422 Unprocessable Entity
 Content-Type: application/json
 
-{"error":{"code":"invalid_request","message":"request contains invalid fields","details":[{"field":"name","code":"required","message":"is required"}]}}
+{"title":"Unprocessable Entity","status":422,"detail":"request contains invalid fields","code":"invalid_request","errors":[{"field":"name","in":"body","code":"required","detail":"is required"}]}
 ```
 
 ## 请求绑定与校验
@@ -177,7 +177,7 @@ func (r *listAccountsRequest) Normalize() {
 }
 ```
 
-校验错误中的字段名会优先使用请求侧 tag 名，而不是 Go struct 字段名。例如 `json:"name"` 失败时，返回的 detail 会是 `field: "name"`。
+校验错误中的字段名会优先使用请求侧 tag 名，而不是 Go struct 字段名。例如 `json:"name"` 失败时，返回的错误项会是 `field: "name", in: "body"`。
 
 ## 响应
 
@@ -194,17 +194,18 @@ func (r *listAccountsRequest) Normalize() {
 
 ```json
 {
-  "error": {
-    "code": "invalid_request",
-    "message": "request contains invalid fields",
-    "details": [
-      {
-        "field": "name",
-        "code": "required",
-        "message": "is required"
-      }
-    ]
-  }
+  "title": "Unprocessable Entity",
+  "status": 422,
+  "detail": "request contains invalid fields",
+  "code": "invalid_request",
+  "errors": [
+    {
+      "field": "name",
+      "in": "body",
+      "code": "required",
+      "detail": "is required"
+    }
+  ]
 }
 ```
 
@@ -218,7 +219,8 @@ func (r *listAccountsRequest) Normalize() {
 - `context.DeadlineExceeded` 返回 `504 Gateway Timeout`，错误码为 `timeout`
 - 未知错误默认返回 `500 Internal Server Error`，错误码为 `internal_error`
 - `HEAD` 请求只写状态码和 `Content-Type`，不写响应体
-- `details` 字段总是数组；没有明细时写空数组，不写 `null`
+- `title` 始终由状态码生成，`detail` 承载公开说明，`code` 承载稳定机器码
+- `errors` 仅在存在结构化字段错误时出现；单个错误项使用 `field`、`in`、`code`、`detail`
 
 如果你需要可复用的公共错误值，可以直接使用 `resp.HTTPError`，以及 `resp.BadRequest(...)`、`resp.NotFound(...)`、`resp.UnprocessableEntity(...)` 等辅助构造函数。
 

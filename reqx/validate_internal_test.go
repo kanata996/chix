@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -130,7 +131,7 @@ func TestValidateStructValidationErrors(t *testing.T) {
 	if len(violations) != 1 {
 		t.Fatalf("violations len = %d, want 1", len(violations))
 	}
-	if violations[0].Field != "name" || violations[0].Code != ViolationCodeRequired || violations[0].Message != "is required" {
+	if violations[0].Field != "name" || violations[0].In != ViolationInBody || violations[0].Code != ViolationCodeRequired || violations[0].Detail != "is required" {
 		t.Fatalf("violations[0] = %#v", violations[0])
 	}
 }
@@ -184,27 +185,27 @@ func TestNormalizeViolationBranches(t *testing.T) {
 		{
 			name: "required",
 			in:   Violation{Field: "name", Code: ViolationCodeRequired},
-			want: Violation{Field: "name", Code: ViolationCodeRequired, Message: "is required"},
+			want: Violation{Field: "name", Code: ViolationCodeRequired, Detail: "is required", Message: "is required"},
 		},
 		{
 			name: "unknown",
 			in:   Violation{Field: "name", Code: ViolationCodeUnknown},
-			want: Violation{Field: "name", Code: ViolationCodeUnknown, Message: "unknown field"},
+			want: Violation{Field: "name", Code: ViolationCodeUnknown, Detail: "unknown field", Message: "unknown field"},
 		},
 		{
 			name: "type",
 			in:   Violation{Field: "name", Code: ViolationCodeType},
-			want: Violation{Field: "name", Code: ViolationCodeType, Message: "has invalid type"},
+			want: Violation{Field: "name", Code: ViolationCodeType, Detail: "has invalid type", Message: "has invalid type"},
 		},
 		{
 			name: "default",
 			in:   Violation{Field: "name"},
-			want: Violation{Field: "name", Code: ViolationCodeInvalid, Message: "is invalid"},
+			want: Violation{Field: "name", Code: ViolationCodeInvalid, Detail: "is invalid", Message: "is invalid"},
 		},
 		{
 			name: "explicit message",
 			in:   Violation{Field: "name", Code: ViolationCodeInvalid, Message: "custom"},
-			want: Violation{Field: "name", Code: ViolationCodeInvalid, Message: "custom"},
+			want: Violation{Field: "name", Code: ViolationCodeInvalid, Detail: "custom", Message: "custom"},
 		},
 	}
 
@@ -214,5 +215,159 @@ func TestNormalizeViolationBranches(t *testing.T) {
 				t.Fatalf("normalizeViolation() = %#v, want %#v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestInvalidFieldWrappers(t *testing.T) {
+	if got := InvalidField("name"); got != (Violation{
+		Field:   "name",
+		In:      ViolationInBody,
+		Code:    ViolationCodeInvalid,
+		Detail:  "is invalid",
+		Message: "is invalid",
+	}) {
+		t.Fatalf("InvalidField() = %#v", got)
+	}
+
+	if got := InvalidFieldIn(ViolationInHeader, "X-Request-Id"); got != (Violation{
+		Field:   "X-Request-Id",
+		In:      ViolationInHeader,
+		Code:    ViolationCodeInvalid,
+		Detail:  "is invalid",
+		Message: "is invalid",
+	}) {
+		t.Fatalf("InvalidFieldIn() = %#v", got)
+	}
+}
+
+func TestViolationInputHelpers(t *testing.T) {
+	if got := violationInForValueSource(valueSource{tag: querySource.tag}); got != ViolationInQuery {
+		t.Fatalf("violationInForValueSource(query) = %q", got)
+	}
+	if got := violationInForValueSource(valueSource{tag: pathSource.tag}); got != ViolationInPath {
+		t.Fatalf("violationInForValueSource(path) = %q", got)
+	}
+	if got := violationInForValueSource(valueSource{tag: headerSource.tag}); got != ViolationInHeader {
+		t.Fatalf("violationInForValueSource(header) = %q", got)
+	}
+	if got := violationInForValueSource(valueSource{tag: "unknown"}); got != ViolationInRequest {
+		t.Fatalf("violationInForValueSource(default) = %q", got)
+	}
+
+	testTags := map[string]string{
+		"json":    ViolationInBody,
+		"query":   ViolationInQuery,
+		"param":   ViolationInPath,
+		"header":  ViolationInHeader,
+		"unknown": ViolationInRequest,
+	}
+	for tag, want := range testTags {
+		if got := violationInForTag(tag); got != want {
+			t.Fatalf("violationInForTag(%q) = %q, want %q", tag, got, want)
+		}
+	}
+
+	testSources := map[sourceKind]string{
+		sourceBody:      ViolationInBody,
+		sourceQuery:     ViolationInQuery,
+		sourcePath:      ViolationInPath,
+		sourceHeader:    ViolationInHeader,
+		sourceRequest:   ViolationInRequest,
+		sourceKind("x"): ViolationInRequest,
+	}
+	for source, want := range testSources {
+		if got := violationInForSource(source); got != want {
+			t.Fatalf("violationInForSource(%q) = %q, want %q", source, got, want)
+		}
+	}
+}
+
+func TestResolveValidationFieldAndNamespaceParsing(t *testing.T) {
+	type nestedItem struct {
+		Value string `header:"x-value"`
+	}
+	type request struct {
+		Nested []*nestedItem `json:"nested"`
+		Plain  string        `json:"plain"`
+	}
+
+	field, ok := resolveValidationField(&request{}, "request.Nested[0].Value")
+	if !ok {
+		t.Fatal("resolveValidationField() = false, want true")
+	}
+	if field.Name != "Value" {
+		t.Fatalf("field.Name = %q, want Value", field.Name)
+	}
+
+	testCases := []struct {
+		name      string
+		target    any
+		namespace string
+	}{
+		{name: "nil target", target: nil, namespace: "request.Name"},
+		{name: "empty namespace", target: &request{}, namespace: ""},
+		{name: "root only", target: &request{}, namespace: "request"},
+		{name: "missing field", target: &request{}, namespace: "request.Missing"},
+		{name: "missing intermediate field", target: &request{}, namespace: "request.Nested[0].Missing.Value"},
+		{name: "non-struct intermediate", target: &request{}, namespace: "request.Plain.Value"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, ok := resolveValidationField(tc.target, tc.namespace); ok {
+				t.Fatalf("resolveValidationField(%#v, %q) = true, want false", tc.target, tc.namespace)
+			}
+		})
+	}
+
+	if got := parseStructNamespace(" request.Nested[0].Value "); !reflect.DeepEqual(got, []string{"Nested", "Value"}) {
+		t.Fatalf("parseStructNamespace() = %#v", got)
+	}
+	if got := parseStructNamespace(""); got != nil {
+		t.Fatalf("parseStructNamespace(empty) = %#v, want nil", got)
+	}
+	if got := parseStructNamespace("request"); got != nil {
+		t.Fatalf("parseStructNamespace(root) = %#v, want nil", got)
+	}
+	if got := parseStructNamespace("request..Nested[0]..Value"); !reflect.DeepEqual(got, []string{"Nested", "Value"}) {
+		t.Fatalf("parseStructNamespace(skip empty) = %#v", got)
+	}
+}
+
+func TestValidationInputForRequestUsesTagPriorityAndFallback(t *testing.T) {
+	type request struct {
+		ID      string `param:"id" validate:"required"`
+		Cursor  string `query:"cursor" validate:"required"`
+		Name    string `json:"name" validate:"required"`
+		TraceID string `header:"x-trace-id" validate:"required"`
+		Plain   string `validate:"required"`
+	}
+
+	target := &request{}
+	err := validatorFor(sourceRequest).Struct(target)
+	if err == nil {
+		t.Fatal("validatorFor(sourceRequest).Struct() error = nil")
+	}
+
+	validationErrs := err.(validator.ValidationErrors)
+	violations := violationsFromValidation(sourceRequest, target, validationErrs)
+	got := map[string]string{}
+	for _, violation := range violations {
+		got[violation.Field] = violation.In
+	}
+
+	want := map[string]string{
+		"id":         ViolationInPath,
+		"cursor":     ViolationInQuery,
+		"name":       ViolationInBody,
+		"X-Trace-Id": ViolationInHeader,
+		"Plain":      ViolationInRequest,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("request violations = %#v, want %#v", got, want)
+	}
+
+	if got := validationInput(sourceRequest, 1, validationErrs[0]); got != ViolationInRequest {
+		t.Fatalf("validationInput(fallback) = %q, want request", got)
 	}
 }

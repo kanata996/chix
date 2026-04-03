@@ -88,7 +88,7 @@ func bindTaggedValuesInPlace[T any](r *http.Request, dst *T, source valueSource,
 		return err
 	}
 
-	violations, err := decodeValuesInto(dstValue, sourceValues(r, source), plan, cfg)
+	violations, err := decodeValuesInto(dstValue, sourceValues(r, source), plan, cfg, violationInForValueSource(source))
 	if err != nil {
 		return err
 	}
@@ -192,7 +192,8 @@ func validateValueFieldType(t reflect.Type, fieldName, sourceName string) error 
 	}
 }
 
-func decodeValuesInto(dst reflect.Value, values url.Values, plan *valueDecodePlan, cfg bindValuesConfig) ([]Violation, error) {
+func decodeValuesInto(dst reflect.Value, values url.Values, plan *valueDecodePlan, cfg bindValuesConfig, inputs ...string) ([]Violation, error) {
+	input := firstViolationInput(inputs...)
 	violations := make([]Violation, 0)
 
 	for _, fieldSpec := range plan.fields {
@@ -202,7 +203,7 @@ func decodeValuesInto(dst reflect.Value, values url.Values, plan *valueDecodePla
 		}
 
 		fieldValue := dst.Field(fieldSpec.index)
-		violation, err := decodeQueryField(fieldValue, rawValues, fieldSpec.name)
+		violation, err := decodeQueryField(fieldValue, rawValues, fieldSpec.name, input)
 		if err != nil {
 			return nil, err
 		}
@@ -226,7 +227,9 @@ func decodeValuesInto(dst reflect.Value, values url.Values, plan *valueDecodePla
 	for _, key := range unknownKeys {
 		violations = append(violations, Violation{
 			Field:   key,
+			In:      input,
 			Code:    ViolationCodeUnknown,
+			Detail:  "unknown field",
 			Message: "unknown field",
 		})
 	}
@@ -288,7 +291,8 @@ func normalizeIdentity(value string) string {
 	return value
 }
 
-func decodeQueryField(dst reflect.Value, values []string, fieldName string) (*Violation, error) {
+func decodeQueryField(dst reflect.Value, values []string, fieldName string, inputs ...string) (*Violation, error) {
+	input := firstViolationInput(inputs...)
 	if len(values) == 0 {
 		return nil, nil
 	}
@@ -296,7 +300,7 @@ func decodeQueryField(dst reflect.Value, values []string, fieldName string) (*Vi
 	switch dst.Kind() {
 	case reflect.Pointer:
 		value := reflect.New(dst.Type().Elem())
-		violation, err := decodeQueryField(value.Elem(), values, fieldName)
+		violation, err := decodeQueryField(value.Elem(), values, fieldName, input)
 		if err != nil || violation != nil {
 			return violation, err
 		}
@@ -306,7 +310,7 @@ func decodeQueryField(dst reflect.Value, values []string, fieldName string) (*Vi
 		slice := reflect.MakeSlice(dst.Type(), 0, len(values))
 		for _, rawValue := range values {
 			item := reflect.New(dst.Type().Elem()).Elem()
-			violation, err := decodeQueryField(item, []string{rawValue}, fieldName)
+			violation, err := decodeQueryField(item, []string{rawValue}, fieldName, input)
 			if err != nil || violation != nil {
 				return violation, err
 			}
@@ -317,18 +321,19 @@ func decodeQueryField(dst reflect.Value, values []string, fieldName string) (*Vi
 	default:
 		if supportsTextUnmarshaler(dst.Type()) {
 			if len(values) > 1 {
-				return &Violation{Field: fieldName, Code: ViolationCodeMultiple, Message: "must not be repeated"}, nil
+				return &Violation{Field: fieldName, In: input, Code: ViolationCodeMultiple, Detail: "must not be repeated", Message: "must not be repeated"}, nil
 			}
-			return decodeTextValue(dst, values[0], fieldName)
+			return decodeTextValue(dst, values[0], fieldName, input)
 		}
 		if len(values) > 1 {
-			return &Violation{Field: fieldName, Code: ViolationCodeMultiple, Message: "must not be repeated"}, nil
+			return &Violation{Field: fieldName, In: input, Code: ViolationCodeMultiple, Detail: "must not be repeated", Message: "must not be repeated"}, nil
 		}
-		return decodeScalarValue(dst, values[0], fieldName)
+		return decodeScalarValue(dst, values[0], fieldName, input)
 	}
 }
 
-func decodeScalarValue(dst reflect.Value, rawValue string, fieldName string) (*Violation, error) {
+func decodeScalarValue(dst reflect.Value, rawValue string, fieldName string, inputs ...string) (*Violation, error) {
+	input := firstViolationInput(inputs...)
 	switch dst.Kind() {
 	case reflect.String:
 		dst.SetString(rawValue)
@@ -336,28 +341,28 @@ func decodeScalarValue(dst reflect.Value, rawValue string, fieldName string) (*V
 	case reflect.Bool:
 		value, err := strconv.ParseBool(rawValue)
 		if err != nil {
-			return invalidQueryType(fieldName, dst.Type()), nil
+			return invalidValueType(fieldName, input, dst.Type()), nil
 		}
 		dst.SetBool(value)
 		return nil, nil
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		value, err := strconv.ParseInt(rawValue, 10, dst.Type().Bits())
 		if err != nil {
-			return invalidQueryType(fieldName, dst.Type()), nil
+			return invalidValueType(fieldName, input, dst.Type()), nil
 		}
 		dst.SetInt(value)
 		return nil, nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		value, err := strconv.ParseUint(rawValue, 10, dst.Type().Bits())
 		if err != nil {
-			return invalidQueryType(fieldName, dst.Type()), nil
+			return invalidValueType(fieldName, input, dst.Type()), nil
 		}
 		dst.SetUint(value)
 		return nil, nil
 	case reflect.Float32, reflect.Float64:
 		value, err := strconv.ParseFloat(rawValue, dst.Type().Bits())
 		if err != nil {
-			return invalidQueryType(fieldName, dst.Type()), nil
+			return invalidValueType(fieldName, input, dst.Type()), nil
 		}
 		dst.SetFloat(value)
 		return nil, nil
@@ -366,7 +371,8 @@ func decodeScalarValue(dst reflect.Value, rawValue string, fieldName string) (*V
 	}
 }
 
-func decodeTextValue(dst reflect.Value, rawValue string, fieldName string) (*Violation, error) {
+func decodeTextValue(dst reflect.Value, rawValue string, fieldName string, inputs ...string) (*Violation, error) {
+	input := firstViolationInput(inputs...)
 	target := dst
 	if dst.Kind() != reflect.Pointer && dst.CanAddr() && dst.Addr().Type().Implements(textUnmarshalerType) {
 		target = dst.Addr()
@@ -374,7 +380,7 @@ func decodeTextValue(dst reflect.Value, rawValue string, fieldName string) (*Vio
 
 	unmarshaler := target.Interface().(encoding.TextUnmarshaler)
 	if err := unmarshaler.UnmarshalText([]byte(rawValue)); err != nil {
-		return &Violation{Field: fieldName, Code: ViolationCodeInvalid, Message: "is invalid"}, nil
+		return &Violation{Field: fieldName, In: input, Code: ViolationCodeInvalid, Detail: "is invalid", Message: "is invalid"}, nil
 	}
 	return nil, nil
 }
@@ -389,10 +395,34 @@ func supportsTextUnmarshaler(t reflect.Type) bool {
 	return reflect.PointerTo(t).Implements(textUnmarshalerType)
 }
 
-func invalidQueryType(fieldName string, t reflect.Type) *Violation {
+func invalidValueType(fieldName, input string, t reflect.Type) *Violation {
 	return &Violation{
 		Field:   fieldName,
+		In:      input,
 		Code:    ViolationCodeType,
+		Detail:  "must be " + describeJSONType(t),
 		Message: "must be " + describeJSONType(t),
 	}
+}
+
+func violationInForValueSource(source valueSource) string {
+	switch source.tag {
+	case querySource.tag:
+		return ViolationInQuery
+	case pathSource.tag:
+		return ViolationInPath
+	case headerSource.tag:
+		return ViolationInHeader
+	default:
+		return ViolationInRequest
+	}
+}
+
+func firstViolationInput(inputs ...string) string {
+	for _, input := range inputs {
+		if strings.TrimSpace(input) != "" {
+			return input
+		}
+	}
+	return ViolationInRequest
 }

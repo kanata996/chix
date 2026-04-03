@@ -141,6 +141,6 @@
 1. 请求上下文里的 request logger
 2. `slog.Default()`
 
-## `details` 的当前行为
+## `errors` 的当前行为
 
-`details` 当前只属于公共错误响应，不写入 request log。
+`errors` 当前只属于公共错误响应，不写入 request log。

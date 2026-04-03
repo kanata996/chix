@@ -94,7 +94,7 @@ func ParamUUID(r *http.Request, name string) (string, error) {
 	return reqx.ParamUUID(r, name)
 }
 
-// WriteError 按统一错误包络写回响应。
+// WriteError 按统一错误对象写回响应。
 func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 	return resp.WriteError(w, r, err)
 }

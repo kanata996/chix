@@ -43,7 +43,7 @@ func ParamString(r *http.Request, name string) (string, error) {
 	}
 
 	var value string
-	violation, _ := decodeQueryField(reflect.ValueOf(&value).Elem(), rawValues, name)
+	violation, _ := decodeQueryField(reflect.ValueOf(&value).Elem(), rawValues, name, ViolationInPath)
 	if violation != nil {
 		return "", invalidFieldError(*violation)
 	}
@@ -57,7 +57,7 @@ func ParamInt(r *http.Request, name string) (int, error) {
 	}
 
 	var value int
-	violation, _ := decodeQueryField(reflect.ValueOf(&value).Elem(), rawValues, name)
+	violation, _ := decodeQueryField(reflect.ValueOf(&value).Elem(), rawValues, name, ViolationInPath)
 	if violation != nil {
 		return 0, invalidFieldError(*violation)
 	}
@@ -72,7 +72,7 @@ func ParamUUID(r *http.Request, name string) (string, error) {
 
 	parsed, err := uuid.Parse(raw)
 	if err != nil {
-		return "", invalidFieldError(InvalidField(name))
+		return "", invalidFieldError(InvalidFieldIn(ViolationInPath, name))
 	}
 	return parsed.String(), nil
 }
@@ -85,11 +85,11 @@ func requiredPathParamValues(r *http.Request, name string) ([]string, error) {
 
 	rawValues, ok := pathValues(r)[name]
 	if !ok || len(rawValues) == 0 {
-		return nil, invalidFieldError(RequiredField(name))
+		return nil, invalidFieldError(RequiredFieldIn(ViolationInPath, name))
 	}
 
 	if len(rawValues) == 1 && rawValues[0] == "" {
-		return nil, invalidFieldError(RequiredField(name))
+		return nil, invalidFieldError(RequiredFieldIn(ViolationInPath, name))
 	}
 
 	return rawValues, nil
