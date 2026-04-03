@@ -29,10 +29,7 @@ func TestNewLogger_AddsCommonAttrsAndTraceID(t *testing.T) {
 	})
 
 	r := chi.NewRouter()
-	r.Use(RequestLogger(RequestLoggerOptions{
-		Logger: logger,
-		Level:  slog.LevelInfo,
-	}))
+	r.Use(RequestLogger(logger, slog.LevelInfo))
 	r.Get("/ok", func(w http.ResponseWriter, r *http.Request) {
 		logger.InfoContext(r.Context(), "inside handler")
 		w.WriteHeader(http.StatusNoContent)
@@ -70,10 +67,7 @@ func TestRequestLogger_MakesPlainLoggerTraceAware(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
 	r := chi.NewRouter()
-	r.Use(RequestLogger(RequestLoggerOptions{
-		Logger: logger,
-		Level:  slog.LevelInfo,
-	}))
+	r.Use(RequestLogger(logger, slog.LevelInfo))
 	r.Get("/trace", func(w http.ResponseWriter, r *http.Request) {
 		ctxLogger := LoggerFromContext(r.Context())
 		if ctxLogger == nil {
@@ -115,10 +109,7 @@ func TestRequestLogger_DoesNotDuplicateTraceIDForTraceAwareLogger(t *testing.T) 
 	})
 
 	r := chi.NewRouter()
-	r.Use(RequestLogger(RequestLoggerOptions{
-		Logger: logger,
-		Level:  slog.LevelInfo,
-	}))
+	r.Use(RequestLogger(logger, slog.LevelInfo))
 	r.Get("/trace", func(w http.ResponseWriter, r *http.Request) {
 		logger.InfoContext(r.Context(), "inside handler")
 		w.WriteHeader(http.StatusNoContent)
@@ -181,10 +172,7 @@ func TestRequestLogger_InjectsBaseRequestAttrsOnSuccess(t *testing.T) {
 		Level:  slog.LevelInfo,
 	})
 	r := chi.NewRouter()
-	r.Use(RequestLogger(RequestLoggerOptions{
-		Logger: logger,
-		Level:  slog.LevelInfo,
-	}))
+	r.Use(RequestLogger(logger, slog.LevelInfo))
 	r.Get("/ok", func(w http.ResponseWriter, r *http.Request) {
 		if !HasBaseRequestLogAttrs(r.Context()) {
 			t.Fatal("HasBaseRequestLogAttrs() = false, want true")
@@ -220,10 +208,7 @@ func TestRequestLogger_InjectsBaseRequestAttrsOnPanic(t *testing.T) {
 		Level:  slog.LevelInfo,
 	})
 	r := chi.NewRouter()
-	r.Use(RequestLogger(RequestLoggerOptions{
-		Logger: logger,
-		Level:  slog.LevelInfo,
-	}))
+	r.Use(RequestLogger(logger, slog.LevelInfo))
 	r.Get("/panic", func(w http.ResponseWriter, r *http.Request) {
 		panic("boom")
 	})
@@ -258,10 +243,7 @@ func TestRequestLogger_StoresLoggerInContext(t *testing.T) {
 	})
 
 	r := chi.NewRouter()
-	r.Use(RequestLogger(RequestLoggerOptions{
-		Logger: logger,
-		Level:  slog.LevelInfo,
-	}))
+	r.Use(RequestLogger(logger, slog.LevelInfo))
 	r.Get("/ctx", func(w http.ResponseWriter, r *http.Request) {
 		if got := LoggerFromContext(r.Context()); got != logger {
 			t.Fatalf("LoggerFromContext() = %p, want %p", got, logger)
@@ -327,36 +309,6 @@ func TestBaseRequestLogAttrs_NilRequestReturnsNil(t *testing.T) {
 	}
 }
 
-// 禁用 panic recovery 后，中间件应让 panic 继续向上传播。
-func TestRequestLogger_DisablePanicRecoveryLetsPanicEscape(t *testing.T) {
-	logger := NewLogger(LoggerOptions{
-		Output: io.Discard,
-		Level:  slog.LevelInfo,
-	})
-
-	r := chi.NewRouter()
-	r.Use(RequestLogger(RequestLoggerOptions{
-		Logger:               logger,
-		Level:                slog.LevelInfo,
-		DisablePanicRecovery: true,
-	}))
-	r.Get("/panic", func(w http.ResponseWriter, r *http.Request) {
-		panic("boom")
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
-	rr := httptest.NewRecorder()
-
-	defer func() {
-		if recovered := recover(); recovered != "boom" {
-			t.Fatalf("recover() = %#v, want boom", recovered)
-		}
-	}()
-
-	r.ServeHTTP(rr, req)
-	t.Fatal("expected panic, got nil")
-}
-
 // 未显式提供 logger 时，请求日志中间件会回退到 slog.Default。
 func TestRequestLogger_UsesDefaultLoggerWhenLoggerMissing(t *testing.T) {
 	var buf bytes.Buffer
@@ -366,9 +318,7 @@ func TestRequestLogger_UsesDefaultLoggerWhenLoggerMissing(t *testing.T) {
 	defer slog.SetDefault(previousDefault)
 
 	r := chi.NewRouter()
-	r.Use(RequestLogger(RequestLoggerOptions{
-		Level: slog.LevelInfo,
-	}))
+	r.Use(RequestLogger(nil, slog.LevelInfo))
 	r.Get("/ok", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -385,8 +335,8 @@ func TestRequestLogger_UsesDefaultLoggerWhenLoggerMissing(t *testing.T) {
 	}
 }
 
-// 禁用 trace id 后，请求日志中不应再出现 traceId 字段。
-func TestRequestLogger_DisableTraceIDOmitsTraceIDField(t *testing.T) {
+// 未显式配置 header 记录时，应恢复 httplog 的默认 request/response header 行为。
+func TestRequestLogger_UsesDefaultHeaderLogging(t *testing.T) {
 	var buf bytes.Buffer
 
 	logger := NewLogger(LoggerOptions{
@@ -394,27 +344,42 @@ func TestRequestLogger_DisableTraceIDOmitsTraceIDField(t *testing.T) {
 		Level:  slog.LevelInfo,
 	})
 	r := chi.NewRouter()
-	r.Use(RequestLogger(RequestLoggerOptions{
-		Logger:         logger,
-		Level:          slog.LevelInfo,
-		DisableTraceID: true,
-	}))
-	r.Get("/ok", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
+	r.Use(RequestLogger(logger, slog.LevelInfo))
+	r.Post("/headers", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/ok", nil)
+	req := httptest.NewRequest(http.MethodPost, "/headers", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://example.com")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
 	logEntry := decodeLogEntry(t, lastLogLine(t, buf.Bytes()))
-	if _, exists := logEntry["traceId"]; exists {
-		t.Fatalf("traceId unexpectedly present: %#v", logEntry["traceId"])
+
+	requestHeaders, ok := logEntry["http.request.headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("http.request.headers = %#v, want map", logEntry["http.request.headers"])
+	}
+	if got := requestHeaders["Content-Type"]; got != "application/json" {
+		t.Fatalf("request Content-Type = %#v, want application/json", got)
+	}
+	if got := requestHeaders["Origin"]; got != "https://example.com" {
+		t.Fatalf("request Origin = %#v, want https://example.com", got)
+	}
+
+	responseHeaders, ok := logEntry["http.response.headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("http.response.headers = %#v, want map", logEntry["http.response.headers"])
+	}
+	if got := responseHeaders["Content-Type"]; got != "application/json" {
+		t.Fatalf("response Content-Type = %#v, want application/json", got)
 	}
 }
 
-// 禁用 request id 注入后，请求日志中不应再出现 request.id 字段。
-func TestRequestLogger_DisableRequestIDOmitRequestIDField(t *testing.T) {
+// 基础请求字段注入不应触发 httplog 的 request body 读取路径。
+func TestRequestLogger_DoesNotReadRequestBodyWithoutBodyLogging(t *testing.T) {
 	var buf bytes.Buffer
 
 	logger := NewLogger(LoggerOptions{
@@ -422,22 +387,33 @@ func TestRequestLogger_DisableRequestIDOmitRequestIDField(t *testing.T) {
 		Level:  slog.LevelInfo,
 	})
 	r := chi.NewRouter()
-	r.Use(RequestLogger(RequestLoggerOptions{
-		Logger:           logger,
-		Level:            slog.LevelInfo,
-		DisableRequestID: true,
-	}))
-	r.Get("/ok", func(w http.ResponseWriter, r *http.Request) {
+	r.Use(RequestLogger(logger, slog.LevelInfo))
+	r.Post("/upload", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/ok", nil)
+	body := &countingReadCloser{
+		reader: strings.NewReader(strings.Repeat("a", 4096)),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/upload", body)
+	req.ContentLength = 4096
+	req.Header.Set(chimw.RequestIDHeader, "req-body")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNoContent)
+	}
+	if body.reads != 0 || body.bytesRead != 0 {
+		t.Fatalf("request body was unexpectedly read: reads=%d bytes=%d", body.reads, body.bytesRead)
+	}
+
 	logEntry := decodeLogEntry(t, lastLogLine(t, buf.Bytes()))
-	if _, exists := logEntry["request.id"]; exists {
-		t.Fatalf("request.id unexpectedly present: %#v", logEntry["request.id"])
+	if got := logEntry["request.id"]; got != "req-body" {
+		t.Fatalf("request.id = %#v, want req-body", got)
+	}
+	if got := logEntry["http.route"]; got != "/upload" {
+		t.Fatalf("http.route = %#v, want /upload", got)
 	}
 }
 
@@ -527,6 +503,23 @@ func TestRequestLogContextMiddleware_AllowsEmptyBaseAttrs(t *testing.T) {
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNoContent)
 	}
+}
+
+type countingReadCloser struct {
+	reader    io.Reader
+	reads     int
+	bytesRead int
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	r.reads++
+	n, err := r.reader.Read(p)
+	r.bytesRead += n
+	return n, err
+}
+
+func (r *countingReadCloser) Close() error {
+	return nil
 }
 
 func decodeLogEntry(t *testing.T, payload []byte) map[string]any {

@@ -16,12 +16,13 @@ import (
 	"github.com/golang-cz/devslog"
 )
 
-type ctxKeyRequestLogContext struct{}
+type ctxKeyRequestLogger struct{}
+type ctxKeyBaseRequestLogAttrs struct{}
 
-type requestLogContext struct {
-	logger           *slog.Logger
-	baseAttrsApplied bool
-}
+var (
+	defaultRequestLogHeaders  = []string{"Content-Type", "Origin"}
+	defaultResponseLogHeaders = []string{"Content-Type"}
+)
 
 // LoggerOptions controls the slog logger created by NewLogger.
 type LoggerOptions struct {
@@ -31,20 +32,6 @@ type LoggerOptions struct {
 	App         string
 	Version     string
 	Env         string
-}
-
-// RequestLoggerOptions controls the composed request logging middleware.
-type RequestLoggerOptions struct {
-	Logger               *slog.Logger
-	Level                slog.Level
-	Schema               *httplog.Schema
-	LogRequestHeaders    []string
-	LogResponseHeaders   []string
-	LogRequestBody       func(*http.Request) bool
-	LogResponseBody      func(*http.Request) bool
-	DisableRequestID     bool
-	DisableTraceID       bool
-	DisablePanicRecovery bool
 }
 
 // NewLogger builds a slog logger suitable for RequestLogger middleware usage.
@@ -66,36 +53,21 @@ func NewLogger(opts LoggerOptions) *slog.Logger {
 
 // RequestLogger returns a chi middleware that standardizes request logging,
 // request ids, trace ids, and panic recovery.
-func RequestLogger(opts RequestLoggerOptions) func(http.Handler) http.Handler {
-	logger := opts.Logger
+func RequestLogger(logger *slog.Logger, level slog.Level) func(http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if !opts.DisableTraceID {
-		logger = ensureTraceIDLogger(logger)
-	}
-
-	schema := opts.Schema
-	if schema == nil {
-		schema = httplog.SchemaECS
-	}
+	logger = ensureTraceIDLogger(logger)
 
 	var chain chi.Middlewares
-	if !opts.DisableRequestID {
-		chain = append(chain, chimw.RequestID)
-	}
-	if !opts.DisableTraceID {
-		chain = append(chain, traceid.Middleware)
-	}
+	chain = append(chain, chimw.RequestID, traceid.Middleware)
 	chain = append(chain,
 		httplog.RequestLogger(logger, &httplog.Options{
-			Level:              opts.Level,
-			Schema:             schema,
-			RecoverPanics:      !opts.DisablePanicRecovery,
-			LogRequestHeaders:  opts.LogRequestHeaders,
-			LogResponseHeaders: opts.LogResponseHeaders,
-			LogRequestBody:     opts.LogRequestBody,
-			LogResponseBody:    opts.LogResponseBody,
+			Level:              level,
+			Schema:             httplog.SchemaECS,
+			RecoverPanics:      true,
+			LogRequestHeaders:  defaultRequestLogHeaders,
+			LogResponseHeaders: defaultResponseLogHeaders,
 		}),
 		requestLogContextMiddleware(logger),
 	)
@@ -111,11 +83,8 @@ func LoggerFromContext(ctx context.Context) *slog.Logger {
 	if ctx == nil {
 		return nil
 	}
-	requestLogCtx, _ := ctx.Value(ctxKeyRequestLogContext{}).(*requestLogContext)
-	if requestLogCtx == nil {
-		return nil
-	}
-	return requestLogCtx.logger
+	logger, _ := ctx.Value(ctxKeyRequestLogger{}).(*slog.Logger)
+	return logger
 }
 
 // BaseRequestLogAttrs returns stable request log fields shared across success,
@@ -141,22 +110,21 @@ func BaseRequestLogAttrs(r *http.Request) []slog.Attr {
 }
 
 // HasBaseRequestLogAttrs reports whether the request context came through the
-// composed request logging middleware that already injects base request attrs.
+// composed request logging middleware that is responsible for injecting base
+// request attrs into the request log.
 func HasBaseRequestLogAttrs(ctx context.Context) bool {
 	if ctx == nil {
 		return false
 	}
-	requestLogCtx, _ := ctx.Value(ctxKeyRequestLogContext{}).(*requestLogContext)
-	return requestLogCtx != nil && requestLogCtx.baseAttrsApplied
+	applied, _ := ctx.Value(ctxKeyBaseRequestLogAttrs{}).(bool)
+	return applied
 }
 
 func requestLogContextMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := context.WithValue(r.Context(), ctxKeyRequestLogContext{}, &requestLogContext{
-				logger:           logger,
-				baseAttrsApplied: true,
-			})
+			ctx := context.WithValue(r.Context(), ctxKeyRequestLogger{}, logger)
+			ctx = context.WithValue(ctx, ctxKeyBaseRequestLogAttrs{}, true)
 			r = r.WithContext(ctx)
 
 			defer func() {

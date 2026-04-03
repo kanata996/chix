@@ -141,5 +141,3 @@
 ## `details` 的当前行为
 
 `details` 当前只属于公共错误响应，不写入 request log。
-
-`safeErrorLogDetails(...)` 仍然存在，但当前不参与请求日志字段输出。

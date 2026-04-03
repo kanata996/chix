@@ -1,5 +1,9 @@
 # chix
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/kanata996/chix.svg)](https://pkg.go.dev/github.com/kanata996/chix)
+[![CI](https://github.com/kanata996/chix/workflows/CI/badge.svg)](https://github.com/kanata996/chix/actions/workflows/ci.yml)
+[![Codecov](https://codecov.io/github/kanata996/chix/graph/badge.svg)](https://codecov.io/github/kanata996/chix)
+
 `chix` 是一个基于 `chi` 和 `net/http` 的轻量级 JSON API HTTP 边界工具包。
 
 它聚焦在服务的请求与响应边界：
@@ -32,6 +36,13 @@ go get github.com/kanata996/chix@latest
 ```
 
 ## 快速开始
+
+下面的示例展示了 `chix` 最常见的 handler 形态：
+
+- `chi` 负责路由
+- `chix.BindAndValidate(...)` 负责请求输入边界
+- `chix.Created(...)` 负责成功 JSON 响应
+- `chix.WriteError(...)` 负责统一错误响应
 
 ```go
 package main
@@ -69,7 +80,45 @@ func main() {
 }
 ```
 
-## 请求绑定
+启动服务后，可以直接验证成功和失败两条路径。
+
+成功请求：
+
+```bash
+curl -i \
+  -X POST http://localhost:8080/orgs/org_123/accounts \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Acme"}'
+```
+
+预期响应：
+
+```http
+HTTP/1.1 201 Created
+Content-Type: application/json
+
+{"id":"acct_123","org_id":"org_123","name":"Acme"}
+```
+
+校验失败请求：
+
+```bash
+curl -i \
+  -X POST http://localhost:8080/orgs/org_123/accounts \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
+
+预期响应：
+
+```http
+HTTP/1.1 422 Unprocessable Entity
+Content-Type: application/json
+
+{"error":{"code":"invalid_request","message":"request contains invalid fields","details":[{"field":"name","code":"required","message":"is required"}]}}
+```
+
+## 请求绑定与校验
 
 支持的 tag：
 
@@ -85,6 +134,13 @@ func main() {
 2. `GET` 和 `DELETE` 请求上的 query 参数
 3. JSON body
 
+这个顺序意味着：
+
+- 后绑定的数据会覆盖先绑定的数据，例如 body 会覆盖同名 path/query 字段
+- `POST`、`PUT`、`PATCH` 等请求不会在 `Bind(...)` 中自动绑定 query；如果你需要它们，显式调用 `BindQueryParams(...)` 或 `BindAndValidateQuery(...)`
+- 缺失的 path/query/header/body 不会把目标 DTO 清零，而是保留目标对象已有值
+- 任一绑定阶段失败时，不会对目标 DTO 部分落值，调用方拿到的仍是原对象
+
 根包中常用的请求侧 API：
 
 - `Bind`、`BindBody`、`BindQueryParams`、`BindPathValues`、`BindHeaders`
@@ -95,9 +151,33 @@ func main() {
 默认请求行为：
 
 - 未知的 query 和 header 字段默认忽略
-- 空 JSON body 默认视为 no-op
-- JSON body 使用 Go 标准库解码
 - 未知 JSON 字段默认忽略
+- JSON body 使用 Go 标准库解码
+- 非空 body 需要 `application/json` 或 `application/*+json` 类型的 `Content-Type`
+- `Bind(...)` 在空 body 下会把 body 阶段视为 no-op，并忽略空 body 场景下的无效 `Content-Type`
+- `BindBody(...)` 和 `BindAndValidateBody(...)` 在空 body 下也会保留已有值；但如果请求显式声明了非 JSON `Content-Type`，仍会返回 `415 Unsupported Media Type`
+- 默认 body 读取上限为 `1 MiB`；可通过 `WithMaxBodyBytes(...)` 覆盖
+
+如果你只想绑定单一来源，优先使用源专用 API：
+
+- 只处理 JSON body：`BindBody(...)`、`BindAndValidateBody(...)`
+- 只处理 query：`BindQueryParams(...)`、`BindAndValidateQuery(...)`
+- 只处理 path：`BindPathValues(...)`、`BindAndValidatePath(...)`
+- 只处理 header：`BindHeaders(...)`、`BindAndValidateHeaders(...)`
+
+`BindAndValidate*` 会在 `validator/v10` 校验前自动执行 DTO 的 `Normalize()`。如果你的 DTO 实现了根包导出的 `Normalizer` 接口，可以在其中做裁剪、大小写归一化或默认值补齐。
+
+```go
+type listAccountsRequest struct {
+	Cursor string `query:"cursor" validate:"omitempty,nospace"`
+}
+
+func (r *listAccountsRequest) Normalize() {
+	r.Cursor = strings.TrimSpace(r.Cursor)
+}
+```
+
+校验错误中的字段名会优先使用请求侧 tag 名，而不是 Go struct 字段名。例如 `json:"name"` 失败时，返回的 detail 会是 `field: "name"`。
 
 ## 响应
 
@@ -107,6 +187,8 @@ func main() {
 - `Created`
 - `NoContent`
 - `JSON`、`JSONPretty`、`JSONBlob`
+
+`JSON(...)`、`OK(...)` 和 `Created(...)` 会在请求 URL 带有 `?pretty` 时自动输出 pretty JSON。
 
 `WriteError(...)` 会将任意错误归一化为稳定的公开错误响应结构：
 
@@ -126,14 +208,110 @@ func main() {
 }
 ```
 
+常见归一化规则：
+
+- `reqx` 产生的绑定/校验错误默认返回 `422 Unprocessable Entity`，错误码为 `invalid_request`
+- 非法 JSON 返回 `400 Bad Request`，错误码为 `invalid_json`
+- 非 JSON `Content-Type` 返回 `415 Unsupported Media Type`，错误码为 `unsupported_media_type`
+- 超过 body 上限返回 `413 Request Entity Too Large`，错误码为 `request_too_large`
+- `context.Canceled` 返回 `499 Client Closed Request`，错误码为 `client_closed_request`
+- `context.DeadlineExceeded` 返回 `504 Gateway Timeout`，错误码为 `timeout`
+- 未知错误默认返回 `500 Internal Server Error`，错误码为 `internal_error`
+- `HEAD` 请求只写状态码和 `Content-Type`，不写响应体
+- `details` 字段总是数组；没有明细时写空数组，不写 `null`
+
 如果你需要可复用的公共错误值，可以直接使用 `resp.HTTPError`，以及 `resp.BadRequest(...)`、`resp.NotFound(...)`、`resp.UnprocessableEntity(...)` 等辅助构造函数。
+
+例如：
+
+```go
+if err := repo.DeleteAccount(ctx, accountID); err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
+		_ = chix.WriteError(w, r, resp.NotFound("account_not_found", "account not found"))
+		return
+	}
+
+	_ = chix.WriteError(w, r, err)
+	return
+}
+```
 
 ## 日志中间件
 
 `middleware` 当前提供一套组合好的请求日志链路：
 
-- `RequestLogger(...)`：统一装配 `RequestID`、`traceid`、`httplog.RequestLogger` 与基础请求日志字段
+- `RequestLogger(logger, level)`：统一装配 `RequestID`、`traceid`、`httplog.RequestLogger` 与基础请求日志字段
 - `NewLogger(...)`：构造适配上述中间件的 `slog.Logger`
+
+示例：
+
+```go
+package main
+
+import (
+	"log/slog"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	chixmw "github.com/kanata996/chix/middleware"
+)
+
+func main() {
+	logger := chixmw.NewLogger(chixmw.LoggerOptions{
+		Development: true,
+		Level:       slog.LevelInfo,
+		App:         "example-api",
+		Version:     "dev",
+		Env:         "local",
+	})
+	slog.SetDefault(logger)
+
+	r := chi.NewRouter()
+	r.Use(chixmw.RequestLogger(logger, slog.LevelInfo))
+
+	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		if reqLogger := chixmw.LoggerFromContext(r.Context()); reqLogger != nil {
+			reqLogger.Info("health check passed")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	if err := http.ListenAndServe(":8080", r); err != nil {
+		logger.Error("server exited", slog.Any("error", err))
+	}
+}
+```
+
+`chi` 侧只需要做两件事：
+
+- 创建 router
+- 尽量在路由链路靠前位置挂上 `chixmw.RequestLogger(logger, slog.LevelInfo)`
+
+不需要再额外挂这些中间件：
+
+- `chimw.RequestID`
+- `traceid.Middleware`
+- `httplog.RequestLogger`
+
+`chix` 会固定使用一套受控默认行为：
+
+- 使用 ECS schema 输出请求日志
+- 自动注入 `RequestID` 和 `traceId`
+- 自动开启 panic recovery
+- 自动补充 `request.id` 和 `http.route`
+- 默认只记录 request headers: `Content-Type`、`Origin`
+- 默认只记录 response headers: `Content-Type`
+- 默认不记录 request/response body
+- `4xx` 默认只保留请求日志，不额外注入 `error.*` 诊断字段
+- `5xx` 会在请求日志上补充 `error.code`、`error.message`、`error.type`、`error.root_message`、`error.root_type` 等字段
+
+如果你已经在进程入口通过 `slog.SetDefault(...)` 配好了默认 logger，也可以直接：
+
+```go
+r.Use(chixmw.RequestLogger(nil, slog.LevelInfo))
+```
+
+完整的错误日志行为说明见 [docs/error-logging.md](./docs/error-logging.md)。
 
 ## 包结构
 
@@ -142,18 +320,3 @@ func main() {
 - `resp`：完整的响应侧 API
 
 如果你只需要常用能力，优先使用根包；如果你需要完整能力面，再直接导入 `reqx` 或 `resp`。
-
-## 开发
-
-```bash
-make test
-make ci
-```
-
-更多信息：
-
-- [CHANGELOG.md](./CHANGELOG.md)
-- [CONTRIBUTING.md](./CONTRIBUTING.md)
-- [SECURITY.md](./SECURITY.md)
-- [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
-- [LICENSE](./LICENSE)
