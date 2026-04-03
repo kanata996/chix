@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	jsonContentType   = "application/json"
-	defaultJSONIndent = "  "
+	jsonContentType        = "application/json"
+	problemJSONContentType = "application/problem+json"
+	defaultJSONIndent      = "  "
 )
 
 type responseWriteError struct {
@@ -35,13 +36,19 @@ func (e *responseWriteError) Unwrap() error {
 // writeJSONBytes 以 application/json 写出原始 JSON 字节切片。
 // 调用方需要自行保证 body 已经是合法 JSON。
 func writeJSONBytes(w http.ResponseWriter, status int, body []byte) error {
+	return writeJSONBytesWithContentType(w, status, jsonContentType, body)
+}
+
+// writeJSONBytesWithContentType 以指定 JSON 媒体类型写出原始 JSON 字节切片。
+// 调用方需要自行保证 body 已经是合法 JSON。
+func writeJSONBytesWithContentType(w http.ResponseWriter, status int, contentType string, body []byte) error {
 	if w == nil {
 		return errors.New("resp: response writer is nil")
 	}
 	if err := validateHTTPStatus(status); err != nil {
 		return err
 	}
-	w.Header().Set("Content-Type", jsonContentType)
+	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
 		return &responseWriteError{

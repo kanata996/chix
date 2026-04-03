@@ -252,7 +252,7 @@ func TestBindJSONWithConfigRejectsInvalidContentTypeOnEmptyBody(t *testing.T) {
 	err := bindJSONWithConfig(req, &dst, bindBodyConfig{allowEmptyBody: true}, bodyBindMode{
 		validateContentTypeOnEmpty: true,
 	})
-	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
+	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json or application/*+json")
 }
 
 // body 读取失败时直接透传底层错误。

@@ -56,7 +56,7 @@ func unsupportedMediaTypeError() error {
 	return resp.NewError(
 		http.StatusUnsupportedMediaType,
 		CodeUnsupportedMediaType,
-		"Content-Type must be application/json",
+		"Content-Type must be application/json or application/*+json",
 	)
 }
 

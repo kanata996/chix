@@ -150,7 +150,7 @@ func writeHTTPError(w http.ResponseWriter, r *http.Request, httpErr *HTTPError) 
 	}
 	if r != nil && r.Method == http.MethodHead {
 		if w != nil {
-			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Type", problemJSONContentType)
 		}
 		return writeStatus(w, httpErr.Status())
 	}
@@ -170,7 +170,7 @@ func writeErrorPayload(w http.ResponseWriter, status int, code, detail string, i
 			code:   httpErr.Code(),
 			detail: httpErr.Detail(),
 		})
-		if writeErr := writeJSONBytes(w, httpErr.Status(), fallbackBody); writeErr != nil {
+		if writeErr := writeJSONBytesWithContentType(w, httpErr.Status(), problemJSONContentType, fallbackBody); writeErr != nil {
 			return errors.Join(&ErrorWriteDegraded{Cause: err}, writeErr)
 		}
 		return &ErrorWriteDegraded{
@@ -179,7 +179,7 @@ func writeErrorPayload(w http.ResponseWriter, status int, code, detail string, i
 		}
 	}
 
-	return writeJSONBytes(w, httpErr.Status(), body)
+	return writeJSONBytesWithContentType(w, httpErr.Status(), problemJSONContentType, body)
 }
 
 // marshalProblemPayload 把公共错误字段编码为最终的 JSON 响应体。

@@ -84,6 +84,9 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 	if rr.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusUnprocessableEntity)
 	}
+	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want application/problem+json", got)
+	}
 
 	body := decodePayload(t, rr.Body.Bytes())
 	if got := body["code"]; got != "unprocessable_entity" {
@@ -158,8 +161,8 @@ func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
 	}
-	if got := rr.Header().Get("Content-Type"); got != "application/json" {
-		t.Fatalf("Content-Type = %q, want application/json", got)
+	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want application/problem+json", got)
 	}
 	if rr.Body.Len() != 0 {
 		t.Fatalf("body = %q, want empty", rr.Body.String())
@@ -292,6 +295,9 @@ func TestWriteErrorDropsUnencodableDetails(t *testing.T) {
 	}
 
 	body := decodePayload(t, rr.Body.Bytes())
+	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want application/problem+json", got)
+	}
 	if _, exists := body["errors"]; exists {
 		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
 	}
@@ -327,6 +333,9 @@ func TestWriteErrorDropsPanickingDetails(t *testing.T) {
 	}
 
 	body := decodePayload(t, rr.Body.Bytes())
+	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want application/problem+json", got)
+	}
 	if _, exists := body["errors"]; exists {
 		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
 	}
