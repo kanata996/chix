@@ -11,6 +11,11 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// 测试清单：
+// [✓] 根包 facade 会把 reqx 的绑定、校验与 path 参数 helper 稳定透传出来
+// [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
+// [✓] 根包公开 option 会继续委托到底层 reqx option，而不改变默认契约
+
 type rootPayloadMap map[string]any
 
 // BindAndValidateBody 会通过根包 facade 把 body 绑定和校验委托给 reqx。

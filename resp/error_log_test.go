@@ -261,6 +261,9 @@ func TestErrorTypeNameAndLimitErrorLogString(t *testing.T) {
 	if got := safeErrorString(nil); got != "" {
 		t.Fatalf("safeErrorString(nil) = %q, want empty", got)
 	}
+	if got := safeErrorString(blankMessageTestError{}); got != "" {
+		t.Fatalf("safeErrorString(blankMessageTestError) = %q, want empty", got)
+	}
 
 	var typedNil error = (*rawTestError)(nil)
 	if got := errorTypeName(typedNil); got != "*resp.rawTestError" {

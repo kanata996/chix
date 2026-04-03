@@ -16,6 +16,12 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 )
 
+// 测试清单：
+// [✓] NewLogger 会补齐公共属性，并在普通 logger 与 trace-aware logger 场景下稳定处理 traceId
+// [✓] RequestLogger 会在成功、panic、默认 logger 与默认 header 配置下写出稳定请求日志，并避免重复字段或意外读取 body
+// [✓] logger/context/base attrs helper 与请求日志上下文中间件在 nil、降级和空 attrs 场景下保持安全行为
+// [✓] logger 输出与 handler 构造在 stdout 回退和 development 模式下保持约定行为
+
 // NewLogger 会为请求日志追加 app/version/env 等公共字段，并配合中间件写入 traceId。
 func TestNewLogger_AddsCommonAttrsAndTraceID(t *testing.T) {
 	var buf bytes.Buffer
