@@ -17,7 +17,10 @@
 
 ### 响应已经开始写出
 
-如果传入错误能解出 `responseWriteError`，且 `responseStarted=true`：
+如果满足以下任一条件：
+
+- 传入错误能解出 `responseWriteError`，且 `responseStarted=true`
+- `ResponseWriter` 显式暴露可读的状态信息，且已检测到状态码或已写字节数
 
 - 直接返回原错误
 - 不补请求日志字段

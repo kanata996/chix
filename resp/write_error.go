@@ -55,7 +55,7 @@ type ErrorWriteDegraded struct {
 //
 // 约束：
 //   - 对 HEAD 请求仅写状态码，不写 body；
-//   - 若响应已经开始写出，则不再尝试二次改写响应；
+//   - 若能明确判断响应已经开始写出，则不再尝试二次改写响应；
 //   - 普通 4xx / 5xx 不在这里额外输出一条重复业务错误日志。
 func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 	if err == nil {
@@ -66,12 +66,41 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 	if errors.As(err, &responseStartedErr) && responseStartedErr != nil && responseStartedErr.responseStarted {
 		return err
 	}
+	if responseAlreadyStarted(w) {
+		return err
+	}
 
 	httpErr := asHTTPError(err)
 	annotateRequestErrorLog(r, err, httpErr)
 	writeErr := writeHTTPError(w, r, httpErr)
 	logErrorResponseWriteFailure(r, httpErr, writeErr)
 	return writeErr
+}
+
+// responseAlreadyStarted 仅在 writer 显式暴露响应状态时判断是否已经开始写出。
+// 对于通用 http.ResponseWriter，标准接口本身无法可靠探测“是否已发出 header/body”。
+func responseAlreadyStarted(w http.ResponseWriter) bool {
+	type responseStateWriter interface {
+		Status() int
+		BytesWritten() int
+	}
+	type responseUnwrapper interface {
+		Unwrap() http.ResponseWriter
+	}
+
+	for depth := 0; w != nil && depth < 8; depth++ {
+		if state, ok := w.(responseStateWriter); ok && (state.Status() != 0 || state.BytesWritten() > 0) {
+			return true
+		}
+
+		unwrapper, ok := w.(responseUnwrapper)
+		if !ok {
+			break
+		}
+		w = unwrapper.Unwrap()
+	}
+
+	return false
 }
 
 // asHTTPError 把任意 error 适配为 HTTPError。

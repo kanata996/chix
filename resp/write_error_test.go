@@ -449,6 +449,32 @@ func TestWriteErrorSkipsRewriteAfterResponseStarted(t *testing.T) {
 	}
 }
 
+// 显式暴露状态的包装 ResponseWriter 一旦已经发出状态或字节，WriteError 不应再改写响应。
+func TestWriteErrorSkipsRewriteAfterWrappedResponseStarted(t *testing.T) {
+	rr := httptest.NewRecorder()
+	w := chimiddleware.NewWrapResponseWriter(rr, 1)
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusAccepted)
+	if _, err := w.Write([]byte("partial")); err != nil {
+		t.Fatalf("w.Write() error = %v", err)
+	}
+
+	cause := errors.New("boom")
+	err := WriteError(w, httptest.NewRequest(http.MethodGet, "/", nil), cause)
+	if !errors.Is(err, cause) {
+		t.Errorf("WriteError() error = %v, want original error %v", err, cause)
+	}
+	if rr.Code != http.StatusAccepted {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusAccepted)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "text/plain" {
+		t.Errorf("Content-Type = %q, want text/plain", got)
+	}
+	if got := rr.Body.String(); got != "partial" {
+		t.Errorf("body = %q, want partial", got)
+	}
+}
+
 // 5xx 错误会给请求日志补充诊断字段，但不写入公开 details。
 func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 	var buf bytes.Buffer
