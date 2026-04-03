@@ -19,6 +19,7 @@ package resp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"reflect"
@@ -38,15 +39,12 @@ type errorChainInfo struct {
 	errorType   string
 	rootMessage string
 	rootType    string
-	chain       []string
-	typeChain   []string
-	wrapped     bool
 }
 
 // annotateRequestErrorLog 把错误诊断字段挂到当前请求日志上下文。
 // 这里不直接输出日志，只是补充 attrs，最终仍由外层 httplog 统一落日志。
 func annotateRequestErrorLog(r *http.Request, err error, httpErr *HTTPError) {
-	if r == nil || err == nil || httpErr == nil {
+	if r == nil {
 		return
 	}
 
@@ -142,34 +140,30 @@ func logErrorResponseWriteFailure(r *http.Request, httpErr *HTTPError, err error
 }
 
 // buildErrorChainInfo 把错误链整理成适合日志输出的摘要结构。
-// 它会同时保留当前错误、根错误以及整条错误链的 message / type 信息。
+// 它只保留请求日志会消费的首层/根因 message 与 type 摘要。
 func buildErrorChainInfo(err error) errorChainInfo {
 	chain := flattenErrorChain(err, maxLoggedErrorChainDepth)
 	if len(chain) == 0 {
 		return errorChainInfo{}
 	}
 
-	info := errorChainInfo{
-		chain:     make([]string, 0, len(chain)),
-		typeChain: make([]string, 0, len(chain)),
-		wrapped:   len(chain) > 1,
-	}
+	var info errorChainInfo
 	for _, item := range chain {
-		message := limitErrorLogString(item.Error())
+		// 某些异常 error 实现（例如 typed-nil 或不安全的 Error()）可能在这里 panic。
+		// 日志诊断路径不能反向把主错误处理打崩，因此统一做恢复并降级为说明性文本。
+		message := safeErrorString(item)
 		errType := errorTypeName(item)
 		if message != "" {
 			if info.message == "" {
 				info.message = message
 			}
 			info.rootMessage = message
-			info.chain = append(info.chain, message)
 		}
 		if errType != "" {
 			if info.errorType == "" {
 				info.errorType = errType
 			}
 			info.rootType = errType
-			info.typeChain = append(info.typeChain, errType)
 		}
 	}
 
@@ -199,18 +193,29 @@ func flattenErrorChain(err error, limit int) []error {
 		if current == nil {
 			continue
 		}
-		if _, ok := seen[current]; ok {
-			continue
+		// error 接口底层可能承载“不可比较类型”（例如包含 slice/map 的 struct）。
+		// 这类值一旦作为 map key 会直接 panic，所以只能在可比较时参与去重；
+		// 对不可比较 error 则退化为仅依赖深度上限来防止无限展开。
+		if isComparableError(current) {
+			if _, ok := seen[current]; ok {
+				continue
+			}
+			seen[current] = struct{}{}
 		}
-		seen[current] = struct{}{}
 		chain = append(chain, current)
 
 		unwrapped := unwrapErrors(current)
+		remaining := limit - len(chain) - len(stack)
+		if remaining <= 0 {
+			continue
+		}
+
+		// 预算不足时优先保留更靠前的分支，避免 errors.Join(...) 在截断后
+		// 偏向后面的子错误；同时也确保 stack 不会因宽 join 无界增长。
+		if len(unwrapped) > remaining {
+			unwrapped = unwrapped[:remaining]
+		}
 		for i := len(unwrapped) - 1; i >= 0; i-- {
-			if len(chain)+len(stack) >= limit && i == 0 {
-				// Keep stack growth bounded when we've already hit the limit envelope.
-				break
-			}
 			stack = append(stack, unwrapped[i])
 		}
 	}
@@ -218,11 +223,27 @@ func flattenErrorChain(err error, limit int) []error {
 	return chain
 }
 
+// isComparableError 判断当前 error 是否可安全作为 map key 使用。
+func isComparableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errType := reflect.TypeOf(err)
+	return errType != nil && errType.Comparable()
+}
+
 // unwrapErrors 统一兼容单个 Unwrap() error 和多个 Unwrap() []error 的错误类型。
-func unwrapErrors(err error) []error {
+func unwrapErrors(err error) (errs []error) {
 	type multiUnwrapper interface {
 		Unwrap() []error
 	}
+	defer func() {
+		if recover() != nil {
+			// 某些第三方 error 的 Unwrap() 可能在 nil receiver 或坏状态下 panic。
+			// 日志注解只做诊断，不应该因为展开失败而影响主流程，因此这里直接降级停止下钻。
+			errs = nil
+		}
+	}()
 
 	switch current := err.(type) {
 	case multiUnwrapper:
@@ -241,6 +262,25 @@ func errorTypeName(err error) string {
 		return ""
 	}
 	return reflect.TypeOf(err).String()
+}
+
+// safeErrorString 读取错误文本，并对异常 Error() 实现做恢复。
+func safeErrorString(err error) (message string) {
+	if err == nil {
+		return ""
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			message = "panic calling Error()"
+			if errType := errorTypeName(err); errType != "" {
+				message += " on " + errType
+			}
+			message += ": " + fmt.Sprint(recovered)
+			message = limitErrorLogString(message)
+		}
+	}()
+
+	return limitErrorLogString(err.Error())
 }
 
 // limitErrorLogString 对错误文本做长度限制，避免单条日志过大。

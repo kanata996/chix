@@ -1,5 +1,12 @@
 package reqx
 
+// 用例清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// - [✓] `BindBody` 的 Content-Type、空 body、未知字段、类型错误与非法 JSON 契约。
+// - [✓] `BindBody` 的单值 JSON、尾随空白、body 大小上限与空请求参数错误。
+// - [✓] `BindAndValidateBody` 会在校验前执行 `Normalize()`，并使用 `json` tag 字段名。
+// - [✓] 空 body 但显式声明非 JSON `Content-Type` 时，`BindBody`/`BindAndValidateBody` 返回 415。
+
 import (
 	"errors"
 	"io"
@@ -9,62 +16,104 @@ import (
 	"testing"
 )
 
-// 非 JSON Content-Type 会被拒绝。
-func TestBindBody_RejectsUnsupportedMediaType(t *testing.T) {
+// 非空 body 需要明确声明 JSON Content-Type；application/json 和 application/*+json 均可接受。
+func TestBindBody_ContentTypeContract(t *testing.T) {
 	type request struct {
 		Name string `json:"name"`
 	}
 
-	req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
+	testCases := []struct {
+		name          string
+		contentType   string
+		setHeader     bool
+		wantName      string
+		wantErrStatus int
+	}{
+		{
+			name:          "rejects unsupported media type",
+			contentType:   "text/plain",
+			setHeader:     true,
+			wantErrStatus: http.StatusUnsupportedMediaType,
+		},
+		{
+			name:          "rejects malformed media type header",
+			contentType:   `application/json; charset="`,
+			setHeader:     true,
+			wantErrStatus: http.StatusUnsupportedMediaType,
+		},
+		{
+			name:          "rejects missing content type",
+			setHeader:     false,
+			wantErrStatus: http.StatusUnsupportedMediaType,
+		},
+		{
+			name:        "allows parameterized application json",
+			contentType: "application/json; charset=utf-8",
+			setHeader:   true,
+			wantName:    "kanata",
+		},
+		{
+			name:        "allows json suffix media type",
+			contentType: "application/problem+json",
+			setHeader:   true,
+			wantName:    "kanata",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
+			if tc.setHeader {
+				req.Header.Set("Content-Type", tc.contentType)
+			}
+
+			var dst request
+			err := BindBody(req, &dst)
+			if tc.wantErrStatus != 0 {
+				_ = assertHTTPError(t, err, tc.wantErrStatus, CodeUnsupportedMediaType, "Content-Type must be application/json or application/*+json")
+				return
+			}
+			if err != nil {
+				t.Fatalf("BindBody() error = %v", err)
+			}
+			if dst.Name != tc.wantName {
+				t.Fatalf("name = %q, want %q", dst.Name, tc.wantName)
+			}
+		})
+	}
+}
+
+// 空 body 且未声明 Content-Type 时仍会按 no-op 处理。
+func TestBindBody_IgnoresEmptyBodyWithoutContentType(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
+	dst := request{Name: "kanata"}
+
+	if err := BindBody(req, &dst); err != nil {
+		t.Fatalf("BindBody() error = %v", err)
+	}
+	if dst.Name != "kanata" {
+		t.Fatalf("name = %q, want kanata", dst.Name)
+	}
+}
+
+// 空 body 但显式声明了非 JSON Content-Type 时，仍应返回 415。
+func TestBindBody_RejectsExplicitInvalidContentTypeOnEmptyBody(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
 	req.Header.Set("Content-Type", "text/plain")
+	dst := request{Name: "kanata"}
 
-	var dst request
 	err := BindBody(req, &dst)
 	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json or application/*+json")
-}
-
-// 非法的媒体类型头会被拒绝。
-func TestBindBody_RejectsInvalidMediaTypeHeader(t *testing.T) {
-	type request struct {
-		Name string `json:"name"`
-	}
-
-	req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
-	req.Header.Set("Content-Type", `application/json; charset="`)
-
-	var dst request
-	err := BindBody(req, &dst)
-	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json or application/*+json")
-}
-
-// 默认配置下，空 body 会被忽略。
-func TestBindBody_IgnoresEmptyBodyByDefault(t *testing.T) {
-	type request struct {
-		Name string `json:"name"`
-	}
-
-	req := newJSONRequest(http.MethodPost, "/", "")
-
-	var dst request
-	if err := BindBody(req, &dst); err != nil {
-		t.Fatalf("BindBody() error = %v", err)
-	}
-}
-
-// 默认配置下，纯空白 body 会被视为空 body 并忽略。
-func TestBindBody_IgnoresWhitespaceOnlyBodyByDefault(t *testing.T) {
-	type request struct {
-		Name string `json:"name"`
-	}
-
-	req := newJSONRequest(http.MethodPost, "/", " \n\t ")
-
-	var dst request
-	if err := BindBody(req, &dst); err != nil {
-		t.Fatalf("BindBody() error = %v", err)
-	}
-	if dst.Name != "" {
-		t.Fatalf("name = %q, want empty", dst.Name)
+	if dst.Name != "kanata" {
+		t.Fatalf("name = %q, want kanata", dst.Name)
 	}
 }
 
@@ -82,6 +131,27 @@ func TestBindBody_IgnoresUnknownFieldsByDefault(t *testing.T) {
 	}
 	if dst.Name != "kanata" {
 		t.Fatalf("name = %q, want kanata", dst.Name)
+	}
+}
+
+// 成功绑定时，未出现在 JSON 里的字段应保留已有值。
+func TestBindBody_PreservesExistingValuesForOmittedFields(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+
+	req := newJSONRequest(http.MethodPost, "/", `{"name":"new-name"}`)
+	dst := request{
+		Name: "existing-name",
+		Age:  17,
+	}
+
+	if err := BindBody(req, &dst); err != nil {
+		t.Fatalf("BindBody() error = %v", err)
+	}
+	if dst.Name != "new-name" || dst.Age != 17 {
+		t.Fatalf("dst = %#v, want name updated and age preserved", dst)
 	}
 }
 
@@ -127,6 +197,23 @@ func TestBindBody_RejectsMultipleJSONValues(t *testing.T) {
 	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must contain a single JSON value")
 }
 
+// 单个 JSON 值后附带空白仍应被视为合法。
+func TestBindBody_AllowsTrailingWhitespaceAfterSingleJSONValue(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	req := newJSONRequest(http.MethodPost, "/", "{\"name\":\"kanata\"} \n\t ")
+
+	var dst request
+	if err := BindBody(req, &dst); err != nil {
+		t.Fatalf("BindBody() error = %v", err)
+	}
+	if dst.Name != "kanata" {
+		t.Fatalf("name = %q, want kanata", dst.Name)
+	}
+}
+
 // body 超过限制时返回过大错误。
 func TestBindBody_RespectsMaxBodyBytes(t *testing.T) {
 	type request struct {
@@ -138,6 +225,24 @@ func TestBindBody_RespectsMaxBodyBytes(t *testing.T) {
 	var dst request
 	err := BindBody(req, &dst, WithMaxBodyBytes(4))
 	_ = assertHTTPError(t, err, http.StatusRequestEntityTooLarge, CodeRequestTooLarge, "request body is too large")
+}
+
+// body 大小恰好等于限制时仍应允许通过，避免 off-by-one。
+func TestBindBody_AllowsBodyAtExactMaxBodyBytes(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	body := `{"name":"kanata"}`
+	req := newJSONRequest(http.MethodPost, "/", body)
+
+	var dst request
+	if err := BindBody(req, &dst, WithMaxBodyBytes(int64(len(body)))); err != nil {
+		t.Fatalf("BindBody() error = %v", err)
+	}
+	if dst.Name != "kanata" {
+		t.Fatalf("name = %q, want kanata", dst.Name)
+	}
 }
 
 // 请求对象不能为空。
@@ -178,19 +283,6 @@ func TestReadBody_UsesDefaultMaxBodyBytesWhenLimitIsNonPositive(t *testing.T) {
 	}
 }
 
-// 带前后空白的 +json 媒体类型也应视为合法。
-func TestValidateJSONContentType_AllowsWhitespaceWrappedJSONSuffixMediaType(t *testing.T) {
-	if err := validateJSONContentType(" application/problem+json ; charset=utf-8 "); err != nil {
-		t.Fatalf("validateJSONContentType() error = %v", err)
-	}
-}
-
-// 未知字段错误消息格式不完整时，回退为通用非法 JSON 错误。
-func TestMapDecodeError_FallsBackToInvalidJSONForMalformedUnknownFieldMessage(t *testing.T) {
-	err := mapDecodeError(errors.New(`json: unknown field "extra`))
-	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
-}
-
 // 绑定后会先做标准化再校验。
 func TestBindAndValidateBody_NormalizesBeforeValidation(t *testing.T) {
 	req := newJSONRequest(http.MethodPost, "/", `{"name":"  kanata  "}`)
@@ -223,5 +315,18 @@ func TestBindAndValidateBody_UsesJSONTagNameInValidationError(t *testing.T) {
 	violation := assertSingleViolation(t, err)
 	if violation.Field != "display_name" || violation.Code != ViolationCodeInvalid || violation.Message != "is invalid" {
 		t.Fatalf("violation = %#v", violation)
+	}
+}
+
+// 空 body 但显式声明了非 JSON Content-Type 时，包装器也应优先返回 415。
+func TestBindAndValidateBody_RejectsExplicitInvalidContentTypeOnEmptyBody(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
+	req.Header.Set("Content-Type", "text/plain")
+
+	dst := normalizedBodyRequest{Name: "kanata"}
+	err := BindAndValidateBody(req, &dst)
+	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json or application/*+json")
+	if dst.Name != "kanata" {
+		t.Fatalf("name = %q, want kanata", dst.Name)
 	}
 }

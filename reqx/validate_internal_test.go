@@ -1,5 +1,12 @@
 package reqx
 
+// 用例清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// - [✓] `BindAndValidate*` 包装器的成功路径与绑定错误优先级。
+// - [✓] `validate`、`validateStruct`、`validateTarget` 的边界分支与无效目标错误。
+// - [✓] violation 规范化、字段解析、来源推断与标签优先级辅助分支。
+// - [✓] 这组测试覆盖内部校验辅助逻辑，断言具体返回值和 panic 分支，不是假测试。
+
 import (
 	"errors"
 	"net/http"
@@ -175,6 +182,38 @@ func TestValidateReturnsInvalidValidationError(t *testing.T) {
 	}
 }
 
+// 内部校验器和标签优先级 helper 对不支持的来源会 panic。
+func TestValidatorHelpers_PanicOnUnsupportedSource(t *testing.T) {
+	t.Run("validatorFor", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("validatorFor() did not panic")
+			}
+		}()
+
+		_ = validatorFor(sourceKind("unsupported"))
+	})
+
+	t.Run("sourceTagPriority", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("sourceTagPriority() did not panic")
+			}
+		}()
+
+		_ = sourceTagPriority(sourceKind("unsupported"))
+	})
+}
+
+// body 来源的标签优先级顺序固定，用于字段别名解析。
+func TestSourceTagPriority_UsesBodyPriority(t *testing.T) {
+	got := sourceTagPriority(sourceBody)
+	want := []string{"json", "query", "param", "header"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sourceTagPriority(sourceBody) = %#v, want %#v", got, want)
+	}
+}
+
 // normalizeViolation 会按错误码补齐默认错误信息。
 func TestNormalizeViolationBranches(t *testing.T) {
 	testCases := []struct {
@@ -196,6 +235,11 @@ func TestNormalizeViolationBranches(t *testing.T) {
 			name: "type",
 			in:   Violation{Field: "name", Code: ViolationCodeType},
 			want: Violation{Field: "name", Code: ViolationCodeType, Detail: "has invalid type", Message: "has invalid type"},
+		},
+		{
+			name: "multiple",
+			in:   Violation{Field: "name", Code: ViolationCodeMultiple},
+			want: Violation{Field: "name", Code: ViolationCodeMultiple, Detail: "must not be repeated", Message: "must not be repeated"},
 		},
 		{
 			name: "default",

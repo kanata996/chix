@@ -11,6 +11,12 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// 测试清单：
+// [✓] 根包 facade 会把 reqx 的绑定、校验与 path 参数 helper 稳定透传出来
+// [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
+// [✓] 根包公开 option 会继续委托到底层 reqx option，而不改变默认契约
+// [✓] README 中承诺的 create account handler 主路径有根包级端到端测试支撑
+
 type rootPayloadMap map[string]any
 
 // BindAndValidateBody 会通过根包 facade 把 body 绑定和校验委托给 reqx。
@@ -350,6 +356,103 @@ func TestWithMaxBodyBytes_DelegatesToReqx(t *testing.T) {
 
 	err := Bind(req, &dst, WithMaxBodyBytes(4))
 	_ = assertRootHTTPError(t, err, http.StatusRequestEntityTooLarge, "request_too_large", "request body is too large")
+}
+
+// README 中的 create account 示例应由根包 facade 直接支撑成功与失败两条主路径。
+func TestReadmeCreateAccountFlow(t *testing.T) {
+	type createAccountRequest struct {
+		OrgID string `param:"org_id"`
+		Name  string `json:"name" validate:"required"`
+	}
+
+	router := chi.NewRouter()
+	router.Post("/orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
+		var req createAccountRequest
+		if err := BindAndValidate(r, &req); err != nil {
+			_ = WriteError(w, r, err)
+			return
+		}
+
+		_ = Created(w, r, map[string]any{
+			"id":     "acct_123",
+			"org_id": req.OrgID,
+			"name":   req.Name,
+		})
+	})
+
+	t.Run("success", func(t *testing.T) {
+		req := newJSONRequest(http.MethodPost, "/orgs/org_123/accounts", `{"name":"Acme"}`)
+		rr := httptest.NewRecorder()
+
+		router.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusCreated)
+		}
+		if got := rr.Header().Get("Content-Type"); got != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+
+		body := decodeRootPayload(t, rr.Body.Bytes())
+		if got := body["id"]; got != "acct_123" {
+			t.Fatalf("id = %#v, want acct_123", got)
+		}
+		if got := body["org_id"]; got != "org_123" {
+			t.Fatalf("org_id = %#v, want org_123", got)
+		}
+		if got := body["name"]; got != "Acme" {
+			t.Fatalf("name = %#v, want Acme", got)
+		}
+	})
+
+	t.Run("validation failure", func(t *testing.T) {
+		req := newJSONRequest(http.MethodPost, "/orgs/org_123/accounts", `{}`)
+		rr := httptest.NewRecorder()
+
+		router.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusUnprocessableEntity)
+		}
+		if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
+			t.Fatalf("Content-Type = %q, want application/problem+json", got)
+		}
+
+		body := decodeRootPayload(t, rr.Body.Bytes())
+		if got := body["title"]; got != "Unprocessable Entity" {
+			t.Fatalf("title = %#v, want Unprocessable Entity", got)
+		}
+		if got := body["status"]; got != float64(http.StatusUnprocessableEntity) {
+			t.Fatalf("status = %#v, want %d", got, http.StatusUnprocessableEntity)
+		}
+		if got := body["detail"]; got != "request contains invalid fields" {
+			t.Fatalf("detail = %#v, want request contains invalid fields", got)
+		}
+		if got := body["code"]; got != "invalid_request" {
+			t.Fatalf("code = %#v, want invalid_request", got)
+		}
+
+		errors, ok := body["errors"].([]any)
+		if !ok || len(errors) != 1 {
+			t.Fatalf("errors = %#v, want 1 item", body["errors"])
+		}
+		violation, ok := errors[0].(map[string]any)
+		if !ok {
+			t.Fatalf("errors[0] = %#v, want map", errors[0])
+		}
+		if got := violation["field"]; got != "name" {
+			t.Fatalf("field = %#v, want name", got)
+		}
+		if got := violation["in"]; got != "body" {
+			t.Fatalf("in = %#v, want body", got)
+		}
+		if got := violation["code"]; got != "required" {
+			t.Fatalf("code = %#v, want required", got)
+		}
+		if got := violation["detail"]; got != "is required" {
+			t.Fatalf("detail = %#v, want is required", got)
+		}
+	})
 }
 
 func newJSONRequest(method, target, body string) *http.Request {

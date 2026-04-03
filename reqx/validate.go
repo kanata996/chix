@@ -91,7 +91,7 @@ func ValidateHeaders[T any](target *T) error {
 func BadRequest(violations ...Violation) error {
 	return resp.NewError(
 		http.StatusBadRequest,
-		"invalid_request",
+		CodeInvalidRequest,
 		"request contains invalid fields",
 		violationsToAny(violations)...,
 	)
@@ -102,13 +102,7 @@ func InvalidField(field string) Violation {
 }
 
 func InvalidFieldIn(input, field string) Violation {
-	return Violation{
-		Field:   field,
-		In:      input,
-		Code:    "invalid",
-		Detail:  "is invalid",
-		Message: "is invalid",
-	}
+	return newViolation(field, input, ViolationCodeInvalid, violationDetailInvalid)
 }
 
 func RequiredField(field string) Violation {
@@ -116,13 +110,7 @@ func RequiredField(field string) Violation {
 }
 
 func RequiredFieldIn(input, field string) Violation {
-	return Violation{
-		Field:   field,
-		In:      input,
-		Code:    "required",
-		Detail:  "is required",
-		Message: "is required",
-	}
+	return newViolation(field, input, ViolationCodeRequired, violationDetailRequired)
 }
 
 func validate[T any](target *T, source sourceKind) error {
@@ -220,8 +208,7 @@ func validateNoSpace(fl validator.FieldLevel) bool {
 	return !strings.ContainsRune(field.String(), ' ')
 }
 
-func violationsFromValidation(source sourceKind, args ...any) []Violation {
-	target, errs := validationArgs(args...)
+func violationsFromValidation(source sourceKind, target any, errs validator.ValidationErrors) []Violation {
 	if len(errs) == 0 {
 		return nil
 	}
@@ -253,29 +240,9 @@ func violationsFromValidation(source sourceKind, args ...any) []Violation {
 
 	violations := make([]Violation, 0, len(entries))
 	for _, entry := range entries {
-		violations = append(violations, Violation{
-			Field:   entry.field,
-			In:      entry.in,
-			Code:    entry.code,
-			Detail:  validationDetail(entry.code),
-			Message: validationDetail(entry.code),
-		})
+		violations = append(violations, newViolation(entry.field, entry.in, entry.code, validationDetail(entry.code)))
 	}
 	return violations
-}
-
-func validationArgs(args ...any) (any, validator.ValidationErrors) {
-	switch len(args) {
-	case 1:
-		if errs, ok := args[0].(validator.ValidationErrors); ok {
-			return nil, errs
-		}
-	case 2:
-		if errs, ok := args[1].(validator.ValidationErrors); ok {
-			return args[0], errs
-		}
-	}
-	return nil, nil
 }
 
 func validationFieldPath(source sourceKind, err validator.FieldError) string {
@@ -306,17 +273,14 @@ func validationFieldPath(source sourceKind, err validator.FieldError) string {
 func validationCode(tag string) string {
 	switch tag {
 	case "required":
-		return "required"
+		return ViolationCodeRequired
 	default:
-		return "invalid"
+		return ViolationCodeInvalid
 	}
 }
 
 func validationDetail(code string) string {
-	if code == "required" {
-		return "is required"
-	}
-	return "is invalid"
+	return violationDetailForCode(code)
 }
 
 func validationInput(source sourceKind, target any, err validator.FieldError) string {
@@ -338,33 +302,17 @@ func validationInput(source sourceKind, target any, err validator.FieldError) st
 }
 
 func violationInForSource(source sourceKind) string {
-	switch source {
-	case sourceBody:
-		return ViolationInBody
-	case sourceQuery:
-		return ViolationInQuery
-	case sourcePath:
-		return ViolationInPath
-	case sourceHeader:
-		return ViolationInHeader
-	default:
-		return ViolationInRequest
+	if input, ok := violationInputsBySource[source]; ok {
+		return input
 	}
+	return ViolationInRequest
 }
 
 func violationInForTag(tagName string) string {
-	switch tagName {
-	case "json":
-		return ViolationInBody
-	case "query":
-		return ViolationInQuery
-	case "param":
-		return ViolationInPath
-	case "header":
-		return ViolationInHeader
-	default:
-		return ViolationInRequest
+	if input, ok := violationInputsByTag[tagName]; ok {
+		return input
 	}
+	return ViolationInRequest
 }
 
 func resolveValidationField(target any, structNamespace string) (reflect.StructField, bool) {
@@ -443,20 +391,10 @@ func fieldAlias(field reflect.StructField, source sourceKind) string {
 }
 
 func sourceTagPriority(source sourceKind) []string {
-	switch source {
-	case sourceBody:
-		return []string{"json", "query", "param", "header"}
-	case sourceQuery:
-		return []string{"query", "json", "param", "header"}
-	case sourcePath:
-		return []string{"param", "json", "query", "header"}
-	case sourceHeader:
-		return []string{"header", "json", "query", "param"}
-	case sourceRequest:
-		return []string{"param", "query", "json", "header"}
-	default:
-		panic(fmt.Sprintf("reqx: unsupported tag source %q", source))
+	if priority, ok := sourceTagPriorities[source]; ok {
+		return priority
 	}
+	panic(fmt.Sprintf("reqx: unsupported tag source %q", source))
 }
 
 func tagValue(field reflect.StructField, tagName string) string {
@@ -464,13 +402,36 @@ func tagValue(field reflect.StructField, tagName string) string {
 	if value == "" {
 		return ""
 	}
-	value = strings.Split(value, ",")[0]
+	value, _, _ = strings.Cut(value, ",")
 	value = strings.TrimSpace(value)
 	if value == "" || value == "-" {
 		return ""
 	}
 	return value
 }
+
+var (
+	sourceTagPriorities = map[sourceKind][]string{
+		sourceBody:    {"json", "query", "param", "header"},
+		sourceQuery:   {"query", "json", "param", "header"},
+		sourcePath:    {"param", "json", "query", "header"},
+		sourceHeader:  {"header", "json", "query", "param"},
+		sourceRequest: {"param", "query", "json", "header"},
+	}
+	violationInputsBySource = map[sourceKind]string{
+		sourceBody:    ViolationInBody,
+		sourceQuery:   ViolationInQuery,
+		sourcePath:    ViolationInPath,
+		sourceHeader:  ViolationInHeader,
+		sourceRequest: ViolationInRequest,
+	}
+	violationInputsByTag = map[string]string{
+		"json":   ViolationInBody,
+		"query":  ViolationInQuery,
+		"param":  ViolationInPath,
+		"header": ViolationInHeader,
+	}
+)
 
 func violationsToAny(violations []Violation) []any {
 	items := make([]any, 0, len(violations))

@@ -1,7 +1,6 @@
 package resp
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 )
@@ -9,11 +8,7 @@ import (
 // JSON 按 Echo Response 的核心能力写出 JSON 响应。
 // 当请求 URL 带有 ?pretty 时，会自动输出 pretty JSON。
 func JSON(w http.ResponseWriter, r *http.Request, status int, data any) error {
-	indent := ""
-	if shouldPrettyJSON(r) {
-		indent = defaultJSONIndent
-	}
-	return writeJSON(w, status, data, indent)
+	return writeJSON(w, status, data, jsonIndent(r))
 }
 
 // JSONPretty 使用指定缩进写出 pretty JSON。
@@ -51,19 +46,20 @@ func writeJSON(w http.ResponseWriter, status int, data any, indent string) error
 }
 
 func writeSuccess(w http.ResponseWriter, r *http.Request, status int, data any) error {
-	if err := validateSuccessBodyStatus(status); err != nil {
+	if err := validateHTTPStatus(status); err != nil {
+		return err
+	}
+	if status > 399 {
+		return fmt.Errorf("resp: invalid success status %d", status)
+	}
+	if err := validateStatusAllowsBody(status, "success writers with a body"); err != nil {
 		return err
 	}
 	if w == nil {
-		return errors.New("resp: response writer is nil")
+		return errNilResponseWriter
 	}
 
-	indent := ""
-	if shouldPrettyJSON(r) {
-		indent = defaultJSONIndent
-	}
-
-	dataJSON, err := encodeJSON(data, indent)
+	dataJSON, err := encodeJSON(data, jsonIndent(r))
 	if err != nil {
 		return err
 	}
@@ -74,38 +70,13 @@ func writeSuccess(w http.ResponseWriter, r *http.Request, status int, data any) 
 	return writeJSONBytes(w, status, dataJSON)
 }
 
-func shouldPrettyJSON(r *http.Request) bool {
+func jsonIndent(r *http.Request) string {
 	if r == nil || r.URL == nil {
-		return false
+		return ""
 	}
 	_, pretty := r.URL.Query()["pretty"]
-	return pretty
-}
-
-// validateSuccessBodyStatus 校验“带响应体”的成功状态码。
-// 例如 204/304 虽然不是错误码，但语义上不允许带 body，因此这里直接拒绝。
-func validateSuccessBodyStatus(status int) error {
-	if err := validateSuccessStatus(status); err != nil {
-		return err
+	if pretty {
+		return defaultJSONIndent
 	}
-	if status < http.StatusOK {
-		return fmt.Errorf("resp: success writers with a body cannot use informational status %d", status)
-	}
-	switch status {
-	case http.StatusNoContent, http.StatusResetContent, http.StatusNotModified:
-		return fmt.Errorf("resp: success writers with a body cannot use bodyless status %d", status)
-	}
-	return nil
-}
-
-// validateSuccessStatus 校验 success writer 可接受的状态码范围。
-// 当前仅允许 1xx-3xx，避免把错误状态误传到成功响应分支。
-func validateSuccessStatus(status int) error {
-	if err := validateHTTPStatus(status); err != nil {
-		return err
-	}
-	if status < 100 || status > 399 {
-		return fmt.Errorf("resp: invalid success status %d", status)
-	}
-	return nil
+	return ""
 }

@@ -1,68 +1,63 @@
 package reqx
 
+// 用例清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// - [✓] `ValidateBody`、`ValidateQuery`、`ValidatePath`、`ValidateHeaders` 会使用来源专属字段别名和 `in` 值。
+// - [✓] `Validate` 会规范化自定义 violation，且空目标返回参数错误。
+// - [✓] `BadRequest` 会生成带 violation 详情的 HTTP 错误。
+// - [✓] `ValidateRequest` 会按 param/query/json/header/plain 选择字段名，但统一以 `request` 作为 `in`。
+// - [✓] `ValidateRequest` 的空目标错误契约会透传当前包装器的参数校验错误。
+
 import (
 	"net/http"
-	"net/http/httptest"
-	"reflect"
 	"testing"
 )
 
-// Header 标量字段重复出现时返回重复值错误。
-func TestBindHeaders_RejectsRepeatedScalar(t *testing.T) {
-	type request struct {
-		RequestID string `header:"x-request-id"`
-	}
+// 各个 Validate* API 会按来源选择稳定的字段别名和 in 值。
+func TestValidate_UsesSourceSpecificFieldAliases(t *testing.T) {
+	t.Run("body uses json tag", func(t *testing.T) {
+		var dst struct {
+			DisplayName string `json:"display_name" validate:"required,nospace"`
+		}
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Add("X-Request-Id", "req-1")
-	req.Header.Add("X-Request-Id", "req-2")
+		violation := assertSingleViolation(t, ValidateBody(&dst))
+		if violation.Field != "display_name" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+			t.Fatalf("violation = %#v", violation)
+		}
+	})
 
-	var dst request
-	err := BindHeaders(req, &dst)
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "X-Request-Id" || violation.In != ViolationInHeader || violation.Code != ViolationCodeMultiple || violation.Detail != "must not be repeated" {
-		t.Fatalf("violation = %#v", violation)
-	}
-}
+	t.Run("query uses query tag", func(t *testing.T) {
+		var dst struct {
+			Cursor string `query:"cursor" validate:"required"`
+		}
 
-// Header 校验错误字段名使用规范化后的 header 名称。
-func TestBindAndValidateHeaders_UsesCanonicalHeaderTagName(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+		violation := assertSingleViolation(t, ValidateQuery(&dst))
+		if violation.Field != "cursor" || violation.In != ViolationInQuery || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+			t.Fatalf("violation = %#v", violation)
+		}
+	})
 
-	var dst struct {
-		RequestID string `header:"x-request-id" validate:"required"`
-	}
-	err := BindAndValidateHeaders(req, &dst)
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "X-Request-Id" || violation.In != ViolationInHeader || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
-		t.Fatalf("violation = %#v", violation)
-	}
-}
+	t.Run("path uses param tag", func(t *testing.T) {
+		var dst struct {
+			UUID string `param:"uuid" validate:"required,uuid"`
+		}
 
-// Body 校验错误字段名优先使用 json tag。
-func TestValidateBody_UsesJSONTagName(t *testing.T) {
-	var dst struct {
-		DisplayName string `json:"display_name" validate:"required,nospace"`
-	}
+		violation := assertSingleViolation(t, ValidatePath(&dst))
+		if violation.Field != "uuid" || violation.In != ViolationInPath || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+			t.Fatalf("violation = %#v", violation)
+		}
+	})
 
-	err := ValidateBody(&dst)
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "display_name" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
-		t.Fatalf("violation = %#v", violation)
-	}
-}
+	t.Run("headers use canonical header tag", func(t *testing.T) {
+		var dst struct {
+			RequestID string `header:"x-request-id" validate:"required"`
+		}
 
-// Path 校验错误字段名优先使用 param tag。
-func TestValidatePath_UsesParamTagName(t *testing.T) {
-	var dst struct {
-		UUID string `param:"uuid" validate:"required,uuid"`
-	}
-
-	err := ValidatePath(&dst)
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "uuid" || violation.In != ViolationInPath || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
-		t.Fatalf("violation = %#v", violation)
-	}
+		violation := assertSingleViolation(t, ValidateHeaders(&dst))
+		if violation.Field != "X-Request-Id" || violation.In != ViolationInHeader || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+			t.Fatalf("violation = %#v", violation)
+		}
+	})
 }
 
 // 自定义校验返回的 violation 会被补齐默认错误信息。
@@ -91,6 +86,55 @@ func TestValidate_NilDestinationReturnsError(t *testing.T) {
 	}
 }
 
+// ValidateRequest 会按请求标签选择字段别名，但统一以 request 作为 in 值。
+func TestValidateRequest_UsesRequestFieldAliases(t *testing.T) {
+	var dst struct {
+		ID      string `param:"id" validate:"required"`
+		Cursor  string `query:"cursor" validate:"required"`
+		Name    string `json:"name" validate:"required"`
+		TraceID string `header:"x-trace-id" validate:"required"`
+		Plain   string `validate:"required"`
+	}
+
+	violations := assertViolations(t, ValidateRequest(&dst))
+	if len(violations) != 5 {
+		t.Fatalf("violations len = %d, want 5", len(violations))
+	}
+
+	got := map[string]Violation{}
+	for _, violation := range violations {
+		got[violation.Field] = violation
+	}
+
+	want := map[string]string{
+		"id":         ViolationInRequest,
+		"cursor":     ViolationInRequest,
+		"name":       ViolationInRequest,
+		"X-Trace-Id": ViolationInRequest,
+		"Plain":      ViolationInRequest,
+	}
+	for field, wantIn := range want {
+		violation, ok := got[field]
+		if !ok {
+			t.Fatalf("missing violation for %q in %#v", field, got)
+		}
+		if violation.In != wantIn || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+			t.Fatalf("violation[%q] = %#v", field, violation)
+		}
+	}
+}
+
+// ValidateRequest 会透传当前包装器的空目标参数错误。
+func TestValidateRequest_NilDestinationReturnsError(t *testing.T) {
+	err := ValidateRequest[struct{}](nil)
+	if err == nil {
+		t.Fatal("ValidateRequest() error = nil")
+	}
+	if got := err.Error(); got != "reqx: target must be a non-nil pointer to struct" {
+		t.Fatalf("error = %q, want reqx: target must be a non-nil pointer to struct", got)
+	}
+}
+
 // BadRequest 会构造带 violation 详情的 HTTP 错误。
 func TestBadRequest_ReturnsHTTPError(t *testing.T) {
 	err := BadRequest(RequiredField("name"))
@@ -107,57 +151,5 @@ func TestBadRequest_ReturnsHTTPError(t *testing.T) {
 	}
 	if violation.Field != "name" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
-	}
-}
-
-// applyBindOptions 会保留默认标志并应用 body 大小限制。
-func TestApplyBindOptions_SetsAllFlags(t *testing.T) {
-	cfg := applyBindOptions(WithMaxBodyBytes(8))
-
-	if cfg.body.maxBodyBytes != 8 {
-		t.Fatalf("maxBodyBytes = %d, want 8", cfg.body.maxBodyBytes)
-	}
-	if !cfg.body.allowUnknownFields {
-		t.Fatal("body.allowUnknownFields = false, want true")
-	}
-	if !cfg.body.allowEmptyBody {
-		t.Fatal("body.allowEmptyBody = false, want true")
-	}
-	if !cfg.query.allowUnknownFields {
-		t.Fatal("query.allowUnknownFields = false, want true")
-	}
-	if !cfg.header.allowUnknownFields {
-		t.Fatal("header.allowUnknownFields = false, want true")
-	}
-}
-
-// 不支持的校验来源会触发 panic。
-func TestValidatorFor_PanicsOnUnsupportedSource(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("validatorFor() did not panic")
-		}
-	}()
-
-	_ = validatorFor(sourceKind("unsupported"))
-}
-
-// 不支持的标签来源优先级会触发 panic。
-func TestSourceTagPriority_PanicsOnUnsupportedSource(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("sourceTagPriority() did not panic")
-		}
-	}()
-
-	_ = sourceTagPriority(sourceKind("unsupported"))
-}
-
-// body 校验来源的标签优先级顺序固定。
-func TestSourceTagPriority_UsesBodyPriority(t *testing.T) {
-	got := sourceTagPriority(sourceBody)
-	want := []string{"json", "query", "param", "header"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("sourceTagPriority(sourceBody) = %#v, want %#v", got, want)
 	}
 }

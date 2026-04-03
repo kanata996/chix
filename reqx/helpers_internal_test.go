@@ -1,5 +1,12 @@
 package reqx
 
+// 用例清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// - [✓] 底层 body 读取、JSON 解码、错误映射与 Content-Type 校验分支。
+// - [✓] 值绑定计划缓存、字段类型校验、路径/查询/头部取值辅助分支。
+// - [✓] 深拷贝、目标校验、错误构造与自定义校验注册辅助分支。
+// - [✓] 这组测试以内部 helper 为对象，但都带有具体输入和行为断言，不是空跑覆盖。
+
 import (
 	"encoding/json"
 	"errors"
@@ -285,13 +292,25 @@ func TestBindJSONWithConfigRejectsUnknownFieldWhenDisabled(t *testing.T) {
 	}
 }
 
-// +json 后缀和空 Content-Type 都被视为合法。
-func TestValidateJSONContentTypeAllowsJSONSuffix(t *testing.T) {
-	if err := validateJSONContentType("application/merge-patch+json"); err != nil {
-		t.Fatalf("validateJSONContentType() error = %v", err)
+// validateJSONContentType 会接受空值、标准 JSON 和 +json 后缀，并正确裁剪首尾空白。
+func TestValidateJSONContentType_AllowsSupportedMediaTypes(t *testing.T) {
+	testCases := []struct {
+		name        string
+		contentType string
+	}{
+		{name: "empty", contentType: ""},
+		{name: "application json", contentType: "application/json"},
+		{name: "parameterized application json", contentType: "application/json; charset=utf-8"},
+		{name: "json suffix", contentType: "application/merge-patch+json"},
+		{name: "trimmed json suffix", contentType: " application/problem+json ; charset=utf-8 "},
 	}
-	if err := validateJSONContentType(""); err != nil {
-		t.Fatalf("validateJSONContentType(empty) error = %v", err)
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateJSONContentType(tc.contentType); err != nil {
+				t.Fatalf("validateJSONContentType() error = %v", err)
+			}
+		})
 	}
 }
 
@@ -331,6 +350,11 @@ func TestMapDecodeErrorBranches(t *testing.T) {
 		if violation.Field != "extra" || violation.Code != ViolationCodeUnknown || violation.Message != "unknown field" {
 			t.Fatalf("violation = %#v", violation)
 		}
+	})
+
+	t.Run("malformed unknown field message", func(t *testing.T) {
+		err := mapDecodeError(errors.New(`json: unknown field "extra`))
+		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
 	})
 
 	t.Run("default", func(t *testing.T) {
@@ -538,6 +562,17 @@ func TestDecodeValuesIntoAndDecodeQueryFieldBranches(t *testing.T) {
 	}
 }
 
+// sourceValues 对不支持的值来源会 panic，避免默默回退成错误输入源。
+func TestSourceValues_PanicsOnUnsupportedSource(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("sourceValues() did not panic")
+		}
+	}()
+
+	_ = sourceValues(httptest.NewRequest(http.MethodGet, "/", nil), valueSource{tag: "unsupported"})
+}
+
 // 解码到不支持的字段类型时，decodeValuesInto 会返回底层错误。
 func TestDecodeValuesIntoReturnsDecodeError(t *testing.T) {
 	type request struct {
@@ -680,7 +715,7 @@ func TestMustRegisterValidationPanicsOnInvalidRegistration(t *testing.T) {
 
 // 校验辅助函数会处理去重、排序和字段路径回退。
 func TestValidationHelpers(t *testing.T) {
-	if got := violationsFromValidation(sourceBody, nil); got != nil {
+	if got := violationsFromValidation(sourceBody, nil, nil); got != nil {
 		t.Fatalf("violationsFromValidation(nil) = %#v, want nil", got)
 	}
 
@@ -689,7 +724,7 @@ func TestValidationHelpers(t *testing.T) {
 		fakeFieldError{tag: "min", namespace: "Req.a", field: "a", typ: reflect.TypeOf("")},
 		fakeFieldError{tag: "required", namespace: "Req.a", field: "a", typ: reflect.TypeOf("")},
 	}
-	violations := violationsFromValidation(sourceRequest, errs)
+	violations := violationsFromValidation(sourceRequest, nil, errs)
 	if len(violations) != 2 {
 		t.Fatalf("violations len = %d, want 2", len(violations))
 	}

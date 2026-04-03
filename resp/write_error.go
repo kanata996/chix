@@ -155,21 +155,16 @@ func writeHTTPError(w http.ResponseWriter, r *http.Request, httpErr *HTTPError) 
 		return writeStatus(w, httpErr.Status())
 	}
 
-	return writeErrorPayload(w, httpErr.Status(), httpErr.Code(), httpErr.Detail(), httpErr.Errors())
+	return writeErrorPayload(w, httpErr)
 }
 
 // writeErrorPayload 负责真正把错误对象编码并写到响应里。
 // 如果 errors 序列化失败，会降级为只保留 title/status/detail/code 的响应，
 // 尽量避免整次错误响应完全失败。
-func writeErrorPayload(w http.ResponseWriter, status int, code, detail string, items []any) error {
-	httpErr := wrapError(status, code, detail, nil, items...)
+func writeErrorPayload(w http.ResponseWriter, httpErr *HTTPError) error {
 	body, err := marshalProblemPayload(httpErr)
 	if err != nil {
-		fallbackBody, _ := marshalProblemPayload(&HTTPError{
-			status: httpErr.Status(),
-			code:   httpErr.Code(),
-			detail: httpErr.Detail(),
-		})
+		fallbackBody, _ := json.Marshal(problemPayloadFromHTTPError(httpErr, false))
 		if writeErr := writeJSONBytesWithContentType(w, httpErr.Status(), problemJSONContentType, fallbackBody); writeErr != nil {
 			return errors.Join(&ErrorWriteDegraded{Cause: err}, writeErr)
 		}
@@ -196,19 +191,23 @@ func marshalProblemPayload(httpErr *HTTPError) (body []byte, err error) {
 		return json.Marshal(problemPayload{})
 	}
 
-	return json.Marshal(problemPayload{
+	return json.Marshal(problemPayloadFromHTTPError(httpErr, true))
+}
+
+func problemPayloadFromHTTPError(httpErr *HTTPError, includeErrors bool) problemPayload {
+	if httpErr == nil {
+		return problemPayload{}
+	}
+
+	payload := problemPayload{
 		Title:  httpErr.Title(),
 		Status: httpErr.Status(),
 		Detail: httpErr.Detail(),
 		Code:   httpErr.Code(),
-		Errors: normalizeErrors(httpErr.Errors()),
-	})
-}
-
-// normalizeErrors 保证 errors 在有内容时返回防御性拷贝。
-func normalizeErrors(items []any) []any {
-	if len(items) == 0 {
-		return nil
 	}
-	return cloneErrors(items)
+	if includeErrors && len(httpErr.errors) > 0 {
+		payload.Errors = httpErr.errors
+	}
+
+	return payload
 }
