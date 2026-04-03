@@ -1,5 +1,9 @@
 # chix
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/kanata996/chix.svg)](https://pkg.go.dev/github.com/kanata996/chix)
+[![CI](https://github.com/kanata996/chix/workflows/CI/badge.svg)](https://github.com/kanata996/chix/actions/workflows/ci.yml)
+[![Codecov](https://codecov.io/github/kanata996/chix/graph/badge.svg)](https://codecov.io/github/kanata996/chix)
+
 `chix` 是一个基于 `chi` 和 `net/http` 的轻量级 JSON API HTTP 边界工具包。
 
 它聚焦在服务的请求与响应边界：
@@ -134,6 +138,69 @@ func main() {
 
 - `RequestLogger(logger, level)`：统一装配 `RequestID`、`traceid`、`httplog.RequestLogger` 与基础请求日志字段
 - `NewLogger(...)`：构造适配上述中间件的 `slog.Logger`
+
+示例：
+
+```go
+package main
+
+import (
+	"log/slog"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	chixmw "github.com/kanata996/chix/middleware"
+)
+
+func main() {
+	logger := chixmw.NewLogger(chixmw.LoggerOptions{
+		Development: true,
+		Level:       slog.LevelInfo,
+		App:         "example-api",
+		Version:     "dev",
+		Env:         "local",
+	})
+	slog.SetDefault(logger)
+
+	r := chi.NewRouter()
+	r.Use(chixmw.RequestLogger(logger, slog.LevelInfo))
+
+	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	if err := http.ListenAndServe(":8080", r); err != nil {
+		logger.Error("server exited", slog.Any("error", err))
+	}
+}
+```
+
+`chi` 侧只需要做两件事：
+
+- 创建 router
+- 尽量在路由链路靠前位置挂上 `chixmw.RequestLogger(logger, slog.LevelInfo)`
+
+不需要再额外挂这些中间件：
+
+- `chimw.RequestID`
+- `traceid.Middleware`
+- `httplog.RequestLogger`
+
+`chix` 会固定使用一套受控默认行为：
+
+- 使用 ECS schema 输出请求日志
+- 自动注入 `RequestID` 和 `traceId`
+- 自动开启 panic recovery
+- 自动补充 `request.id` 和 `http.route`
+- 默认只记录 request headers: `Content-Type`、`Origin`
+- 默认只记录 response headers: `Content-Type`
+- 默认不记录 request/response body
+
+如果你已经在进程入口通过 `slog.SetDefault(...)` 配好了默认 logger，也可以直接：
+
+```go
+r.Use(chixmw.RequestLogger(nil, slog.LevelInfo))
+```
 
 ## 包结构
 
