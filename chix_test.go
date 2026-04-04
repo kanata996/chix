@@ -472,9 +472,9 @@ func newRouteJSONRequest(method, target, body, name, value string) *http.Request
 }
 
 func withRouteParam(req *http.Request, name, value string) *http.Request {
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add(name, value)
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req.Pattern = "/{" + name + "}"
+	req.SetPathValue(name, value)
+	return req
 }
 
 func decodeRootPayload(t *testing.T, body []byte) rootPayloadMap {
