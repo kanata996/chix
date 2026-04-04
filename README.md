@@ -122,7 +122,7 @@ Content-Type: application/problem+json
 
 支持的 tag：
 
-- `param:"..."`：`chi` 路由参数
+- `param:"..."`：匹配到的请求 path 命名 wildcard（通过 `http.Request.PathValue(...)` 读取；以 `http.Request.Pattern` 中的命名 wildcard 为准，例如 `/{id}`、`/{path...}`）
 - `query:"..."`：查询字符串参数
 - `json:"..."`：JSON 请求体
 - `header:"..."`：请求头
@@ -140,6 +140,12 @@ Content-Type: application/problem+json
 - `POST`、`PUT`、`PATCH` 等请求不会在 `Bind(...)` 中自动绑定 query；如果你需要它们，显式调用 `BindQueryParams(...)` 或 `BindAndValidateQuery(...)`
 - 缺失的 path/query/header/body 不会把目标 DTO 清零，而是保留目标对象已有值
 - 任一绑定阶段失败时，不会对目标 DTO 部分落值，调用方拿到的仍是原对象
+
+path 绑定的兼容边界：
+
+- `reqx` 只依赖 `net/http` 暴露的 `PathValue` / `Pattern` 语义
+- `param:"..."` 只面向命名 wildcard；它不是 `chi.RouteContext` 的兼容层
+- `chi` 专有的 `*` catch-all 不属于 `reqx` 的公开 path 契约
 
 根包中常用的请求侧 API：
 

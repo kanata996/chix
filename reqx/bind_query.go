@@ -20,7 +20,6 @@ var (
 	headerDecodePlanCache sync.Map
 	valueSourceReaders    = map[string]func(*http.Request) url.Values{
 		querySource.tag:  queryValues,
-		pathSource.tag:   pathValues,
 		headerSource.tag: headerValues,
 	}
 	valueSourceInputs = map[string]string{
@@ -91,7 +90,7 @@ func bindTaggedValuesInPlace[T any](r *http.Request, dst *T, source valueSource,
 		return err
 	}
 
-	violations, err := decodeValuesInto(dstValue, sourceValues(r, source), plan, cfg, violationInForValueSource(source))
+	violations, err := decodeValuesInto(dstValue, sourceValues(r, source, plan), plan, cfg, violationInForValueSource(source))
 	if err != nil {
 		return err
 	}
@@ -234,7 +233,11 @@ func decodeValuesInto(dst reflect.Value, values url.Values, plan *valueDecodePla
 	return violations, nil
 }
 
-func sourceValues(r *http.Request, source valueSource) url.Values {
+func sourceValues(r *http.Request, source valueSource, plan *valueDecodePlan) url.Values {
+	if source.tag == pathSource.tag {
+		return pathValuesForPlan(r, plan)
+	}
+
 	if readValues, ok := valueSourceReaders[source.tag]; ok {
 		return readValues(r)
 	}

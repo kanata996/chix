@@ -2,19 +2,17 @@ package reqx
 
 // 用例清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
-// - [✓] `BindPathValues` 的空输入、未知字段、无路由上下文、重复值与类型错误契约。
+// - [✓] `BindPathValues` 的空输入、未知字段、无匹配 pattern 与类型错误契约。
 // - [✓] 非法 path 绑定定义会在解码计划阶段被拒绝。
 // - [✓] `ParamString`、`ParamInt`、`ParamUUID` 的裁剪、解析与错误映射行为。
 // - [✓] `BindAndValidatePath` 会在校验前执行 `Normalize()`，并使用 `param` tag 字段名。
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // 绑定后会先裁剪 path 参数再做校验。
@@ -114,8 +112,8 @@ func TestBindPathValues_IgnoresUnknownFieldsByDefault(t *testing.T) {
 	}
 }
 
-// 没有 chi route context 时，path 绑定应退化为 no-op，而不是报错或清空已有值。
-func TestBindPathValues_NoRouteContextPreservesExistingValues(t *testing.T) {
+// 没有匹配 pattern 时，path 绑定应退化为 no-op，而不是报错或清空已有值。
+func TestBindPathValues_NoPatternPreservesExistingValues(t *testing.T) {
 	type pathRequest struct {
 		ID string `param:"id"`
 	}
@@ -149,21 +147,22 @@ func TestBindPathValues_TypeMismatchReturnsViolation(t *testing.T) {
 	}
 }
 
-// 标量 path 参数重复出现时返回重复值错误。
-func TestBindPathValues_RepeatedParamsReturnViolation(t *testing.T) {
+// 空 path 值会在已知 wildcard 存在时绑定为空串，而不是被当成缺失字段。
+func TestBindPathValues_EmptyPathValueBindsBlankString(t *testing.T) {
 	type pathRequest struct {
 		ID string `param:"id"`
 	}
 
 	req := requestWithPathParams(map[string][]string{
-		"id": {"1", "2"},
+		"id": {""},
 	})
 
 	var path pathRequest
-	err := BindPathValues(req, &path)
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "id" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
-		t.Fatalf("BindPathValues() violation = %#v", violation)
+	if err := BindPathValues(req, &path); err != nil {
+		t.Fatalf("BindPathValues() error = %v", err)
+	}
+	if path.ID != "" {
+		t.Fatalf("BindPathValues() id = %q, want empty string", path.ID)
 	}
 }
 
@@ -304,18 +303,6 @@ func TestParamInt_MapsLookupAndDecodeFailures(t *testing.T) {
 
 // ParamString 会把 path 查找阶段的各种失败统一映射为稳定的错误契约。
 func TestParamString_MapsLookupFailures(t *testing.T) {
-	t.Run("repeated value", func(t *testing.T) {
-		req := requestWithPathParams(map[string][]string{
-			"id": {"1", "2"},
-		})
-
-		_, err := ParamString(req, "id")
-		violation := assertSingleViolation(t, err)
-		if violation.Field != "id" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
-			t.Fatalf("violation = %#v", violation)
-		}
-	})
-
 	t.Run("whitespace only value", func(t *testing.T) {
 		req := requestWithPathParams(map[string][]string{
 			"id": {"   "},
@@ -338,7 +325,7 @@ func TestParamString_MapsLookupFailures(t *testing.T) {
 		}
 	})
 
-	t.Run("no route context", func(t *testing.T) {
+	t.Run("no matched pattern", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items/42", nil)
 
 		_, err := ParamString(req, "id")
@@ -378,21 +365,6 @@ func TestParamUUID_MapsLookupAndValidationFailures(t *testing.T) {
 		}
 	})
 
-	t.Run("repeated value", func(t *testing.T) {
-		req := requestWithPathParams(map[string][]string{
-			"uuid": {
-				"550e8400-e29b-41d4-a716-446655440000",
-				"f47ac10b-58cc-4372-a567-0e02b2c3d479",
-			},
-		})
-
-		_, err := ParamUUID(req, "uuid")
-		violation := assertSingleViolation(t, err)
-		if violation.Field != "uuid" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
-			t.Fatalf("violation = %#v", violation)
-		}
-	})
-
 	t.Run("missing value", func(t *testing.T) {
 		req := requestWithPathParams(nil)
 
@@ -406,13 +378,37 @@ func TestParamUUID_MapsLookupAndValidationFailures(t *testing.T) {
 
 func requestWithPathParams(params map[string][]string) *http.Request {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rctx := chi.NewRouteContext()
+	req.Pattern = syntheticPatternFromPathParams(params)
+
 	for key, values := range params {
-		for _, value := range values {
-			rctx.URLParams.Add(key, value)
+		if len(values) == 0 {
+			continue
 		}
+		req.SetPathValue(key, values[0])
 	}
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	return req
+}
+
+func syntheticPatternFromPathParams(params map[string][]string) string {
+	if len(params) == 0 {
+		return ""
+	}
+
+	keys := make([]string, 0, len(params))
+	for key := range params {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var builder strings.Builder
+	for _, key := range keys {
+		builder.WriteString("/{")
+		builder.WriteString(key)
+		builder.WriteString("}")
+	}
+
+	return builder.String()
 }
 
 type normalizedPathRequest struct {

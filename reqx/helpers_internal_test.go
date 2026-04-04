@@ -409,15 +409,53 @@ func TestEmptyBodyError(t *testing.T) {
 	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
 }
 
-// pathValues 在空请求或无路由上下文时返回空结果。
-func TestPathValuesBranches(t *testing.T) {
-	if got := pathValues(nil); len(got) != 0 {
-		t.Fatalf("pathValues(nil) = %#v, want empty", got)
+// pathValuesForPlan 在空请求、空计划或无匹配 pattern 时返回空结果。
+func TestPathValuesForPlanBranches(t *testing.T) {
+	plan := &valueDecodePlan{
+		fields: []valueFieldSpec{{name: "id"}},
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	if got := pathValues(req); len(got) != 0 {
-		t.Fatalf("pathValues(no route ctx) = %#v, want empty", got)
+	if got := pathValuesForPlan(nil, plan); len(got) != 0 {
+		t.Fatalf("pathValuesForPlan(nil, plan) = %#v, want empty", got)
+	}
+	if got := pathValuesForPlan(req, nil); len(got) != 0 {
+		t.Fatalf("pathValuesForPlan(req, nil) = %#v, want empty", got)
+	}
+	if got := pathValuesForPlan(req, plan); len(got) != 0 {
+		t.Fatalf("pathValuesForPlan(no pattern) = %#v, want empty", got)
+	}
+}
+
+func TestPathWildcardHelpers(t *testing.T) {
+	names := pathWildcardNames("GET /users/{user_id}/files/{path...}/{$}")
+	if !reflect.DeepEqual(names, []string{"user_id", "path"}) {
+		t.Fatalf("pathWildcardNames() = %#v", names)
+	}
+	if got := pathWildcardNames("/users/{user_id"); len(got) != 0 {
+		t.Fatalf("pathWildcardNames(invalid pattern) = %#v, want empty", got)
+	}
+
+	if !pathWildcardExists("/users/{user_id}", "user_id") {
+		t.Fatal("pathWildcardExists() = false, want true")
+	}
+	if pathWildcardExists("/users/{user_id}", "account_id") {
+		t.Fatal("pathWildcardExists() = true, want false")
+	}
+	if pathWildcardExists("/users/{user_id}", "   ") {
+		t.Fatal("pathWildcardExists(blank name) = true, want false")
+	}
+}
+
+func TestPathParamValues(t *testing.T) {
+	if got, ok := pathParamValues(nil, "id"); ok || got != nil {
+		t.Fatalf("pathParamValues(nil) = (%#v, %v), want (nil, false)", got, ok)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.SetPathValue("id", " 42 ")
+	if got, ok := pathParamValues(req, "id"); !ok || !reflect.DeepEqual(got, []string{"42"}) {
+		t.Fatalf("pathParamValues(non-empty) = (%#v, %v), want ([\"42\"], true)", got, ok)
 	}
 }
 
@@ -570,7 +608,7 @@ func TestSourceValues_PanicsOnUnsupportedSource(t *testing.T) {
 		}
 	}()
 
-	_ = sourceValues(httptest.NewRequest(http.MethodGet, "/", nil), valueSource{tag: "unsupported"})
+	_ = sourceValues(httptest.NewRequest(http.MethodGet, "/", nil), valueSource{tag: "unsupported"}, nil)
 }
 
 // 解码到不支持的字段类型时，decodeValuesInto 会返回底层错误。
