@@ -302,6 +302,10 @@ func main() {
 }
 ```
 
+`chixmw.RequestLogger` 是 `chix` 唯一受支持的请求日志中间件入口。它是
+`chi + httplog` 的一层受控封装，目标是把常见的 request logging 默认值一次性
+收敛好，而不是让每个项目自己重复拼装中间件。
+
 `chi` 侧只需要做两件事：
 
 - 创建 router
@@ -309,13 +313,20 @@ func main() {
 
 不需要再额外挂这些中间件：
 
+- `chimw.Logger`
+- `chimw.Recoverer`
 - `chimw.RequestID`
 - `traceid.Middleware`
 - `httplog.RequestLogger`
 
+`chi` 官方文档里 `middleware.Logger + middleware.Recoverer` 的组合，适用于直接
+使用 `chi` 原生请求日志时的推荐链路；如果已经使用 `chixmw.RequestLogger(...)`，
+就不要再把这两个中间件叠上去。`chix` 也不提供另一套“自己把等价的
+chi/httplog 中间件链再手工组一遍”的官方支持模式。
+
 `chix` 会固定使用一套受控默认行为：
 
-- 使用 ECS schema 输出请求日志
+- 请求日志字段固定按 ECS 命名
 - 自动注入 `RequestID` 和 `traceId`
 - 自动开启 panic recovery
 - 自动补充 `request.id` 和 `http.route`
@@ -324,6 +335,10 @@ func main() {
 - 默认不记录 request/response body
 - `4xx` 默认只保留请求日志，不额外注入 `error.*` 诊断字段
 - `5xx` 会在请求日志上补充 `error.code`、`error.message`、`error.type`、`error.root_message`、`error.root_type` 等字段
+
+如果你希望顶层日志字段也保持 ECS 风格，例如 `@timestamp`、`log.level`、
+`message`，优先使用 `chixmw.NewLogger(...)`，或自行传入一个已经配置
+`httplog.SchemaECS.ReplaceAttr` 的 `slog.Logger`。
 
 如果你已经在进程入口通过 `slog.SetDefault(...)` 配好了默认 logger，也可以直接：
 

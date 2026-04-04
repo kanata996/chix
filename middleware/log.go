@@ -55,8 +55,18 @@ func NewLogger(opts LoggerOptions) *slog.Logger {
 	return slog.New(newHandler(output, opts.Development, handlerOpts)).With(loggerAttrs(opts)...)
 }
 
-// RequestLogger returns a chi middleware that standardizes request logging,
-// request ids, trace ids, and panic recovery.
+// RequestLogger returns the supported request-logging middleware for chix. It
+// is an opinionated chi middleware that standardizes request logging, request
+// ids, trace ids, and panic recovery.
+//
+// It composes chi's RequestID, traceid.Middleware, and httplog.RequestLogger
+// with RecoverPanics enabled, so callers should not mount chi's Logger,
+// chi's Recoverer, traceid.Middleware, chi's RequestID, or another
+// httplog.RequestLogger on the same route chain. chix does not define a
+// separate supported mode where callers assemble that chain themselves.
+//
+// For fully ECS-aligned output, prefer NewLogger or another slog.Logger whose
+// handler uses httplog.SchemaECS.ReplaceAttr.
 func RequestLogger(logger *slog.Logger, level slog.Level) func(http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
