@@ -1,6 +1,9 @@
-// Package chix provides a curated root-level facade over the request/response
-// boundary helpers in reqx and resp.
+// Package chix 提供根包常用的请求/响应边界入口，聚合 reqx 与 resp 中最常用的一组能力。
 //
-// Use the root package for the common Echo-style binding and HTTP response
-// entry points. Import reqx/resp directly when you need the full surface area.
+// 适合在大多数 handler 中直接使用：
+//   - Echo 风格的请求绑定与校验入口
+//   - 常用 JSON 成功响应辅助
+//   - 统一错误响应写回
+//
+// 如果你需要请求侧或响应侧的包级 API，请直接导入 reqx 或 resp。
 package chix

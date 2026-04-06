@@ -15,9 +15,9 @@
 
 当前仓库对外主要暴露三个包：
 
-- `github.com/kanata996/chix`：常用能力的根包 facade
-- `github.com/kanata996/chix/reqx`：请求侧绑定与校验辅助
-- `github.com/kanata996/chix/resp`：响应侧 JSON 与错误写回辅助
+- `github.com/kanata996/chix`：面向大多数 handler 的根包入口
+- `github.com/kanata996/chix/reqx`：请求侧绑定、校验与 path 参数辅助
+- `github.com/kanata996/chix/resp`：响应写回、错误类型与快捷错误构造
 
 ## 状态
 
@@ -37,12 +37,16 @@ go get github.com/kanata996/chix@latest
 
 ## 快速开始
 
+如果你想直接看一份可运行的 `chi + chix` 推荐接入示例，见 [`_example`](./_example)。
+
 下面的示例展示了 `chix` 最常见的 handler 形态：
 
 - `chi` 负责路由
 - `chix.BindAndValidate(...)` 负责请求输入边界
 - `chix.Created(...)` 负责成功 JSON 响应
 - `chix.WriteError(...)` 负责统一错误响应
+
+这段代码只展示最小 handler 接线；生产场景下的日志、中间件、`http.Server` timeout 和优雅停机，见 [`_example`](./_example)。
 
 ```go
 package main
@@ -223,8 +227,8 @@ func (r *listAccountsRequest) Normalize() {
 - `title` 始终由 HTTP status text 生成，例如 `422 -> "Unprocessable Entity"`
 - `detail` 承载对外公开的人类可读说明
 - `code` 承载稳定的机器错误码，便于客户端分支处理
-- `errors` 仅在存在结构化字段错误时出现
-- `errors[]` 子项固定为 `field`、`in`、`code`、`detail`
+- `errors` 仅在存在公开结构化错误详情时出现
+- 对于 `reqx` 生成的字段级错误，`errors[]` 子项固定为 `field`、`in`、`code`、`detail`
 - `in` 表示错误来源，当前可能为 `body`、`query`、`path`、`header`、`request`
 
 常见归一化规则：
@@ -238,7 +242,7 @@ func (r *listAccountsRequest) Normalize() {
 - 未知错误默认返回 `500 Internal Server Error`，错误码为 `internal_error`
 - `HEAD` 错误响应只写状态码和 `application/problem+json`，不写响应体
 - `title` 始终由状态码生成，`detail` 承载公开说明，`code` 承载稳定机器码
-- `errors` 仅在存在结构化字段错误时出现；单个错误项使用 `field`、`in`、`code`、`detail`
+- `errors` 仅在存在公开结构化错误详情时出现；其中 `reqx` 生成的字段级错误项使用 `field`、`in`、`code`、`detail`
 
 如果你需要可复用的公共错误值，可以直接使用 `resp.HTTPError`，以及 `resp.BadRequest(...)`、`resp.NotFound(...)`、`resp.UnprocessableEntity(...)` 等辅助构造函数。
 
@@ -256,12 +260,32 @@ if err := repo.DeleteAccount(ctx, accountID); err != nil {
 }
 ```
 
-## 日志中间件
+## 错误日志
 
-`middleware` 当前提供一套组合好的请求日志链路：
+`chix` 不再统一接管 access log。请求日志配置建议由每个服务直接使用
+`chi + httplog` 自己决定，例如：
 
-- `RequestLogger(logger, level)`：统一装配 `RequestID`、`traceid`、`httplog.RequestLogger` 与基础请求日志字段
-- `NewLogger(...)`：构造适配上述中间件的 `slog.Logger`
+- 是否挂 `RequestID` / `traceid.Middleware`
+- 是否记录 request / response headers
+- 是否额外挂 `middleware.RequestLogAttrs()` 给所有 access log 追加 `traceId` / `request.id`
+- 是否跳过 `/healthz` 等低价值路由
+- 成功请求是否还需要额外业务日志
+
+`resp.WriteError(...)` 负责的是错误语义，而不是整套日志策略。
+
+当错误最终收敛为 `5xx` 时，`WriteError(...)` 会做两件事：
+
+- 如果当前请求经过了 `httplog.RequestLogger(...)`，通过 `httplog.SetAttrs(...)` 给 request log 补少量错误字段和关联字段：`error.code`、`error.timeout`、`error.canceled`，以及上下文里已有的 `traceId` / `request.id`
+- 通过 `slog.Default()` 输出一条独立的 error 日志，便于在 access log 之外排查问题
+
+默认示例不挂 `middleware.RequestLogAttrs()`；它是一个可选辅助中间件，适合你希望所有
+access log 都带上 `traceId` / `request.id` 的场景。
+
+当错误响应自身写出失败时，还会再输出一条：
+
+- `resp: failed to write error response`
+
+下面这段代码只展示日志接线；更完整的 `http.Server` timeout 与优雅停机写法见 [`_example`](./_example)。
 
 示例：
 
@@ -271,72 +295,37 @@ package main
 import (
 	"log/slog"
 	"net/http"
+	"os"
 
 	"github.com/go-chi/chi/v5"
-	chixmw "github.com/kanata996/chix/middleware"
+	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/httplog/v3"
+	"github.com/go-chi/traceid"
 )
 
 func main() {
-	logger := chixmw.NewLogger(chixmw.LoggerOptions{
-		Development: true,
-		Level:       slog.LevelInfo,
-		App:         "example-api",
-		Version:     "dev",
-		Env:         "local",
-	})
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
 	r := chi.NewRouter()
-	r.Use(chixmw.RequestLogger(logger, slog.LevelInfo))
+	r.Use(chimw.RequestID)
+	r.Use(traceid.Middleware)
+	r.Use(httplog.RequestLogger(logger, &httplog.Options{
+		Level:         slog.LevelInfo,
+		Schema:        httplog.SchemaECS,
+		RecoverPanics: true,
+	}))
 
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		if reqLogger := chixmw.LoggerFromContext(r.Context()); reqLogger != nil {
-			reqLogger.Info("health check passed")
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
-
-	if err := http.ListenAndServe(":8080", r); err != nil {
-		logger.Error("server exited", slog.Any("error", err))
-	}
+	_ = http.ListenAndServe(":8080", r)
 }
-```
-
-`chi` 侧只需要做两件事：
-
-- 创建 router
-- 尽量在路由链路靠前位置挂上 `chixmw.RequestLogger(logger, slog.LevelInfo)`
-
-不需要再额外挂这些中间件：
-
-- `chimw.RequestID`
-- `traceid.Middleware`
-- `httplog.RequestLogger`
-
-`chix` 会固定使用一套受控默认行为：
-
-- 使用 ECS schema 输出请求日志
-- 自动注入 `RequestID` 和 `traceId`
-- 自动开启 panic recovery
-- 自动补充 `request.id` 和 `http.route`
-- 默认只记录 request headers: `Content-Type`、`Origin`
-- 默认只记录 response headers: `Content-Type`
-- 默认不记录 request/response body
-- `4xx` 默认只保留请求日志，不额外注入 `error.*` 诊断字段
-- `5xx` 会在请求日志上补充 `error.code`、`error.message`、`error.type`、`error.root_message`、`error.root_type` 等字段
-
-如果你已经在进程入口通过 `slog.SetDefault(...)` 配好了默认 logger，也可以直接：
-
-```go
-r.Use(chixmw.RequestLogger(nil, slog.LevelInfo))
 ```
 
 完整的错误日志行为说明见 [docs/error-logging.md](./docs/error-logging.md)。
 
 ## 包结构
 
-- `chix`：面向大多数 handler 的常用 facade
-- `reqx`：完整的请求侧 API
-- `resp`：完整的响应侧 API
+- `chix`：面向大多数 handler 的常用入口
+- `reqx`：请求侧绑定、校验与 path 参数辅助
+- `resp`：响应写回、错误类型与快捷错误构造
 
-如果你只需要常用能力，优先使用根包；如果你需要完整能力面，再直接导入 `reqx` 或 `resp`。
+如果你只需要常用 handler 接线，优先使用根包；如果你需要请求侧或响应侧的包级 API，再直接导入 `reqx` 或 `resp`。

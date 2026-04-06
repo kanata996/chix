@@ -1,6 +1,7 @@
 package resp
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/traceid"
 )
 
 // 测试清单：
@@ -196,13 +199,16 @@ func TestUnwrapErrors(t *testing.T) {
 	}
 }
 
-// 请求日志属性提取会在 nil 输入时返回空，并对 5xx 错误补充诊断字段。
+// 请求日志属性提取会在 nil 输入时返回空，并对 5xx 错误补充低噪音关联字段。
 func TestRequestErrorLogAttrs(t *testing.T) {
 	if got := requestErrorLogAttrs(nil, nil, nil); got != nil {
 		t.Fatalf("requestErrorLogAttrs(nil, nil, nil) = %#v, want nil", got)
 	}
 
 	req := newRequestWithRoute(t, http.MethodGet, "/users/{id}", "/users/u_1")
+	ctx := traceid.NewContext(req.Context())
+	ctx = context.WithValue(ctx, chimw.RequestIDKey, "req-123")
+	req = req.WithContext(ctx)
 	httpErr := wrapError(http.StatusInternalServerError, "internal_error", "", errors.New("db timeout"))
 	attrs := requestErrorLogAttrs(req, httpErr, httpErr)
 	if len(attrs) == 0 {
@@ -213,16 +219,78 @@ func TestRequestErrorLogAttrs(t *testing.T) {
 	if got := values["error.code"]; got != "internal_error" {
 		t.Fatalf("error.code = %#v, want internal_error", got)
 	}
-	if got := values["http.route"]; got != "/users/{id}" {
-		t.Fatalf("http.route = %#v, want /users/{id}", got)
+	if got := values["request.id"]; got != "req-123" {
+		t.Fatalf("request.id = %#v, want req-123", got)
 	}
-	if got := values["error.root_message"]; got != "db timeout" {
-		t.Fatalf("error.root_message = %#v, want db timeout", got)
+	if got, ok := values["traceId"].(string); !ok || got == "" {
+		t.Fatalf("traceId = %#v, want non-empty string", values["traceId"])
+	}
+	if _, exists := values["error.root_message"]; exists {
+		t.Fatalf("error.root_message unexpectedly present: %#v", values["error.root_message"])
 	}
 
 	clientErr := BadRequest("bad_request", "bad request")
 	if got := requestErrorLogAttrs(req, clientErr, clientErr); got != nil {
 		t.Fatalf("requestErrorLogAttrs(4xx) = %#v, want nil", got)
+	}
+}
+
+func TestDiagnosticErrorLogAttrs(t *testing.T) {
+	if got := diagnosticErrorLogAttrs(nil, nil); got != nil {
+		t.Fatalf("diagnosticErrorLogAttrs(nil, nil) = %#v, want nil", got)
+	}
+
+	canceledErr := wrapError(http.StatusInternalServerError, "internal_error", "", context.Canceled)
+	canceledAttrs := attrsToMap(diagnosticErrorLogAttrs(canceledErr, canceledErr))
+	if got := canceledAttrs["error.canceled"]; got != true {
+		t.Fatalf("error.canceled = %#v, want true", got)
+	}
+
+	timeoutCause := fmt.Errorf("query timeout: %w", context.DeadlineExceeded)
+	timeoutErr := wrapError(http.StatusInternalServerError, "internal_error", "", timeoutCause)
+	timeoutAttrs := attrsToMap(diagnosticErrorLogAttrs(timeoutErr, timeoutErr))
+	if got := timeoutAttrs["error.timeout"]; got != true {
+		t.Fatalf("error.timeout = %#v, want true", got)
+	}
+}
+
+func TestLogServerError(t *testing.T) {
+	var buf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	defer slog.SetDefault(previousDefault)
+
+	logServerError(nil, nil, nil)
+	logServerError(nil, BadRequest("bad_request", "bad request"), errors.New("client error"))
+	if buf.Len() != 0 {
+		t.Fatalf("logServerError() unexpectedly wrote output: %s", buf.Bytes())
+	}
+
+	logServerError(nil, NewError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), errors.New("db timeout"))
+	if buf.Len() == 0 {
+		t.Fatal("logServerError() did not write 5xx output")
+	}
+}
+
+func TestLogServerErrorAttrs(t *testing.T) {
+	var buf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	defer slog.SetDefault(previousDefault)
+
+	logServerErrorAttrs(nil, nil, nil)
+	logServerErrorAttrs(nil, BadRequest("bad_request", "bad request"), []slog.Attr{
+		slog.String("error.code", "bad_request"),
+	})
+	if buf.Len() != 0 {
+		t.Fatalf("logServerErrorAttrs() unexpectedly wrote output: %s", buf.Bytes())
+	}
+
+	logServerErrorAttrs(nil, NewError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), []slog.Attr{
+		slog.String("error.code", "internal_error"),
+	})
+	if buf.Len() == 0 {
+		t.Fatal("logServerErrorAttrs() did not write 5xx output")
 	}
 }
 
@@ -238,6 +306,33 @@ func TestErrorForDiagnostics(t *testing.T) {
 	withoutCause := NewError(http.StatusInternalServerError, "", "")
 	if got := errorForDiagnostics(original, withoutCause); !errors.Is(got, original) {
 		t.Fatalf("errorForDiagnostics() without cause = %v, want original %v", got, original)
+	}
+}
+
+func TestRequestContextAttrs(t *testing.T) {
+	if got := requestContextAttrs(nilContext()); got != nil {
+		t.Fatalf("requestContextAttrs(nil) = %#v, want nil", got)
+	}
+
+	if got := requestContextAttrs(context.Background()); len(got) != 0 {
+		t.Fatalf("requestContextAttrs(background) len = %d, want 0", len(got))
+	}
+
+	ctx := traceid.NewContext(context.Background())
+	ctx = context.WithValue(ctx, chimw.RequestIDKey, "req-123")
+	routeCtx := chi.NewRouteContext()
+	routeCtx.RoutePatterns = []string{"  /users/{id}  "}
+	ctx = context.WithValue(ctx, chi.RouteCtxKey, routeCtx)
+
+	attrs := attrsToMap(requestContextAttrs(ctx))
+	if got := attrs["request.id"]; got != "req-123" {
+		t.Fatalf("request.id = %#v, want req-123", got)
+	}
+	if got, ok := attrs["traceId"].(string); !ok || got == "" {
+		t.Fatalf("traceId = %#v, want non-empty string", attrs["traceId"])
+	}
+	if got := attrs["http.route"]; got != "/users/{id}" {
+		t.Fatalf("http.route = %#v, want /users/{id}", got)
 	}
 }
 
@@ -290,4 +385,9 @@ func newRequestWithRoute(t *testing.T, method, routePattern, target string) *htt
 	routeCtx := chi.NewRouteContext()
 	routeCtx.RoutePatterns = []string{routePattern}
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+}
+
+func nilContext() context.Context {
+	var ctx context.Context
+	return ctx
 }

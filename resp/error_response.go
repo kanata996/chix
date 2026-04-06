@@ -107,16 +107,6 @@ func (e *HTTPError) Errors() []any {
 	return cloneErrors(e.errors)
 }
 
-// Message 保留为 Detail 的兼容别名，便于复用 Echo 风格调用习惯。
-func (e *HTTPError) Message() string {
-	return e.Detail()
-}
-
-// Details 保留为 Errors 的兼容别名，便于兼容旧调用方。
-func (e *HTTPError) Details() []any {
-	return e.Errors()
-}
-
 // BadRequest 构造 400 Bad Request 公共错误。
 func BadRequest(code, detail string, errors ...any) *HTTPError {
 	return NewError(http.StatusBadRequest, code, detail, errors...)

@@ -287,7 +287,7 @@ func TestBindJSONWithConfigRejectsUnknownFieldWhenDisabled(t *testing.T) {
 	}
 	err := bindJSONWithConfig(req, &dst, bindBodyConfig{allowUnknownFields: false}, bodyBindMode{})
 	violation := assertSingleViolation(t, err)
-	if violation.Field != "extra" || violation.Code != ViolationCodeUnknown || violation.Message != "unknown field" {
+	if violation.Field != "extra" || violation.Code != ViolationCodeUnknown || violation.Detail != "unknown field" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -327,7 +327,7 @@ func TestMapDecodeErrorBranches(t *testing.T) {
 			Type:  reflect.TypeOf(0),
 		})
 		violation := assertSingleViolation(t, err)
-		if violation.Field != "age" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
+		if violation.Field != "age" || violation.Code != ViolationCodeType || violation.Detail != "must be number" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -347,7 +347,7 @@ func TestMapDecodeErrorBranches(t *testing.T) {
 	t.Run("unknown field", func(t *testing.T) {
 		err := mapDecodeError(errors.New(`json: unknown field "extra"`))
 		violation := assertSingleViolation(t, err)
-		if violation.Field != "extra" || violation.Code != ViolationCodeUnknown || violation.Message != "unknown field" {
+		if violation.Field != "extra" || violation.Code != ViolationCodeUnknown || violation.Detail != "unknown field" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -467,7 +467,7 @@ func TestRequiredPathParamValuesRejectsSingleEmptyValue(t *testing.T) {
 
 	_, err := requiredPathParamValues(req, "id")
 	violation := assertSingleViolation(t, err)
-	if violation.Field != "id" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+	if violation.Field != "id" || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -653,10 +653,9 @@ func TestBindTaggedValuesReturnsDecodeErrorFromCachedPlan(t *testing.T) {
 	})
 
 	err := bindTaggedValues(req, &dst, valueSource{
-		name:         "query",
-		tag:          querySource.tag,
-		cache:        &cache,
-		normalizeKey: normalizeIdentity,
+		name:  "query",
+		tag:   querySource.tag,
+		cache: &cache,
 	}, bindValuesConfig{})
 	if err == nil {
 		t.Fatal("bindTaggedValues() error = nil")

@@ -193,21 +193,6 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 
 若改动影响任何对外字段名、状态码、错误码、日志字段或响应体结构，必须有直接回归测试。
 
-### 3.4 `middleware`
-
-`middleware` 负责请求日志和相关边界中间件，测试必须覆盖日志字段与上下文行为。
-
-至少覆盖：
-
-- request id、trace id、route 等基础日志字段
-- trace-aware 与非 trace-aware logger 的处理差异
-- panic 恢复路径
-- 请求上下文 logger 注入与 fallback
-- 不应重复注入的字段不会重复出现
-- 无 logger、无 request、无上下文等降级路径
-
-若改动影响日志字段名、注入时机、trace 透传或 panic 恢复，必须补直接断言。
-
 ## 4. 测试设计规范
 
 ### 4.1 先测公开行为，再测内部辅助

@@ -123,7 +123,7 @@ func ParamUUID(r *http.Request, name string) (string, error) {
 
 	parsed, err := uuid.Parse(raw)
 	if err != nil {
-		return "", invalidFieldError(InvalidFieldIn(ViolationInPath, name))
+		return "", invalidFieldError(newViolation(name, ViolationInPath, ViolationCodeInvalid, violationDetailInvalid))
 	}
 	return parsed.String(), nil
 }
@@ -135,12 +135,8 @@ func requiredPathParamValues(r *http.Request, name string) ([]string, error) {
 	}
 
 	rawValues, ok := pathParamValues(r, name)
-	if !ok || len(rawValues) == 0 {
-		return nil, invalidFieldError(RequiredFieldIn(ViolationInPath, name))
-	}
-
-	if len(rawValues) == 1 && rawValues[0] == "" {
-		return nil, invalidFieldError(RequiredFieldIn(ViolationInPath, name))
+	if !ok || len(rawValues) == 0 || (len(rawValues) == 1 && rawValues[0] == "") {
+		return nil, invalidFieldError(newViolation(name, ViolationInPath, ViolationCodeRequired, violationDetailRequired))
 	}
 
 	return rawValues, nil

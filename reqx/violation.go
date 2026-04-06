@@ -1,7 +1,6 @@
 package reqx
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/kanata996/chix/resp"
@@ -31,31 +30,12 @@ const (
 	ViolationInRequest = "request"
 )
 
-// Violation 描述单个字段校验失败。
+// Violation 描述单个请求字段违规。
 type Violation struct {
-	Field   string `json:"field,omitempty"`
-	In      string `json:"in,omitempty"`
-	Code    string `json:"code"`
-	Detail  string `json:"detail"`
-	Message string `json:"-"`
-}
-
-// ValidateFunc 校验已经解码好的请求值。
-type ValidateFunc[T any] func(*T) []Violation
-
-func Validate[T any](dst *T, fn ValidateFunc[T]) error {
-	if fn == nil {
-		return nil
-	}
-	if dst == nil {
-		return fmt.Errorf("reqx: destination must not be nil")
-	}
-
-	violations := fn(dst)
-	if len(violations) == 0 {
-		return nil
-	}
-	return invalidFieldsError(violations)
+	Field  string `json:"field,omitempty"`
+	In     string `json:"in,omitempty"`
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
 }
 
 func invalidFieldError(violation Violation) error {
@@ -77,11 +57,10 @@ func invalidFieldsError(violations []Violation) error {
 
 func newViolation(field, input, code, detail string) Violation {
 	return Violation{
-		Field:   field,
-		In:      input,
-		Code:    code,
-		Detail:  detail,
-		Message: detail,
+		Field:  field,
+		In:     input,
+		Code:   code,
+		Detail: detail,
 	}
 }
 
@@ -89,13 +68,9 @@ func normalizeViolation(violation Violation) Violation {
 	if violation.Code == "" {
 		violation.Code = ViolationCodeInvalid
 	}
-	if violation.Detail == "" && violation.Message != "" {
-		violation.Detail = violation.Message
-	}
 	if violation.Detail == "" {
 		violation.Detail = violationDetailForCode(violation.Code)
 	}
-	violation.Message = violation.Detail
 	return violation
 }
 

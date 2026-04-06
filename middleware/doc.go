@@ -1,9 +1,8 @@
-// Package middleware provides reusable chi middlewares for request logging and
-// related HTTP boundary concerns.
+// Package middleware provides small optional chi middlewares used by chix.
 //
-// The request logging middleware composes:
-//   - chi request id injection
-//   - trace id propagation
-//   - httplog request logging with panic recovery
-//   - stable base request log attrs such as request.id and http.route
+// This package does not own the full request logging stack. Access log
+// configuration should stay with the service, typically via chi + httplog.
+//
+// RequestLogAttrs is an opt-in bridge that copies request-correlated attrs such
+// as traceId and request.id into the current httplog request log.
 package middleware

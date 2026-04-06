@@ -21,12 +21,6 @@ type (
 	BindHeadersOption = reqx.BindHeadersOption
 	// Normalizer 允许 DTO 在校验前做标准化处理。
 	Normalizer = reqx.Normalizer
-	// Violation 描述单个字段的绑定或校验失败。
-	Violation = reqx.Violation
-	// HTTPError 是统一的 HTTP 边界错误类型。
-	HTTPError = resp.HTTPError
-	// ErrorWriteDegraded 表示错误响应在写出时发生了降级。
-	ErrorWriteDegraded = resp.ErrorWriteDegraded
 )
 
 // Bind 按 Echo 风格顺序绑定请求数据：path -> query(GET/DELETE) -> body。

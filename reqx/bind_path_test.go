@@ -142,7 +142,7 @@ func TestBindPathValues_TypeMismatchReturnsViolation(t *testing.T) {
 	var path pathRequest
 	err := BindPathValues(req, &path)
 	violation := assertSingleViolation(t, err)
-	if violation.Field != "id" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
+	if violation.Field != "id" || violation.Code != ViolationCodeType || violation.Detail != "must be number" {
 		t.Fatalf("BindPathValues() violation = %#v", violation)
 	}
 }
@@ -285,7 +285,7 @@ func TestParamInt_MapsLookupAndDecodeFailures(t *testing.T) {
 
 		_, err := ParamInt(req, "id")
 		violation := assertSingleViolation(t, err)
-		if violation.Field != "id" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
+		if violation.Field != "id" || violation.Code != ViolationCodeType || violation.Detail != "must be number" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -295,7 +295,7 @@ func TestParamInt_MapsLookupAndDecodeFailures(t *testing.T) {
 
 		_, err := ParamInt(req, "id")
 		violation := assertSingleViolation(t, err)
-		if violation.Field != "id" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+		if violation.Field != "id" || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -310,7 +310,7 @@ func TestParamString_MapsLookupFailures(t *testing.T) {
 
 		_, err := ParamString(req, "id")
 		violation := assertSingleViolation(t, err)
-		if violation.Field != "id" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+		if violation.Field != "id" || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -320,7 +320,7 @@ func TestParamString_MapsLookupFailures(t *testing.T) {
 
 		_, err := ParamString(req, "uuid")
 		violation := assertSingleViolation(t, err)
-		if violation.Field != "uuid" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+		if violation.Field != "uuid" || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
 			t.Fatalf("ParamString() violation = %#v", violation)
 		}
 	})
@@ -330,7 +330,7 @@ func TestParamString_MapsLookupFailures(t *testing.T) {
 
 		_, err := ParamString(req, "id")
 		violation := assertSingleViolation(t, err)
-		if violation.Field != "id" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+		if violation.Field != "id" || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -360,7 +360,7 @@ func TestParamUUID_MapsLookupAndValidationFailures(t *testing.T) {
 
 		_, err := ParamUUID(req, "uuid")
 		violation := assertSingleViolation(t, err)
-		if violation.Field != "uuid" || violation.Code != ViolationCodeInvalid || violation.Message != "is invalid" {
+		if violation.Field != "uuid" || violation.Code != ViolationCodeInvalid || violation.Detail != "is invalid" {
 			t.Fatalf("ParamUUID() violation = %#v", violation)
 		}
 	})
@@ -370,7 +370,7 @@ func TestParamUUID_MapsLookupAndValidationFailures(t *testing.T) {
 
 		_, err := ParamUUID(req, "uuid")
 		violation := assertSingleViolation(t, err)
-		if violation.Field != "uuid" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+		if violation.Field != "uuid" || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})

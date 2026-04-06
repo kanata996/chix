@@ -18,7 +18,7 @@ func newJSONRequest(method, target, body string) *http.Request {
 	return req
 }
 
-func assertHTTPError(t *testing.T, err error, wantStatus int, wantCode, wantMessage string) *resp.HTTPError {
+func assertHTTPError(t *testing.T, err error, wantStatus int, wantCode, wantDetail string) *resp.HTTPError {
 	t.Helper()
 
 	httpErr, ok := err.(*resp.HTTPError)
@@ -31,8 +31,8 @@ func assertHTTPError(t *testing.T, err error, wantStatus int, wantCode, wantMess
 	if got := httpErr.Code(); got != wantCode {
 		t.Fatalf("code = %q, want %q", got, wantCode)
 	}
-	if got := httpErr.Message(); got != wantMessage {
-		t.Fatalf("message = %q, want %q", got, wantMessage)
+	if got := httpErr.Detail(); got != wantDetail {
+		t.Fatalf("detail = %q, want %q", got, wantDetail)
 	}
 	return httpErr
 }
@@ -48,7 +48,7 @@ func assertViolations(t *testing.T, err error) []Violation {
 		"request contains invalid fields",
 	)
 
-	details := httpErr.Details()
+	details := httpErr.Errors()
 	violations := make([]Violation, 0, len(details))
 	for i, detail := range details {
 		violation, ok := detail.(Violation)

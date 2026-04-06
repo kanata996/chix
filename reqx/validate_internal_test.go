@@ -90,20 +90,6 @@ func TestBindAndValidateWrappersSuccessPaths(t *testing.T) {
 	}
 }
 
-// 自定义 Validate 在空函数和无 violation 场景下直接成功。
-func TestValidateAllowsNilFuncAndNoViolations(t *testing.T) {
-	type request struct {
-		Name string
-	}
-
-	if err := Validate(&request{Name: "ok"}, nil); err != nil {
-		t.Fatalf("Validate(nil fn) error = %v", err)
-	}
-	if err := Validate(&request{Name: "ok"}, func(*request) []Violation { return nil }); err != nil {
-		t.Fatalf("Validate(no violations) error = %v", err)
-	}
-}
-
 // validate 会覆盖成功、typed nil 和非结构体目标分支。
 func TestValidateBranches(t *testing.T) {
 	type request struct {
@@ -224,32 +210,32 @@ func TestNormalizeViolationBranches(t *testing.T) {
 		{
 			name: "required",
 			in:   Violation{Field: "name", Code: ViolationCodeRequired},
-			want: Violation{Field: "name", Code: ViolationCodeRequired, Detail: "is required", Message: "is required"},
+			want: Violation{Field: "name", Code: ViolationCodeRequired, Detail: "is required"},
 		},
 		{
 			name: "unknown",
 			in:   Violation{Field: "name", Code: ViolationCodeUnknown},
-			want: Violation{Field: "name", Code: ViolationCodeUnknown, Detail: "unknown field", Message: "unknown field"},
+			want: Violation{Field: "name", Code: ViolationCodeUnknown, Detail: "unknown field"},
 		},
 		{
 			name: "type",
 			in:   Violation{Field: "name", Code: ViolationCodeType},
-			want: Violation{Field: "name", Code: ViolationCodeType, Detail: "has invalid type", Message: "has invalid type"},
+			want: Violation{Field: "name", Code: ViolationCodeType, Detail: "has invalid type"},
 		},
 		{
 			name: "multiple",
 			in:   Violation{Field: "name", Code: ViolationCodeMultiple},
-			want: Violation{Field: "name", Code: ViolationCodeMultiple, Detail: "must not be repeated", Message: "must not be repeated"},
+			want: Violation{Field: "name", Code: ViolationCodeMultiple, Detail: "must not be repeated"},
 		},
 		{
 			name: "default",
 			in:   Violation{Field: "name"},
-			want: Violation{Field: "name", Code: ViolationCodeInvalid, Detail: "is invalid", Message: "is invalid"},
+			want: Violation{Field: "name", Code: ViolationCodeInvalid, Detail: "is invalid"},
 		},
 		{
-			name: "explicit message",
-			in:   Violation{Field: "name", Code: ViolationCodeInvalid, Message: "custom"},
-			want: Violation{Field: "name", Code: ViolationCodeInvalid, Detail: "custom", Message: "custom"},
+			name: "explicit detail",
+			in:   Violation{Field: "name", Code: ViolationCodeInvalid, Detail: "custom"},
+			want: Violation{Field: "name", Code: ViolationCodeInvalid, Detail: "custom"},
 		},
 	}
 
@@ -259,28 +245,6 @@ func TestNormalizeViolationBranches(t *testing.T) {
 				t.Fatalf("normalizeViolation() = %#v, want %#v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestInvalidFieldWrappers(t *testing.T) {
-	if got := InvalidField("name"); got != (Violation{
-		Field:   "name",
-		In:      ViolationInBody,
-		Code:    ViolationCodeInvalid,
-		Detail:  "is invalid",
-		Message: "is invalid",
-	}) {
-		t.Fatalf("InvalidField() = %#v", got)
-	}
-
-	if got := InvalidFieldIn(ViolationInHeader, "X-Request-Id"); got != (Violation{
-		Field:   "X-Request-Id",
-		In:      ViolationInHeader,
-		Code:    ViolationCodeInvalid,
-		Detail:  "is invalid",
-		Message: "is invalid",
-	}) {
-		t.Fatalf("InvalidFieldIn() = %#v", got)
 	}
 }
 

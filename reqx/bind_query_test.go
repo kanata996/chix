@@ -106,7 +106,7 @@ func TestBindQueryParams_MapsSingleFieldViolations(t *testing.T) {
 
 		var dst request
 		violation := assertSingleViolation(t, BindQueryParams(req, &dst))
-		if violation.Field != "id" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
+		if violation.Field != "id" || violation.Code != ViolationCodeMultiple || violation.Detail != "must not be repeated" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -120,7 +120,7 @@ func TestBindQueryParams_MapsSingleFieldViolations(t *testing.T) {
 
 		var dst request
 		violation := assertSingleViolation(t, BindQueryParams(req, &dst))
-		if violation.Field != "page" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
+		if violation.Field != "page" || violation.Code != ViolationCodeType || violation.Detail != "must be number" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -134,7 +134,7 @@ func TestBindQueryParams_MapsSingleFieldViolations(t *testing.T) {
 
 		var dst request
 		violation := assertSingleViolation(t, BindQueryParams(req, &dst))
-		if violation.Field != "state" || violation.Code != ViolationCodeInvalid || violation.Message != "is invalid" {
+		if violation.Field != "state" || violation.Code != ViolationCodeInvalid || violation.Detail != "is invalid" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -148,7 +148,7 @@ func TestBindQueryParams_MapsSingleFieldViolations(t *testing.T) {
 
 		var dst request
 		violation := assertSingleViolation(t, BindQueryParams(req, &dst))
-		if violation.Field != "state" || violation.Code != ViolationCodeMultiple || violation.Message != "must not be repeated" {
+		if violation.Field != "state" || violation.Code != ViolationCodeMultiple || violation.Detail != "must not be repeated" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -162,7 +162,7 @@ func TestBindQueryParams_MapsSingleFieldViolations(t *testing.T) {
 
 		var dst request
 		violation := assertSingleViolation(t, BindQueryParams(req, &dst))
-		if violation.Field != "page" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
+		if violation.Field != "page" || violation.Code != ViolationCodeType || violation.Detail != "must be number" {
 			t.Fatalf("violation = %#v", violation)
 		}
 		if dst.Page != nil {
@@ -298,13 +298,13 @@ func TestBindQueryParams_AggregatesViolationsAndPreservesDestination(t *testing.
 	}
 
 	want := []Violation{
-		{Field: "page", Code: ViolationCodeType, Message: "must be number"},
-		{Field: "id", Code: ViolationCodeType, Message: "must be number"},
-		{Field: "state", Code: ViolationCodeInvalid, Message: "is invalid"},
+		{Field: "page", Code: ViolationCodeType, Detail: "must be number"},
+		{Field: "id", Code: ViolationCodeType, Detail: "must be number"},
+		{Field: "state", Code: ViolationCodeInvalid, Detail: "is invalid"},
 	}
 	for i, wantViolation := range want {
 		got := violations[i]
-		if got.Field != wantViolation.Field || got.Code != wantViolation.Code || got.Message != wantViolation.Message {
+		if got.Field != wantViolation.Field || got.Code != wantViolation.Code || got.Detail != wantViolation.Detail {
 			t.Fatalf("violations[%d] = %#v, want %#v", i, got, wantViolation)
 		}
 	}
@@ -329,7 +329,7 @@ func TestBindAndValidateQuery_UsesQueryTagName(t *testing.T) {
 	}
 	err := BindAndValidateQuery(req, &dst)
 	violation := assertSingleViolation(t, err)
-	if violation.Field != "cursor" || violation.Code != ViolationCodeRequired || violation.Message != "is required" {
+	if violation.Field != "cursor" || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }

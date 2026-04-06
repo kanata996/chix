@@ -1,4 +1,6 @@
-// Package resp 的本文件负责“统一错误响应写回”。
+package resp
+
+// 本文件负责“统一错误响应写回”。
 //
 // 定位：
 //   - 这里是 WriteError(...) 的主实现文件。
@@ -14,7 +16,6 @@
 //   - 对外响应契约稳定优先，不泄露内部原始错误对象。
 //   - 普通 4xx / 5xx 只写统一错误响应，不额外输出重复业务错误日志。
 //   - 若 errors 无法编码，则降级保留 title/status/detail/code，尽量保证客户端仍收到有效错误响应。
-package resp
 
 import (
 	"context"
@@ -46,7 +47,7 @@ type ErrorWriteDegraded struct {
 //
 // 职责分为三步：
 //   - 先把任意 error 收敛为可稳定写回的 HTTPError；
-//   - 再给当前 request log 补充错误诊断字段；
+//   - 再给当前 request log 补充低噪音错误字段与关联字段；
 //   - 最后按统一错误响应契约写回客户端。
 //
 // 约束：
@@ -58,16 +59,21 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 		return nil
 	}
 
+	httpErr := asHTTPError(err)
+
 	var responseStartedErr *responseWriteError
 	if errors.As(err, &responseStartedErr) && responseStartedErr != nil && responseStartedErr.responseStarted {
+		logServerError(r, httpErr, err)
 		return err
 	}
 	if responseAlreadyStarted(w) {
+		logServerError(r, httpErr, err)
 		return err
 	}
 
-	httpErr := asHTTPError(err)
-	annotateRequestErrorLog(r, err, httpErr)
+	requestLogAttrs := requestErrorLogAttrs(r, err, httpErr)
+	annotateRequestErrorLogAttrs(r, requestLogAttrs)
+	logServerError(r, httpErr, err)
 	writeErr := writeHTTPError(w, r, httpErr)
 	logErrorResponseWriteFailure(r, httpErr, writeErr)
 	return writeErr

@@ -5,7 +5,7 @@
 对比基线：
 
 - `chi` 负责路由与中间件编排
-- `chix` 负责请求绑定、校验、JSON 响应、统一错误响应、请求日志
+- `chix` 负责请求绑定、校验、JSON 响应、统一错误响应、5xx 错误诊断
 - 对标对象为 Echo 在 API 场景中的核心开发体验
 
 本文基于当前仓库状态与 Echo 官方文档整理，结论时间点为 `2026-04-03`。
@@ -26,7 +26,7 @@
 - `validator/v10` 校验
 - JSON 成功响应写回
 - 统一错误响应写回
-- 一套预组合的请求日志链路
+- 5xx 错误时的 request log enrich 与独立错误日志
 
 相关源码与文档：
 
@@ -36,7 +36,7 @@
 - [`reqx/validate.go`](../reqx/validate.go)
 - [`resp/json.go`](../resp/json.go)
 - [`resp/write_error.go`](../resp/write_error.go)
-- [`middleware/log.go`](../middleware/log.go)
+- [`resp/error_log.go`](../resp/error_log.go)
 
 ## 相比 Echo 的主要优势
 
@@ -86,17 +86,16 @@
 
 这对前端、SDK、测试和 API 文档都更友好，也比 Echo 默认的错误输出更适合做稳定的对外契约。
 
-### 4. 日志链路更收敛
+### 4. 5xx 错误日志更收敛
 
-`middleware.RequestLogger(...)` 当前已经把这些能力预组合在一起：
+`chix` 不再统一接管 access log，仍然建议服务自己直接配置
+`chi + httplog`。但在 handler 最终走到 `WriteError(...)` 且状态收敛为 `5xx`
+时，`resp` 会：
 
-- request id
-- trace id
-- `httplog` 请求日志
-- panic recovery
-- `request.id` 与 `http.route` 等基础字段补充
+- 通过 `httplog.SetAttrs(...)` 给当前 request log 补 `error.*` 诊断字段
+- 通过 `slog.Default()` 输出一条独立 error log，便于在 access log 之外排查问题
 
-这对 API 服务是高频刚需。相比“自己从 `chi` 生态里逐个拼”，`chix` 在这条链路上已经给出了约束明确的默认方案。
+这比“每个 handler 都自己决定 5xx 要不要记、记什么字段”更容易形成稳定约束。
 
 ## 相比 Echo 的主要短板
 

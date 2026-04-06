@@ -8,7 +8,6 @@ import (
 )
 
 const (
-	CodeRequestError         = "request_error"
 	CodeInvalidJSON          = "invalid_json"
 	CodeUnsupportedMediaType = "unsupported_media_type"
 	CodeRequestTooLarge      = "request_too_large"
