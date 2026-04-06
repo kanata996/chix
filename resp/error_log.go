@@ -25,8 +25,10 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httplog/v3"
-	chixmw "github.com/kanata996/chix/middleware"
+	"github.com/go-chi/traceid"
 )
 
 const (
@@ -67,6 +69,14 @@ func requestErrorLogAttrs(r *http.Request, err error, httpErr *HTTPError) []slog
 		return nil
 	}
 
+	return diagnosticErrorLogAttrs(err, httpErr)
+}
+
+func diagnosticErrorLogAttrs(err error, httpErr *HTTPError) []slog.Attr {
+	if err == nil || httpErr == nil {
+		return nil
+	}
+
 	chain := buildErrorChainInfo(errorForDiagnostics(err, httpErr))
 	attrs := make([]slog.Attr, 0, 7)
 	attrs = append(attrs, slog.String("error.code", httpErr.Code()))
@@ -88,9 +98,6 @@ func requestErrorLogAttrs(r *http.Request, err error, httpErr *HTTPError) []slog
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		attrs = append(attrs, slog.Bool("error.timeout", true))
-	}
-	if r != nil && !chixmw.HasBaseRequestLogAttrs(r.Context()) {
-		attrs = append(attrs, chixmw.BaseRequestLogAttrs(r)...)
 	}
 
 	return attrs
@@ -114,19 +121,15 @@ func logErrorResponseWriteFailure(r *http.Request, httpErr *HTTPError, err error
 	}
 
 	ctx := context.Background()
-	logger := slog.Default()
 	if r != nil {
 		ctx = r.Context()
-		if ctxLogger := chixmw.LoggerFromContext(ctx); ctxLogger != nil {
-			logger = ctxLogger
-		}
 	}
 
-	attrs := []any{
+	attrs := []slog.Attr{
 		slog.Int("http.response.status_code", httpErr.Status()),
-		slog.String("error.code", httpErr.Code()),
-		slog.Any("error", err),
 	}
+	attrs = append(attrs, diagnosticErrorLogAttrs(err, httpErr)...)
+	attrs = append(attrs, requestContextAttrs(ctx)...)
 
 	var degraded *ErrorWriteDegraded
 	if errors.As(err, &degraded) && degraded != nil {
@@ -136,7 +139,27 @@ func logErrorResponseWriteFailure(r *http.Request, httpErr *HTTPError, err error
 		)
 	}
 
-	logger.ErrorContext(ctx, "resp: failed to write error response", attrs...)
+	slog.Default().LogAttrs(ctx, slog.LevelError, "resp: failed to write error response", attrs...)
+}
+
+// logServerError 记录一次独立的 5xx 错误日志，便于在 access log 之外排查问题。
+func logServerError(r *http.Request, httpErr *HTTPError, err error) {
+	if err == nil || httpErr == nil || httpErr.Status() < http.StatusInternalServerError {
+		return
+	}
+
+	ctx := context.Background()
+	if r != nil {
+		ctx = r.Context()
+	}
+
+	attrs := []slog.Attr{
+		slog.Int("http.response.status_code", httpErr.Status()),
+	}
+	attrs = append(attrs, diagnosticErrorLogAttrs(err, httpErr)...)
+	attrs = append(attrs, requestContextAttrs(ctx)...)
+
+	slog.Default().LogAttrs(ctx, slog.LevelError, "resp: request failed with server error", attrs...)
 }
 
 // buildErrorChainInfo 把错误链整理成适合日志输出的摘要结构。
@@ -293,4 +316,25 @@ func limitErrorLogString(value string) string {
 		return trimmed
 	}
 	return trimmed[:maxLoggedErrorStringBytes] + "...(truncated)"
+}
+
+func requestContextAttrs(ctx context.Context) []slog.Attr {
+	if ctx == nil {
+		return nil
+	}
+
+	attrs := make([]slog.Attr, 0, 3)
+	if traceID := traceid.FromContext(ctx); traceID != "" {
+		attrs = append(attrs, slog.String(traceid.LogKey, traceID))
+	}
+	if requestID := chimw.GetReqID(ctx); requestID != "" {
+		attrs = append(attrs, slog.String("request.id", requestID))
+	}
+	if rctx := chi.RouteContext(ctx); rctx != nil {
+		if route := strings.TrimSpace(rctx.RoutePattern()); route != "" {
+			attrs = append(attrs, slog.String("http.route", route))
+		}
+	}
+
+	return attrs
 }

@@ -58,16 +58,20 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 		return nil
 	}
 
+	httpErr := asHTTPError(err)
+
 	var responseStartedErr *responseWriteError
 	if errors.As(err, &responseStartedErr) && responseStartedErr != nil && responseStartedErr.responseStarted {
+		logServerError(r, httpErr, err)
 		return err
 	}
 	if responseAlreadyStarted(w) {
+		logServerError(r, httpErr, err)
 		return err
 	}
 
-	httpErr := asHTTPError(err)
 	annotateRequestErrorLog(r, err, httpErr)
+	logServerError(r, httpErr, err)
 	writeErr := writeHTTPError(w, r, httpErr)
 	logErrorResponseWriteFailure(r, httpErr, writeErr)
 	return writeErr

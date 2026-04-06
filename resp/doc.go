@@ -10,5 +10,6 @@
 //   - 使用 JSON / JSONPretty / JSONBlob 进行底层 JSON 输出
 //   - 使用 OK / Created / NoContent 写成功响应
 //   - 使用 WriteError 写结构化错误响应
+//   - 在 5xx 场景通过 WriteError 补 request log 诊断字段，并输出独立错误日志
 //   - 使用 HTTPError 及相关辅助构造可复用的公共错误值
 package resp

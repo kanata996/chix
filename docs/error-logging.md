@@ -6,7 +6,6 @@
 
 - `resp/write_error.go`
 - `resp/error_log.go`
-- `middleware/log.go`
 
 ## `WriteError(...)` 的日志分支
 
@@ -22,9 +21,12 @@
 - 传入错误能解出 `responseWriteError`，且 `responseStarted=true`
 - `ResponseWriter` 显式暴露可读的状态信息，且已检测到状态码或已写字节数
 
-- 直接返回原错误
-- 不补请求日志字段
-- 不写独立错误日志
+则：
+
+- 不再改写响应
+- 不再补 request log 字段
+- 若错误最终收敛为 `5xx`，仍会通过 `slog.Default()` 输出一条独立错误日志
+- 返回原错误
 
 ### 常规错误响应路径
 
@@ -32,22 +34,30 @@
 
 1. `asHTTPError(err)`
 2. `annotateRequestErrorLog(r, err, httpErr)`
-3. `writeHTTPError(w, r, httpErr)`
-4. `logErrorResponseWriteFailure(r, httpErr, writeErr)`
-5. 返回 `writeErr`
+3. `logServerError(r, httpErr, err)`
+4. `writeHTTPError(w, r, httpErr)`
+5. `logErrorResponseWriteFailure(r, httpErr, writeErr)`
+6. 返回 `writeErr`
 
-其中第 4 步只有在 `writeErr != nil` 时才会实际输出独立错误日志。
+其中：
 
-## 请求日志行为
+- 第 2 步只影响当前 request log
+- 第 3 步只在 `httpErr.Status() >= 500` 时输出独立错误日志
+- 第 5 步只在 `writeErr != nil` 时输出独立错误日志
 
-`annotateRequestErrorLog(...)` 只通过 `httplog.SetAttrs(...)` 给当前请求日志补字段，本身不直接输出日志。
+## Request Log 行为
+
+`annotateRequestErrorLog(...)` 只通过 `httplog.SetAttrs(...)` 给当前 request log
+补字段，本身不直接输出日志。
+
+如果请求没有经过 `httplog.RequestLogger(...)`，这一步会自然退化为 no-op。
 
 ### 4xx
 
 当 `httpErr.Status() < 500` 时：
 
 - 不补任何 `error.*` 字段
-- 只保留外层请求日志原有字段
+- 只保留外层 request log 原有字段
 
 ### 5xx
 
@@ -69,7 +79,10 @@
 - `error.timeout` 仅在 `errors.Is(err, context.DeadlineExceeded)` 时写入
 - `error.canceled` 仅在 `errors.Is(err, context.Canceled)` 时写入
 
-### 不再写入请求日志的字段
+如果你希望 access log 也带上 `traceId`、`request.id`，需要在服务
+自己的 `chi + httplog` 链路里额外挂 `middleware.RequestLogAttrs()`。
+
+### 不再写入 Request Log 的字段
 
 当前不会写入 request log 的字段有：
 
@@ -83,22 +96,56 @@
 - `error.category`
 - `error.expected`
 
-## 基础请求字段
+## 独立错误日志行为
 
-错误注解路径在需要时会补：
+### 普通 5xx
 
+当 `WriteError(...)` 最终收敛为 `5xx` 时，会通过 `slog.Default()` 输出一条独立
+`error` 日志：
+
+- 消息：`resp: request failed with server error`
+
+字段包括：
+
+- `http.response.status_code`
+- `error.code`
+- `error.message`
+- `error.type`
+- `error.root_message`
+- `error.root_type`
+- `error.timeout`
+- `error.canceled`
+- `traceId`
 - `request.id`
 - `http.route`
 
-补充条件为：
+### 错误响应写出失败
 
-- 当前上下文未被标记为已注入基础请求字段
+`logErrorResponseWriteFailure(...)` 只在错误响应写出路径返回非空错误时输出独立
+`error` 日志：
 
-如果请求已经经过 `middleware.RequestLogger(...)`，错误注解路径不会重复补充。
+- 消息：`resp: failed to write error response`
+
+字段包括：
+
+- `http.response.status_code`
+- `error.code`
+- `error.message`
+- `error.type`
+- `error.root_message`
+- `error.root_type`
+- `traceId`
+- `request.id`
+- `http.route`
+
+如果错误可解出 `ErrorWriteDegraded`，还会追加：
+
+- `resp.error_degraded`
+- `resp.public_response_preserved`
 
 ## 诊断起点与错误链
 
-5xx 的诊断起点规则为：
+5xx 诊断起点规则为：
 
 - 如果 `HTTPError` 持有 `cause`，优先从 `httpErr.cause` 开始
 - 否则从原始 `err` 开始
@@ -113,34 +160,9 @@
 - 最大深度 `8`
 - 使用 `seen` 集合避免循环引用
 
-`error.root_message` 和 `error.root_type` 在普通单链包装场景里通常对应最底层错误；在 `errors.Join(...)` 场景里，它们表示本次遍历尾部摘要，不保证是唯一根因。
-
-## 独立错误日志行为
-
-`logErrorResponseWriteFailure(...)` 只在错误响应写出路径返回非空错误时输出独立 `error` 日志。
-
-日志消息为：
-
-- `resp: failed to write error response`
-
-固定字段为：
-
-- `http.response.status_code`
-- `error.code`
-- `error`
-
-如果错误可解出 `ErrorWriteDegraded`，还会追加：
-
-- `resp.error_degraded`
-- `resp.public_response_preserved`
-
-## 独立错误日志的 logger 来源
-
-独立错误日志按以下顺序选择 logger：
-
-1. 请求上下文里的 request logger
-2. `slog.Default()`
+`error.root_message` 和 `error.root_type` 在普通单链包装场景里通常对应最底层
+错误；在 `errors.Join(...)` 场景里，它们表示本次遍历尾部摘要，不保证是唯一根因。
 
 ## `errors` 的当前行为
 
-`errors` 当前只属于公共错误响应，不写入 request log。
+`errors` 当前只属于公共错误响应，不写入 request log，也不会原样塞进独立错误日志。
