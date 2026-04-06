@@ -227,8 +227,8 @@ func (r *listAccountsRequest) Normalize() {
 - `title` 始终由 HTTP status text 生成，例如 `422 -> "Unprocessable Entity"`
 - `detail` 承载对外公开的人类可读说明
 - `code` 承载稳定的机器错误码，便于客户端分支处理
-- `errors` 仅在存在结构化字段错误时出现
-- `errors[]` 子项固定为 `field`、`in`、`code`、`detail`
+- `errors` 仅在存在公开结构化错误详情时出现
+- 对于 `reqx` 生成的字段级错误，`errors[]` 子项固定为 `field`、`in`、`code`、`detail`
 - `in` 表示错误来源，当前可能为 `body`、`query`、`path`、`header`、`request`
 
 常见归一化规则：
@@ -242,7 +242,7 @@ func (r *listAccountsRequest) Normalize() {
 - 未知错误默认返回 `500 Internal Server Error`，错误码为 `internal_error`
 - `HEAD` 错误响应只写状态码和 `application/problem+json`，不写响应体
 - `title` 始终由状态码生成，`detail` 承载公开说明，`code` 承载稳定机器码
-- `errors` 仅在存在结构化字段错误时出现；单个错误项使用 `field`、`in`、`code`、`detail`
+- `errors` 仅在存在公开结构化错误详情时出现；其中 `reqx` 生成的字段级错误项使用 `field`、`in`、`code`、`detail`
 
 如果你需要可复用的公共错误值，可以直接使用 `resp.HTTPError`，以及 `resp.BadRequest(...)`、`resp.NotFound(...)`、`resp.UnprocessableEntity(...)` 等辅助构造函数。
 

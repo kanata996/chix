@@ -19,14 +19,14 @@
 ### Removed
 
 - 根包 `chix` 不再重导出 `reqx.Violation`、`resp.HTTPError`、`resp.ErrorWriteDegraded`；需要这些底层类型时请直接导入 `reqx` 或 `resp`。
-- `reqx` 收回了手写校验/错误构造辅助的导出面；公开入口聚焦在 `Bind*`、`BindAndValidate*`、`Param*`、`Normalizer`、`Violation` 与绑定 option。
+- `reqx` 收回了手写校验/错误构造辅助的导出面；当前公开入口聚焦在 `Bind*`、`BindAndValidate*`、`Param*`、`Normalizer`、`Violation`、绑定 option，以及已文档化的错误码 / violation 常量。
 - `reqx.Violation` 不再保留 `Message` 兼容字段，字段级公开错误统一使用 `detail` / `Detail`。
 - `resp.HTTPError` 不再保留 `Message()`、`Details()` 兼容别名；统一使用 `Detail()`、`Errors()`。
 
 ### Changed
 
-- 公开错误响应从包裹式 `{"error": {...}}` 调整为顶层 problem 风格对象；当前顶层字段固定为 `title`、`status`、`detail`、`code`，并在存在结构化字段错误时附带 `errors`。
-- 字段级错误项统一为 `field`、`in`、`code`、`detail`；`in` 用于标识错误输入来源，取值覆盖 `body`、`query`、`path`、`header`、`request`。
+- 公开错误响应从包裹式 `{"error": {...}}` 调整为顶层 problem 风格对象；当前顶层字段固定为 `title`、`status`、`detail`、`code`，并在存在公开结构化错误详情时附带 `errors`。
+- 对于 `reqx` 生成的字段级错误，`errors[]` 子项统一为 `field`、`in`、`code`、`detail`；`in` 用于标识错误输入来源，取值覆盖 `body`、`query`、`path`、`header`、`request`。
 - `title` 现在统一由 HTTP 状态码生成，`detail` 承载公开错误说明，`code` 承载稳定机器码；公开错误响应不包含 `type` 和 `instance`。
 - `reqx` 产生的绑定与校验错误会尽可能映射到请求侧 tag 名和来源位置，例如 `json:"name"` 会返回 `field: "name", in: "body"`。
 - 请求侧 JSON body 明确接受 `application/json` 和 `application/*+json`；错误响应的 `Content-Type` 明确为 `application/problem+json`，以对齐 Huma 的 problem 响应约定。

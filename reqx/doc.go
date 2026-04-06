@@ -1,7 +1,7 @@
 // Package reqx 为基于 net/http 的 JSON API 提供请求侧辅助能力。
 //
 // 它聚焦在 HTTP 输入边界：
-//   - 将 JSON / query / path 值绑定到结构体
+//   - 将 JSON / query / path / header 值绑定到结构体
 //   - 使用 validator/v10 校验绑定后的输入
 //   - 将常见请求违规统一收敛为稳定的 HTTP 错误
 //

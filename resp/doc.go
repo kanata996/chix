@@ -13,7 +13,7 @@
 //   - 在 5xx 场景通过 WriteError 补 request log 诊断字段，并输出独立错误日志
 //   - 使用 HTTPError 及状态快捷构造复用公共错误值
 //
-// 公开 API 约束：
+// 公开 API：
 //   - 成功响应入口：JSON、JSONPretty、JSONBlob、OK、Created、NoContent
 //   - 错误响应入口：WriteError
 //   - 公开错误类型：HTTPError

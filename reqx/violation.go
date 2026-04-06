@@ -30,7 +30,7 @@ const (
 	ViolationInRequest = "request"
 )
 
-// Violation 描述单个字段校验失败。
+// Violation 描述单个请求字段违规。
 type Violation struct {
 	Field  string `json:"field,omitempty"`
 	In     string `json:"in,omitempty"`

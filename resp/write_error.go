@@ -1,4 +1,6 @@
-// Package resp 的本文件负责“统一错误响应写回”。
+package resp
+
+// 本文件负责“统一错误响应写回”。
 //
 // 定位：
 //   - 这里是 WriteError(...) 的主实现文件。
@@ -14,7 +16,6 @@
 //   - 对外响应契约稳定优先，不泄露内部原始错误对象。
 //   - 普通 4xx / 5xx 只写统一错误响应，不额外输出重复业务错误日志。
 //   - 若 errors 无法编码，则降级保留 title/status/detail/code，尽量保证客户端仍收到有效错误响应。
-package resp
 
 import (
 	"context"
