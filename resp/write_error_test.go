@@ -14,7 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httplog/v3"
-	chixmw "github.com/kanata996/chix/middleware"
+	"github.com/go-chi/traceid"
 )
 
 // 测试清单：
@@ -26,7 +26,7 @@ import (
 // [✓] 响应已经开始写出时不会被二次改写，但 5xx 仍会输出独立错误日志
 // [✓] asHTTPError 会保留 HTTPError，并把 context/普通 error 收敛为稳定公共语义
 // [✓] problem payload 会按 includeErrors 开关决定是否暴露公开 errors
-// [✓] 5xx 请求日志会补充诊断字段并输出独立错误日志，4xx 不会；错误响应写出失败会记录独立日志
+// [✓] 5xx 请求日志只补充低噪音关联字段并输出独立错误日志，4xx 不会；错误响应写出失败会记录独立日志
 
 type failingWriter struct {
 	header http.Header
@@ -47,6 +47,10 @@ type wrappedTestError struct {
 	err error
 }
 
+type countingError struct {
+	calls *int
+}
+
 type panicJSONDetail struct{}
 
 func (panicJSONDetail) MarshalJSON() ([]byte, error) {
@@ -59,6 +63,13 @@ func (e *wrappedTestError) Error() string {
 
 func (e *wrappedTestError) Unwrap() error {
 	return e.err
+}
+
+func (e *countingError) Error() string {
+	if e != nil && e.calls != nil {
+		*e.calls = *e.calls + 1
+	}
+	return "counting error"
 }
 
 func (w *failingWriter) Header() http.Header {
@@ -598,13 +609,13 @@ func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 	r := chi.NewRouter()
+	r.Use(chimiddleware.RequestID)
+	r.Use(traceid.Middleware)
 	r.Use(httplog.RequestLogger(logger, &httplog.Options{
 		Level:         slog.LevelInfo,
 		Schema:        httplog.SchemaECS,
 		RecoverPanics: true,
 	}))
-	r.Use(chimiddleware.RequestID)
-	r.Use(chixmw.RequestLogAttrs())
 	r.Get("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
 		rawErr := &rawTestError{message: "db timeout"}
 		err := wrapError(
@@ -630,20 +641,23 @@ func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 	if got := logEntry["error.code"]; got != "internal_error" {
 		t.Fatalf("error.code = %#v, want internal_error", got)
 	}
-	if got := logEntry["error.message"]; got != "load user: db timeout" {
-		t.Fatalf("error.message = %#v, want wrapped raw error", got)
-	}
-	if got := logEntry["error.type"]; got != "*resp.wrappedTestError" {
-		t.Fatalf("error.type = %#v, want *resp.wrappedTestError", got)
-	}
-	if got := logEntry["error.root_message"]; got != "db timeout" {
-		t.Fatalf("error.root_message = %#v, want db timeout", got)
-	}
-	if got := logEntry["error.root_type"]; got != "*resp.rawTestError" {
-		t.Fatalf("error.root_type = %#v, want *resp.rawTestError", got)
-	}
 	if got := logEntry["request.id"]; got != "req-123" {
 		t.Fatalf("request.id = %#v, want req-123", got)
+	}
+	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
+		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
+	}
+	if _, exists := logEntry["error.message"]; exists {
+		t.Fatalf("error.message unexpectedly present: %#v", logEntry["error.message"])
+	}
+	if _, exists := logEntry["error.type"]; exists {
+		t.Fatalf("error.type unexpectedly present: %#v", logEntry["error.type"])
+	}
+	if _, exists := logEntry["error.root_message"]; exists {
+		t.Fatalf("error.root_message unexpectedly present: %#v", logEntry["error.root_message"])
+	}
+	if _, exists := logEntry["error.root_type"]; exists {
+		t.Fatalf("error.root_type unexpectedly present: %#v", logEntry["error.root_type"])
 	}
 	if _, exists := logEntry["error.details"]; exists {
 		t.Fatalf("error.details unexpectedly present: %#v", logEntry["error.details"])
@@ -668,7 +682,7 @@ func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 	}
 }
 
-// HTTPError 自身没有 cause 时，请求日志诊断会回退到原始包装错误而不是公开消息。
+// request log 只保留低噪音字段，不会镜像包装错误文本或类型。
 func TestWriteErrorEnrichesRequestLogFromWrappedHTTPErrorWithoutCause(t *testing.T) {
 	var buf bytes.Buffer
 
@@ -697,14 +711,13 @@ func TestWriteErrorEnrichesRequestLogFromWrappedHTTPErrorWithoutCause(t *testing
 	}
 
 	logEntry := decodePayload(t, buf.Bytes())
-	if got := logEntry["error.message"]; got != "handler failed: Internal Server Error" {
-		t.Fatalf("error.message = %#v, want wrapped original error", got)
+	if got := logEntry["error.code"]; got != "internal_error" {
+		t.Fatalf("error.code = %#v, want internal_error", got)
 	}
-	if got := logEntry["error.root_message"]; got != "Internal Server Error" {
-		t.Fatalf("error.root_message = %#v, want Internal Server Error", got)
-	}
-	if got := logEntry["error.root_type"]; got != "*resp.HTTPError" {
-		t.Fatalf("error.root_type = %#v, want *resp.HTTPError", got)
+	for _, key := range []string{"error.message", "error.type", "error.root_message", "error.root_type"} {
+		if _, exists := logEntry[key]; exists {
+			t.Fatalf("%s unexpectedly present: %#v", key, logEntry[key])
+		}
 	}
 }
 
@@ -714,13 +727,13 @@ func TestWriteErrorEnrichesRequestLogWithTimeoutFlag(t *testing.T) {
 
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 	r := chi.NewRouter()
+	r.Use(chimiddleware.RequestID)
+	r.Use(traceid.Middleware)
 	r.Use(httplog.RequestLogger(logger, &httplog.Options{
 		Level:         slog.LevelInfo,
 		Schema:        httplog.SchemaECS,
 		RecoverPanics: true,
 	}))
-	r.Use(chimiddleware.RequestID)
-	r.Use(chixmw.RequestLogAttrs())
 	r.Get("/timeout", func(w http.ResponseWriter, r *http.Request) {
 		err := wrapError(
 			http.StatusInternalServerError,
@@ -750,6 +763,9 @@ func TestWriteErrorEnrichesRequestLogWithTimeoutFlag(t *testing.T) {
 	if got := logEntry["request.id"]; got != "req-timeout" {
 		t.Fatalf("request.id = %#v, want req-timeout", got)
 	}
+	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
+		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
+	}
 }
 
 // 5xx 请求日志会显式标记 canceled 错误，即使公开响应仍是 500。
@@ -758,13 +774,13 @@ func TestWriteErrorEnrichesRequestLogWithCanceledFlag(t *testing.T) {
 
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 	r := chi.NewRouter()
+	r.Use(chimiddleware.RequestID)
+	r.Use(traceid.Middleware)
 	r.Use(httplog.RequestLogger(logger, &httplog.Options{
 		Level:         slog.LevelInfo,
 		Schema:        httplog.SchemaECS,
 		RecoverPanics: true,
 	}))
-	r.Use(chimiddleware.RequestID)
-	r.Use(chixmw.RequestLogAttrs())
 	r.Get("/canceled", func(w http.ResponseWriter, r *http.Request) {
 		err := wrapError(
 			http.StatusInternalServerError,
@@ -793,6 +809,9 @@ func TestWriteErrorEnrichesRequestLogWithCanceledFlag(t *testing.T) {
 	}
 	if got := logEntry["request.id"]; got != "req-canceled" {
 		t.Fatalf("request.id = %#v, want req-canceled", got)
+	}
+	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
+		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
 	}
 }
 
@@ -843,6 +862,29 @@ func TestWriteErrorDoesNotEnrichRequestLogFor4xx(t *testing.T) {
 	}
 }
 
+// 4xx 不会为了独立错误日志去预先展开内部诊断错误链。
+func TestWriteErrorDoesNotBuildDiagnosticAttrsFor4xx(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/users/u_123", nil)
+	rr := httptest.NewRecorder()
+
+	calls := 0
+	err := WriteError(rr, req, wrapError(
+		http.StatusBadRequest,
+		"bad_request",
+		"bad request",
+		&countingError{calls: &calls},
+	))
+	if err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+	if calls != 0 {
+		t.Fatalf("countingError.Error() calls = %d, want 0", calls)
+	}
+}
+
 // 5xx 会通过 slog.Default() 额外记录一条独立错误日志，便于脱离 access log 排查问题。
 func TestWriteErrorLogsServerErrorToDefaultLogger(t *testing.T) {
 	var requestBuf bytes.Buffer
@@ -854,13 +896,13 @@ func TestWriteErrorLogsServerErrorToDefaultLogger(t *testing.T) {
 	defer slog.SetDefault(previousDefault)
 
 	r := chi.NewRouter()
+	r.Use(chimiddleware.RequestID)
+	r.Use(traceid.Middleware)
 	r.Use(httplog.RequestLogger(requestLogger, &httplog.Options{
 		Level:         slog.LevelInfo,
 		Schema:        httplog.SchemaECS,
 		RecoverPanics: true,
 	}))
-	r.Use(chimiddleware.RequestID)
-	r.Use(chixmw.RequestLogAttrs())
 	r.Get("/failure", func(w http.ResponseWriter, r *http.Request) {
 		_ = WriteError(w, r, errors.New("db timeout"))
 	})
@@ -884,6 +926,15 @@ func TestWriteErrorLogsServerErrorToDefaultLogger(t *testing.T) {
 	if got := accessLog["error.code"]; got != "internal_error" {
 		t.Fatalf("access log error.code = %#v, want internal_error", got)
 	}
+	if got := accessLog["request.id"]; got != "req-server" {
+		t.Fatalf("access log request.id = %#v, want req-server", got)
+	}
+	if got, ok := accessLog["traceId"].(string); !ok || got == "" {
+		t.Fatalf("access log traceId = %#v, want non-empty string", accessLog["traceId"])
+	}
+	if _, exists := accessLog["error.message"]; exists {
+		t.Fatalf("access log error.message unexpectedly present: %#v", accessLog["error.message"])
+	}
 
 	logEntry := decodePayload(t, defaultBuf.Bytes())
 	if got := logEntry["msg"]; got != "resp: request failed with server error" {
@@ -897,6 +948,9 @@ func TestWriteErrorLogsServerErrorToDefaultLogger(t *testing.T) {
 	}
 	if got := logEntry["request.id"]; got != "req-server" {
 		t.Fatalf("request.id = %#v, want req-server", got)
+	}
+	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
+		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
 	}
 	if got := logEntry["http.route"]; got != "/failure" {
 		t.Fatalf("http.route = %#v, want /failure", got)

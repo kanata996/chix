@@ -64,28 +64,33 @@
 当 `httpErr.Status() >= 500` 时，会补以下字段：
 
 - `error.code`
-- `error.message`
-- `error.type`
-- `error.root_message`
-- `error.root_type`
 - `error.timeout`
 - `error.canceled`
+- `traceId`
+- `request.id`
 
 其中：
 
 - `error.code` 始终来自 `HTTPError.Code()`
-- `error.message`、`error.type` 来自诊断起点错误
-- `error.root_message`、`error.root_type` 来自错误链遍历尾部摘要
 - `error.timeout` 仅在 `errors.Is(err, context.DeadlineExceeded)` 时写入
 - `error.canceled` 仅在 `errors.Is(err, context.Canceled)` 时写入
+- `traceId` / `request.id` 仅在当前上下文里已有对应值时写入
 
-如果你希望 access log 也带上 `traceId`、`request.id`，需要在服务
-自己的 `chi + httplog` 链路里额外挂 `middleware.RequestLogAttrs()`。
+如果你希望所有 access log 都带上 `traceId`、`request.id`，需要在服务
+自己的 `chi + httplog` 链路里额外挂 `middleware.RequestLogAttrs()`；`WriteError(...)`
+自己的 5xx request log 注解不依赖这个中间件。
+
+默认示例不会挂这个中间件，因为 `WriteError(...)` 已经会在 5xx request log 上补
+`traceId` / `request.id`。如果两者同时使用，5xx access log 会再次追加同名字段。
 
 ### 不再写入 Request Log 的字段
 
 当前不会写入 request log 的字段有：
 
+- `error.message`
+- `error.type`
+- `error.root_message`
+- `error.root_type`
 - `error.details`
 - `error.details_count`
 - `error.details_dropped`

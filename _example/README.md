@@ -7,7 +7,8 @@
 - 显式挂 `chi/middleware.RequestID`
 - 显式挂 `traceid.Middleware`
 - 显式挂 `httplog.RequestLogger`
-- 可选挂 `middleware.RequestLogAttrs()` 给 access log 追加 `traceId`、`request.id`
+- 默认不挂 `middleware.RequestLogAttrs()`
+- 如果你希望所有 access log 都带上 `traceId`、`request.id`，可以再额外挂这个辅助中间件
 
 同时演示三种常见写法：
 

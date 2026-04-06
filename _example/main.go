@@ -15,7 +15,6 @@ import (
 	"github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
 	"github.com/kanata996/chix"
-	chixmw "github.com/kanata996/chix/middleware"
 	"github.com/kanata996/chix/resp"
 )
 
@@ -100,7 +99,6 @@ func newRouter(logger *slog.Logger, store *accountStore) http.Handler {
 		LogRequestHeaders:  []string{"Content-Type", "Origin"},
 		LogResponseHeaders: []string{"Content-Type"},
 	}))
-	r.Use(chixmw.RequestLogAttrs())
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		_ = chix.NoContent(w, r)

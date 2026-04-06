@@ -46,7 +46,7 @@ type ErrorWriteDegraded struct {
 //
 // 职责分为三步：
 //   - 先把任意 error 收敛为可稳定写回的 HTTPError；
-//   - 再给当前 request log 补充错误诊断字段；
+//   - 再给当前 request log 补充低噪音错误字段与关联字段；
 //   - 最后按统一错误响应契约写回客户端。
 //
 // 约束：
@@ -70,7 +70,8 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 		return err
 	}
 
-	annotateRequestErrorLog(r, err, httpErr)
+	requestLogAttrs := requestErrorLogAttrs(r, err, httpErr)
+	annotateRequestErrorLogAttrs(r, requestLogAttrs)
 	logServerError(r, httpErr, err)
 	writeErr := writeHTTPError(w, r, httpErr)
 	logErrorResponseWriteFailure(r, httpErr, writeErr)

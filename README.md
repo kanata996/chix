@@ -265,7 +265,7 @@ if err := repo.DeleteAccount(ctx, accountID); err != nil {
 
 - 是否挂 `RequestID` / `traceid.Middleware`
 - 是否记录 request / response headers
-- 是否通过 `middleware.RequestLogAttrs()` 给 access log 追加 `traceId` / `request.id`
+- 是否额外挂 `middleware.RequestLogAttrs()` 给所有 access log 追加 `traceId` / `request.id`
 - 是否跳过 `/healthz` 等低价值路由
 - 成功请求是否还需要额外业务日志
 
@@ -273,8 +273,11 @@ if err := repo.DeleteAccount(ctx, accountID); err != nil {
 
 当错误最终收敛为 `5xx` 时，`WriteError(...)` 会做两件事：
 
-- 如果当前请求经过了 `httplog.RequestLogger(...)`，通过 `httplog.SetAttrs(...)` 给 request log 补 `error.*` 诊断字段
+- 如果当前请求经过了 `httplog.RequestLogger(...)`，通过 `httplog.SetAttrs(...)` 给 request log 补少量错误字段和关联字段：`error.code`、`error.timeout`、`error.canceled`，以及上下文里已有的 `traceId` / `request.id`
 - 通过 `slog.Default()` 输出一条独立的 error 日志，便于在 access log 之外排查问题
+
+默认示例不挂 `middleware.RequestLogAttrs()`；它是一个可选辅助中间件，适合你希望所有
+access log 都带上 `traceId` / `request.id` 的场景。
 
 当错误响应自身写出失败时，还会再输出一条：
 
@@ -294,7 +297,6 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
-	chixmw "github.com/kanata996/chix/middleware"
 )
 
 func main() {
@@ -309,7 +311,6 @@ func main() {
 		Schema:        httplog.SchemaECS,
 		RecoverPanics: true,
 	}))
-	r.Use(chixmw.RequestLogAttrs())
 
 	_ = http.ListenAndServe(":8080", r)
 }
