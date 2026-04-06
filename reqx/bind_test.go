@@ -185,7 +185,7 @@ func TestBind_PropagatesStageErrors(t *testing.T) {
 
 		var bound request
 		violation := assertSingleViolation(t, Bind(req, &bound))
-		if violation.Field != "page" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
+		if violation.Field != "page" || violation.Code != ViolationCodeType || violation.Detail != "must be number" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})

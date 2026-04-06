@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/kanata996/chix/resp"
 )
 
 type Normalizer interface {
@@ -37,80 +36,35 @@ func BindAndValidate[T any](r *http.Request, dst *T, opts ...BindOption) error {
 	if err := Bind(r, dst, opts...); err != nil {
 		return err
 	}
-	return ValidateRequest(dst)
+	return validate(dst, sourceRequest)
 }
 
 func BindAndValidateBody[T any](r *http.Request, dst *T, opts ...BindBodyOption) error {
 	if err := BindBody(r, dst, opts...); err != nil {
 		return err
 	}
-	return ValidateBody(dst)
+	return validate(dst, sourceBody)
 }
 
 func BindAndValidateQuery[T any](r *http.Request, dst *T, opts ...BindQueryParamsOption) error {
 	if err := BindQueryParams(r, dst, opts...); err != nil {
 		return err
 	}
-	return ValidateQuery(dst)
+	return validate(dst, sourceQuery)
 }
 
 func BindAndValidatePath[T any](r *http.Request, dst *T) error {
 	if err := BindPathValues(r, dst); err != nil {
 		return err
 	}
-	return ValidatePath(dst)
+	return validate(dst, sourcePath)
 }
 
 func BindAndValidateHeaders[T any](r *http.Request, dst *T, opts ...BindHeadersOption) error {
 	if err := BindHeaders(r, dst, opts...); err != nil {
 		return err
 	}
-	return ValidateHeaders(dst)
-}
-
-func ValidateBody[T any](target *T) error {
-	return validate(target, sourceBody)
-}
-
-func ValidateRequest[T any](target *T) error {
-	return validate(target, sourceRequest)
-}
-
-func ValidateQuery[T any](target *T) error {
-	return validate(target, sourceQuery)
-}
-
-func ValidatePath[T any](target *T) error {
-	return validate(target, sourcePath)
-}
-
-func ValidateHeaders[T any](target *T) error {
-	return validate(target, sourceHeader)
-}
-
-func BadRequest(violations ...Violation) error {
-	return resp.NewError(
-		http.StatusBadRequest,
-		CodeInvalidRequest,
-		"request contains invalid fields",
-		violationsToAny(violations)...,
-	)
-}
-
-func InvalidField(field string) Violation {
-	return InvalidFieldIn(ViolationInBody, field)
-}
-
-func InvalidFieldIn(input, field string) Violation {
-	return newViolation(field, input, ViolationCodeInvalid, violationDetailInvalid)
-}
-
-func RequiredField(field string) Violation {
-	return RequiredFieldIn(ViolationInBody, field)
-}
-
-func RequiredFieldIn(input, field string) Violation {
-	return newViolation(field, input, ViolationCodeRequired, violationDetailRequired)
+	return validate(dst, sourceHeader)
 }
 
 func validate[T any](target *T, source sourceKind) error {
@@ -118,7 +72,9 @@ func validate[T any](target *T, source sourceKind) error {
 		return err
 	}
 
-	normalizeTarget(target)
+	if normalizer, ok := any(target).(Normalizer); ok {
+		normalizer.Normalize()
+	}
 
 	violations, err := validateStruct(target, source)
 	if err != nil {
@@ -142,12 +98,6 @@ func validateTarget(target any) error {
 	}
 
 	return nil
-}
-
-func normalizeTarget(target any) {
-	if normalizer, ok := target.(Normalizer); ok {
-		normalizer.Normalize()
-	}
 }
 
 func validateStruct(target any, source sourceKind) ([]Violation, error) {
@@ -240,7 +190,7 @@ func violationsFromValidation(source sourceKind, target any, errs validator.Vali
 
 	violations := make([]Violation, 0, len(entries))
 	for _, entry := range entries {
-		violations = append(violations, newViolation(entry.field, entry.in, entry.code, validationDetail(entry.code)))
+		violations = append(violations, newViolation(entry.field, entry.in, entry.code, violationDetailForCode(entry.code)))
 	}
 	return violations
 }
@@ -277,10 +227,6 @@ func validationCode(tag string) string {
 	default:
 		return ViolationCodeInvalid
 	}
-}
-
-func validationDetail(code string) string {
-	return violationDetailForCode(code)
 }
 
 func validationInput(source sourceKind, target any, err validator.FieldError) string {
@@ -432,14 +378,6 @@ var (
 		"header": ViolationInHeader,
 	}
 )
-
-func violationsToAny(violations []Violation) []any {
-	items := make([]any, 0, len(violations))
-	for _, violation := range violations {
-		items = append(items, violation)
-	}
-	return items
-}
 
 func errorsf(format string, args ...any) error {
 	return fmt.Errorf("reqx: "+format, args...)

@@ -162,7 +162,7 @@ func TestBind_PathTypeMismatchDoesNotPartiallyApply(t *testing.T) {
 
 	err := Bind(req, &dst)
 	violation := assertSingleViolation(t, err)
-	if violation.Field != "id" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
+	if violation.Field != "id" || violation.Code != ViolationCodeType || violation.Detail != "must be number" {
 		t.Fatalf("violation = %#v", violation)
 	}
 	if dst.ID != 42 || dst.Page != 3 || dst.Name != "kanata" {

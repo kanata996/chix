@@ -16,6 +16,13 @@
 
 ## [Unreleased]
 
+### Removed
+
+- 根包 `chix` 不再重导出 `reqx.Violation`、`resp.HTTPError`、`resp.ErrorWriteDegraded`；需要这些底层类型时请直接导入 `reqx` 或 `resp`。
+- `reqx` 收回了手写校验/错误构造辅助的导出面；公开入口聚焦在 `Bind*`、`BindAndValidate*`、`Param*`、`Normalizer`、`Violation` 与绑定 option。
+- `reqx.Violation` 不再保留 `Message` 兼容字段，字段级公开错误统一使用 `detail` / `Detail`。
+- `resp.HTTPError` 不再保留 `Message()`、`Details()` 兼容别名；统一使用 `Detail()`、`Errors()`。
+
 ### Changed
 
 - 公开错误响应从包裹式 `{"error": {...}}` 调整为顶层 problem 风格对象；当前顶层字段固定为 `title`、`status`、`detail`、`code`，并在存在结构化字段错误时附带 `errors`。
@@ -27,4 +34,4 @@
 
 ### Docs
 
-- 更新 [README.md](./README.md)，补充当前错误响应契约、字段语义和示例。
+- 更新 [README.md](./README.md) 和包注释，补充当前错误响应契约、字段语义和示例，并收窄根包与 `reqx` / `resp` 的职责描述。

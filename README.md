@@ -15,9 +15,9 @@
 
 当前仓库对外主要暴露三个包：
 
-- `github.com/kanata996/chix`：常用能力的根包 facade
-- `github.com/kanata996/chix/reqx`：请求侧绑定与校验辅助
-- `github.com/kanata996/chix/resp`：响应侧 JSON 与错误写回辅助
+- `github.com/kanata996/chix`：面向大多数 handler 的根包入口
+- `github.com/kanata996/chix/reqx`：请求侧绑定、校验与 path 参数辅助
+- `github.com/kanata996/chix/resp`：响应写回、错误类型与快捷错误构造
 
 ## 状态
 
@@ -324,8 +324,8 @@ func main() {
 
 ## 包结构
 
-- `chix`：面向大多数 handler 的常用 facade
-- `reqx`：完整的请求侧 API
-- `resp`：完整的响应侧 API
+- `chix`：面向大多数 handler 的常用入口
+- `reqx`：请求侧绑定、校验与 path 参数辅助
+- `resp`：响应写回、错误类型与快捷错误构造
 
-如果你只需要常用能力，优先使用根包；如果你需要完整能力面，再直接导入 `reqx` 或 `resp`。
+如果你只需要常用 handler 接线，优先使用根包；如果你需要请求侧或响应侧的包级 API，再直接导入 `reqx` 或 `resp`。

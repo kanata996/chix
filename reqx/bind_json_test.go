@@ -166,7 +166,7 @@ func TestBindBody_RejectsTypeMismatch(t *testing.T) {
 	var dst request
 	err := BindBody(req, &dst)
 	violation := assertSingleViolation(t, err)
-	if violation.Field != "age" || violation.Code != ViolationCodeType || violation.Message != "must be number" {
+	if violation.Field != "age" || violation.Code != ViolationCodeType || violation.Detail != "must be number" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -313,7 +313,7 @@ func TestBindAndValidateBody_UsesJSONTagNameInValidationError(t *testing.T) {
 	}
 	err := BindAndValidateBody(req, &dst)
 	violation := assertSingleViolation(t, err)
-	if violation.Field != "display_name" || violation.Code != ViolationCodeInvalid || violation.Message != "is invalid" {
+	if violation.Field != "display_name" || violation.Code != ViolationCodeInvalid || violation.Detail != "is invalid" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }

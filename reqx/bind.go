@@ -16,7 +16,8 @@ func Bind[T any](r *http.Request, dst *T, opts ...BindOption) error {
 		if err := bindTaggedValuesInPlace(r, bound, pathSource, bindValuesConfig{allowUnknownFields: true}); err != nil {
 			return err
 		}
-		if shouldBindQueryParams(r.Method) {
+		switch strings.ToUpper(strings.TrimSpace(r.Method)) {
+		case http.MethodGet, http.MethodDelete:
 			if err := bindTaggedValuesInPlace(r, bound, querySource, cfg.query); err != nil {
 				return err
 			}
@@ -30,15 +31,6 @@ func Bind[T any](r *http.Request, dst *T, opts ...BindOption) error {
 			validateContentTypeOnEmpty: false,
 		})
 	})
-}
-
-func shouldBindQueryParams(method string) bool {
-	switch strings.ToUpper(strings.TrimSpace(method)) {
-	case http.MethodGet, http.MethodDelete:
-		return true
-	default:
-		return false
-	}
 }
 
 func bindIntoClone[T any](dst *T, fn func(*T) error) error {

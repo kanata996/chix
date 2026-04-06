@@ -18,15 +18,6 @@ var (
 	queryDecodePlanCache  sync.Map
 	pathDecodePlanCache   sync.Map
 	headerDecodePlanCache sync.Map
-	valueSourceReaders    = map[string]func(*http.Request) url.Values{
-		querySource.tag:  queryValues,
-		headerSource.tag: headerValues,
-	}
-	valueSourceInputs = map[string]string{
-		querySource.tag:  ViolationInQuery,
-		pathSource.tag:   ViolationInPath,
-		headerSource.tag: ViolationInHeader,
-	}
 )
 
 type valueSource struct {
@@ -39,16 +30,14 @@ type valueSource struct {
 
 var (
 	querySource = valueSource{
-		name:         "query",
-		tag:          "query",
-		cache:        &queryDecodePlanCache,
-		normalizeKey: normalizeIdentity,
+		name:  "query",
+		tag:   "query",
+		cache: &queryDecodePlanCache,
 	}
 	pathSource = valueSource{
 		name:                  "path",
 		tag:                   "param",
 		cache:                 &pathDecodePlanCache,
-		normalizeKey:          normalizeIdentity,
 		allowUnknownByDefault: true,
 	}
 	headerSource = valueSource{
@@ -170,7 +159,10 @@ func valueFieldName(field reflect.StructField, source valueSource) (string, bool
 	if name == "" || name == "-" {
 		return "", false
 	}
-	return source.normalizeKey(name), true
+	if source.normalizeKey != nil {
+		name = source.normalizeKey(name)
+	}
+	return name, true
 }
 
 func validateValueFieldType(t reflect.Type, fieldName, sourceName string) error {
@@ -234,29 +226,34 @@ func decodeValuesInto(dst reflect.Value, values url.Values, plan *valueDecodePla
 }
 
 func sourceValues(r *http.Request, source valueSource, plan *valueDecodePlan) url.Values {
-	if source.tag == pathSource.tag {
+	switch source.tag {
+	case pathSource.tag:
 		return pathValuesForPlan(r, plan)
+	case querySource.tag:
+		if r == nil || r.URL == nil {
+			return url.Values{}
+		}
+		return r.URL.Query()
+	case headerSource.tag:
+		return headerValues(r)
+	default:
+		panic(fmt.Sprintf("reqx: unsupported value source %q", source.tag))
 	}
-
-	if readValues, ok := valueSourceReaders[source.tag]; ok {
-		return readValues(r)
-	}
-	panic(fmt.Sprintf("reqx: unsupported value source %q", source.tag))
-}
-
-func queryValues(r *http.Request) url.Values {
-	values := url.Values{}
-	if r.URL != nil {
-		values = r.URL.Query()
-	}
-	return values
 }
 
 func headerValues(r *http.Request) url.Values {
 	if r == nil || len(r.Header) == 0 {
 		return url.Values{}
 	}
-	if headerKeysAreCanonical(r.Header) {
+
+	canonical := true
+	for key := range r.Header {
+		if key != textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(key)) {
+			canonical = false
+			break
+		}
+	}
+	if canonical {
 		return url.Values(r.Header)
 	}
 
@@ -270,19 +267,6 @@ func headerValues(r *http.Request) url.Values {
 		values[normalizedKey] = append(values[normalizedKey], rawValues...)
 	}
 	return values
-}
-
-func headerKeysAreCanonical(header http.Header) bool {
-	for key := range header {
-		if key != textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(key)) {
-			return false
-		}
-	}
-	return true
-}
-
-func normalizeIdentity(value string) string {
-	return value
 }
 
 func decodeQueryField(dst reflect.Value, values []string, fieldName string, inputs ...string) (*Violation, error) {
@@ -396,10 +380,7 @@ func invalidValueType(fieldName, input string, t reflect.Type) *Violation {
 }
 
 func violationInForValueSource(source valueSource) string {
-	if input, ok := valueSourceInputs[source.tag]; ok {
-		return input
-	}
-	return ViolationInRequest
+	return violationInForTag(source.tag)
 }
 
 func firstViolationInput(inputs ...string) string {
