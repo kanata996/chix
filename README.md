@@ -46,6 +46,8 @@ go get github.com/kanata996/chix@latest
 - `chix.Created(...)` 负责成功 JSON 响应
 - `chix.WriteError(...)` 负责统一错误响应
 
+这段代码只展示最小 handler 接线；生产场景下的日志、中间件、`http.Server` timeout 和优雅停机，见 [`_example`](./_example)。
+
 ```go
 package main
 
@@ -282,6 +284,8 @@ access log 都带上 `traceId` / `request.id` 的场景。
 当错误响应自身写出失败时，还会再输出一条：
 
 - `resp: failed to write error response`
+
+下面这段代码只展示日志接线；更完整的 `http.Server` timeout 与优雅停机写法见 [`_example`](./_example)。
 
 示例：
 

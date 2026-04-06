@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -167,12 +170,34 @@ func main() {
 		Addr:              ":8080",
 		Handler:           newRouter(logger, newAccountStore()),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
+
+	shutdownSignalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
 
 	logger.Info("server starting", slog.String("addr", server.Addr))
 
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logger.Error("server exited", slog.Any("error", err))
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("server exited", slog.Any("error", err))
+			os.Exit(1)
+		}
+	}()
+
+	<-shutdownSignalCtx.Done()
+
+	logger.Info("server shutting down")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Error("server shutdown failed", slog.Any("error", err))
 		os.Exit(1)
 	}
+
+	logger.Info("server stopped")
 }

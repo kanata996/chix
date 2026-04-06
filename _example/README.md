@@ -10,11 +10,12 @@
 - 默认不挂 `middleware.RequestLogAttrs()`
 - 如果你希望所有 access log 都带上 `traceId`、`request.id`，可以再额外挂这个辅助中间件
 
-同时演示三种常见写法：
+同时演示几类常见写法：
 
 - `chix.BindAndValidate(...)` 处理 path + JSON body 输入边界
-- `chix.WriteError(...)` 写统一错误响应
-- `resp.WriteError(...)` 在 5xx 时补 request log 诊断字段，并通过 `slog.Default()` 输出独立错误日志
+- `chix.WriteError(...)` 写统一错误响应；其底层 `resp.WriteError(...)` 保留 5xx 时的 request log 注解和独立 error log 行为
+- `http.Server` 的常见 timeout 配置
+- 基于 `SIGINT` / `SIGTERM` 的优雅停机
 
 ## 运行
 
