@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -41,13 +42,13 @@ type accountStore struct {
 	mu        sync.RWMutex
 	nextID    int
 	accounts  map[string]account
-	nameIndex map[string]string
+	nameIndex map[string]map[string]string
 }
 
 func newAccountStore() *accountStore {
 	return &accountStore{
 		accounts:  make(map[string]account),
-		nameIndex: make(map[string]string),
+		nameIndex: make(map[string]map[string]string),
 	}
 }
 
@@ -55,14 +56,19 @@ func (s *accountStore) Create(orgID, name string) (account, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	indexKey := orgID + ":" + strings.ToLower(name)
-	if existingID, exists := s.nameIndex[indexKey]; exists {
+	namesByOrg := s.nameIndex[orgID]
+	if namesByOrg == nil {
+		namesByOrg = make(map[string]string)
+		s.nameIndex[orgID] = namesByOrg
+	}
+
+	normalizedName := strings.ToLower(name)
+	if _, exists := namesByOrg[normalizedName]; exists {
 		return account{}, resp.Conflict("account_name_conflict", fmt.Sprintf("account %q already exists in org %q", name, orgID), map[string]any{
 			"field":  "name",
 			"in":     "body",
 			"code":   "already_exists",
 			"detail": fmt.Sprintf("account %q already exists", name),
-			"id":     existingID,
 		})
 	}
 
@@ -74,7 +80,7 @@ func (s *accountStore) Create(orgID, name string) (account, error) {
 		CreatedAt: time.Now().UTC(),
 	}
 	s.accounts[acct.ID] = acct
-	s.nameIndex[indexKey] = acct.ID
+	namesByOrg[normalizedName] = acct.ID
 
 	return acct, nil
 }
@@ -91,7 +97,7 @@ func (s *accountStore) Get(orgID, accountID string) (account, bool) {
 	return acct, true
 }
 
-func newRouter(logger *slog.Logger, store *accountStore) http.Handler {
+func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) http.Handler {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
 	r.Use(traceid.Middleware)
@@ -103,9 +109,15 @@ func newRouter(logger *slog.Logger, store *accountStore) http.Handler {
 		LogResponseHeaders: []string{"Content-Type"},
 	}))
 
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+	healthzHandler := func(w http.ResponseWriter, r *http.Request) {
+		if draining != nil && draining.Load() {
+			_ = chix.WriteError(w, r, resp.NewError(http.StatusServiceUnavailable, "", "server is shutting down"))
+			return
+		}
 		_ = chix.NoContent(w, r)
-	})
+	}
+
+	r.Get("/healthz", healthzHandler)
 
 	r.Post("/orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
 		var req createAccountRequest
@@ -165,10 +177,12 @@ func newLogger() *slog.Logger {
 func main() {
 	logger := newLogger()
 	slog.SetDefault(logger)
+	var draining atomic.Bool
 
 	server := &http.Server{
 		Addr:              ":8080",
-		Handler:           newRouter(logger, newAccountStore()),
+		Handler:           newRouter(logger, newAccountStore(), &draining),
+		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -178,18 +192,29 @@ func main() {
 	shutdownSignalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopSignals()
 
+	serverErrors := make(chan error, 1)
+
 	logger.Info("server starting", slog.String("addr", server.Addr))
 
 	go func() {
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		serverErrors <- server.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serverErrors:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server exited", slog.Any("error", err))
 			os.Exit(1)
 		}
-	}()
 
-	<-shutdownSignalCtx.Done()
+		logger.Info("server stopped")
+		return
+	case <-shutdownSignalCtx.Done():
+	}
 
 	logger.Info("server shutting down")
+	stopSignals()
+	draining.Store(true)
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
