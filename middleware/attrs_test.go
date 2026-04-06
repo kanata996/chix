@@ -54,6 +54,45 @@ func TestRequestLogAttrs_EnrichesAccessLog(t *testing.T) {
 	}
 }
 
+func TestRequestLogAttrs_EnrichesRecoveredPanicAccessLog(t *testing.T) {
+	var buf bytes.Buffer
+
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	r := chi.NewRouter()
+	r.Use(chimw.RequestID)
+	r.Use(traceid.Middleware)
+	r.Use(httplog.RequestLogger(logger, &httplog.Options{
+		Level:         slog.LevelInfo,
+		Schema:        httplog.SchemaECS,
+		RecoverPanics: true,
+	}))
+	r.Use(RequestLogAttrs())
+	r.Get("/panic", func(http.ResponseWriter, *http.Request) {
+		panic("boom")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
+	req.Header.Set(chimw.RequestIDHeader, "req-panic")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+
+	var entry map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &entry); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got := entry["request.id"]; got != "req-panic" {
+		t.Fatalf("request.id = %#v, want req-panic", got)
+	}
+	if got, ok := entry["traceId"].(string); !ok || got == "" {
+		t.Fatalf("traceId = %#v, want non-empty string", entry["traceId"])
+	}
+}
+
 func TestRequestContextAttrs(t *testing.T) {
 	if got := requestContextAttrs(nilContext()); got != nil {
 		t.Fatalf("requestContextAttrs(nil) = %#v, want nil", got)
