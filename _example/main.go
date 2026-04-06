@@ -38,17 +38,22 @@ type account struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type accountNameKey struct {
+	OrgID string
+	Name  string
+}
+
 type accountStore struct {
 	mu        sync.RWMutex
 	nextID    int
 	accounts  map[string]account
-	nameIndex map[string]map[string]string
+	nameIndex map[accountNameKey]string
 }
 
 func newAccountStore() *accountStore {
 	return &accountStore{
 		accounts:  make(map[string]account),
-		nameIndex: make(map[string]map[string]string),
+		nameIndex: make(map[accountNameKey]string),
 	}
 }
 
@@ -56,14 +61,11 @@ func (s *accountStore) Create(orgID, name string) (account, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	namesByOrg := s.nameIndex[orgID]
-	if namesByOrg == nil {
-		namesByOrg = make(map[string]string)
-		s.nameIndex[orgID] = namesByOrg
+	nameKey := accountNameKey{
+		OrgID: orgID,
+		Name:  strings.ToLower(name),
 	}
-
-	normalizedName := strings.ToLower(name)
-	if _, exists := namesByOrg[normalizedName]; exists {
+	if _, exists := s.nameIndex[nameKey]; exists {
 		return account{}, resp.Conflict("account_name_conflict", fmt.Sprintf("account %q already exists in org %q", name, orgID), map[string]any{
 			"field":  "name",
 			"in":     "body",
@@ -80,7 +82,7 @@ func (s *accountStore) Create(orgID, name string) (account, error) {
 		CreatedAt: time.Now().UTC(),
 	}
 	s.accounts[acct.ID] = acct
-	namesByOrg[normalizedName] = acct.ID
+	s.nameIndex[nameKey] = acct.ID
 
 	return acct, nil
 }
@@ -109,19 +111,17 @@ func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) 
 		LogResponseHeaders: []string{"Content-Type"},
 	}))
 
-	healthzHandler := func(w http.ResponseWriter, r *http.Request) {
+	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if draining != nil && draining.Load() {
 			_ = chix.WriteError(w, r, resp.NewError(http.StatusServiceUnavailable, "", "server is shutting down"))
 			return
 		}
 		_ = chix.NoContent(w, r)
-	}
-
-	r.Get("/healthz", healthzHandler)
+	})
 
 	r.Post("/orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
 		var req createAccountRequest
-		if err := chix.BindAndValidate(r, &req, chix.WithMaxBodyBytes(1<<20)); err != nil {
+		if err := chix.BindAndValidate(r, &req); err != nil {
 			_ = chix.WriteError(w, r, err)
 			return
 		}
