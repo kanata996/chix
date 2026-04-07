@@ -31,7 +31,6 @@ func TestRequestLogAttrs_EnrichesAccessLog(t *testing.T) {
 	r.Get("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-
 	req := httptest.NewRequest(http.MethodGet, "/users/u_123", nil)
 	req.Header.Set(chimw.RequestIDHeader, "req-123")
 	rr := httptest.NewRecorder()
@@ -70,7 +69,6 @@ func TestRequestLogAttrs_EnrichesRecoveredPanicAccessLog(t *testing.T) {
 	r.Get("/panic", func(http.ResponseWriter, *http.Request) {
 		panic("boom")
 	})
-
 	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
 	req.Header.Set(chimw.RequestIDHeader, "req-panic")
 	rr := httptest.NewRecorder()

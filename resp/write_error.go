@@ -23,6 +23,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/kanata996/chix/errx"
 )
 
 // problemPayload 是最终写入响应体的公共错误字段。
@@ -112,24 +114,24 @@ func responseAlreadyStarted(w http.ResponseWriter) bool {
 //   - 已经是 HTTPError，直接返回；
 //   - context.Canceled / context.DeadlineExceeded 走固定 HTTP 语义；
 //   - 其余错误统一视为内部错误。
-func asHTTPError(err error) *HTTPError {
+func asHTTPError(err error) *errx.HTTPError {
 	if err == nil {
 		return nil
 	}
 
-	var httpErr *HTTPError
+	var httpErr *errx.HTTPError
 	if errors.As(err, &httpErr) && httpErr != nil {
 		return httpErr
 	}
 
 	switch {
 	case errors.Is(err, context.Canceled):
-		return wrapError(499, "client_closed_request", "Client Closed Request", err)
+		return errx.NewHTTPErrorWithCause(499, "client_closed_request", "Client Closed Request", err)
 	case errors.Is(err, context.DeadlineExceeded):
-		return wrapError(http.StatusGatewayTimeout, "timeout", "", err)
+		return errx.NewHTTPErrorWithCause(http.StatusGatewayTimeout, "timeout", "", err)
 	}
 
-	return wrapError(http.StatusInternalServerError, "", "", err)
+	return errx.NewHTTPErrorWithCause(http.StatusInternalServerError, "", "", err)
 }
 
 // Error 返回降级错误的文本描述，便于上层记录或断言。
@@ -150,7 +152,7 @@ func (e *ErrorWriteDegraded) Unwrap() error {
 
 // writeHTTPError 负责把已经收敛好的 HTTPError 写回到响应。
 // 这里不再做错误语义推断，只处理 HEAD 与普通请求的写回分支。
-func writeHTTPError(w http.ResponseWriter, r *http.Request, httpErr *HTTPError) error {
+func writeHTTPError(w http.ResponseWriter, r *http.Request, httpErr *errx.HTTPError) error {
 	if httpErr == nil {
 		return nil
 	}
@@ -167,7 +169,7 @@ func writeHTTPError(w http.ResponseWriter, r *http.Request, httpErr *HTTPError) 
 // writeErrorPayload 负责真正把错误对象编码并写到响应里。
 // 如果 errors 序列化失败，会降级为只保留 title/status/detail/code 的响应，
 // 尽量避免整次错误响应完全失败。
-func writeErrorPayload(w http.ResponseWriter, httpErr *HTTPError) error {
+func writeErrorPayload(w http.ResponseWriter, httpErr *errx.HTTPError) error {
 	body, err := marshalProblemPayload(httpErr)
 	if err != nil {
 		fallbackBody, _ := json.Marshal(problemPayloadFromHTTPError(httpErr, false))
@@ -185,7 +187,7 @@ func writeErrorPayload(w http.ResponseWriter, httpErr *HTTPError) error {
 
 // marshalProblemPayload 把公共错误字段编码为最终的 JSON 响应体。
 // 该步骤只关心响应体结构，不处理日志、副作用或写出行为。
-func marshalProblemPayload(httpErr *HTTPError) (body []byte, err error) {
+func marshalProblemPayload(httpErr *errx.HTTPError) (body []byte, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			body = nil
@@ -200,7 +202,7 @@ func marshalProblemPayload(httpErr *HTTPError) (body []byte, err error) {
 	return json.Marshal(problemPayloadFromHTTPError(httpErr, true))
 }
 
-func problemPayloadFromHTTPError(httpErr *HTTPError, includeErrors bool) problemPayload {
+func problemPayloadFromHTTPError(httpErr *errx.HTTPError, includeErrors bool) problemPayload {
 	if httpErr == nil {
 		return problemPayload{}
 	}
@@ -211,8 +213,8 @@ func problemPayloadFromHTTPError(httpErr *HTTPError, includeErrors bool) problem
 		Detail: httpErr.Detail(),
 		Code:   httpErr.Code(),
 	}
-	if includeErrors && len(httpErr.errors) > 0 {
-		payload.Errors = httpErr.errors
+	if includeErrors {
+		payload.Errors = httpErr.Errors()
 	}
 
 	return payload

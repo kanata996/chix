@@ -15,6 +15,7 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
+	"github.com/kanata996/chix/errx"
 )
 
 // 测试清单：
@@ -93,7 +94,7 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, req, NewError(
+	err := WriteError(rr, req, errx.NewHTTPError(
 		http.StatusUnprocessableEntity,
 		"",
 		"",
@@ -138,7 +139,7 @@ func TestWriteErrorPreservesExplicitPublicFields(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/users", nil)
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, req, NewError(
+	err := WriteError(rr, req, errx.NewHTTPError(
 		http.StatusBadRequest,
 		"invalid_json",
 		"payload invalid",
@@ -238,7 +239,7 @@ func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodHead, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, req, NewError(http.StatusBadRequest, "", "", "detail"))
+	err := WriteError(rr, req, errx.NewHTTPError(http.StatusBadRequest, "", "", "detail"))
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
@@ -258,7 +259,7 @@ func TestWriteErrorNormalizesInvalidStatusAndHidesCause(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, req, wrapError(99, "", "", errors.New("db timeout")))
+	err := WriteError(rr, req, errx.NewHTTPErrorWithCause(99, "", "", errors.New("db timeout")))
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
@@ -360,7 +361,7 @@ func TestWriteErrorDropsUnencodableDetails(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, req, NewError(
+	err := WriteError(rr, req, errx.NewHTTPError(
 		http.StatusBadRequest,
 		"bad_request",
 		"bad request",
@@ -398,7 +399,7 @@ func TestWriteErrorDropsPanickingDetails(t *testing.T) {
 		}
 	}()
 
-	err := WriteError(rr, req, NewError(
+	err := WriteError(rr, req, errx.NewHTTPError(
 		http.StatusBadRequest,
 		"bad_request",
 		"bad request",
@@ -480,7 +481,7 @@ func TestAsHTTPError(t *testing.T) {
 		t.Fatalf("asHTTPError(nil) = %#v, want nil", got)
 	}
 
-	httpErr := NewError(http.StatusBadRequest, "bad_request", "bad request")
+	httpErr := errx.NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")
 	if got := asHTTPError(httpErr); got != httpErr {
 		t.Fatalf("asHTTPError(httpErr) = %#v, want same pointer", got)
 	}
@@ -529,7 +530,7 @@ func TestWriteHTTPErrorNilHTTPErrorIsNoop(t *testing.T) {
 }
 
 func TestProblemPayloadFromHTTPErrorIncludeErrorsToggle(t *testing.T) {
-	httpErr := NewError(http.StatusBadRequest, "bad_request", "bad request", map[string]any{"field": "name"})
+	httpErr := errx.NewHTTPError(http.StatusBadRequest, "bad_request", "bad request", map[string]any{"field": "name"})
 
 	withErrors := problemPayloadFromHTTPError(httpErr, true)
 	if len(withErrors.Errors) != 1 {
@@ -549,7 +550,7 @@ func TestProblemPayloadFromHTTPErrorIncludeErrorsToggle(t *testing.T) {
 func TestWriteErrorPayloadReturnsJoinedErrorWhenFallbackWriteFails(t *testing.T) {
 	w := &failingWriter{}
 
-	err := writeErrorPayload(w, NewError(http.StatusBadRequest, "bad_request", "bad request", func() {}))
+	err := writeErrorPayload(w, errx.NewHTTPError(http.StatusBadRequest, "bad_request", "bad request", func() {}))
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -651,7 +652,7 @@ func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 	}))
 	r.Get("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
 		rawErr := &rawTestError{message: "db timeout"}
-		err := wrapError(
+		err := errx.NewHTTPErrorWithCause(
 			http.StatusInternalServerError,
 			"internal_error",
 			"",
@@ -660,7 +661,6 @@ func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 		)
 		_ = WriteError(w, r, err)
 	})
-
 	req := httptest.NewRequest(http.MethodGet, "/users/u_123", nil)
 	req.Header.Set(chimiddleware.RequestIDHeader, "req-123")
 	rr := httptest.NewRecorder()
@@ -727,14 +727,13 @@ func TestWriteErrorEnrichesRequestLogFromWrappedHTTPErrorWithoutCause(t *testing
 		RecoverPanics: true,
 	}))
 	r.Get("/wrapped", func(w http.ResponseWriter, r *http.Request) {
-		err := fmt.Errorf("handler failed: %w", NewError(
+		err := fmt.Errorf("handler failed: %w", errx.NewHTTPError(
 			http.StatusInternalServerError,
 			"internal_error",
 			"",
 		))
 		_ = WriteError(w, r, err)
 	})
-
 	req := httptest.NewRequest(http.MethodGet, "/wrapped", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -768,7 +767,7 @@ func TestWriteErrorEnrichesRequestLogWithTimeoutFlag(t *testing.T) {
 		RecoverPanics: true,
 	}))
 	r.Get("/timeout", func(w http.ResponseWriter, r *http.Request) {
-		err := wrapError(
+		err := errx.NewHTTPErrorWithCause(
 			http.StatusInternalServerError,
 			"internal_error",
 			"",
@@ -776,7 +775,6 @@ func TestWriteErrorEnrichesRequestLogWithTimeoutFlag(t *testing.T) {
 		)
 		_ = WriteError(w, r, err)
 	})
-
 	req := httptest.NewRequest(http.MethodGet, "/timeout", nil)
 	req.Header.Set(chimiddleware.RequestIDHeader, "req-timeout")
 	rr := httptest.NewRecorder()
@@ -815,7 +813,7 @@ func TestWriteErrorEnrichesRequestLogWithCanceledFlag(t *testing.T) {
 		RecoverPanics: true,
 	}))
 	r.Get("/canceled", func(w http.ResponseWriter, r *http.Request) {
-		err := wrapError(
+		err := errx.NewHTTPErrorWithCause(
 			http.StatusInternalServerError,
 			"internal_error",
 			"",
@@ -823,7 +821,6 @@ func TestWriteErrorEnrichesRequestLogWithCanceledFlag(t *testing.T) {
 		)
 		_ = WriteError(w, r, err)
 	})
-
 	req := httptest.NewRequest(http.MethodGet, "/canceled", nil)
 	req.Header.Set(chimiddleware.RequestIDHeader, "req-canceled")
 	rr := httptest.NewRecorder()
@@ -865,13 +862,12 @@ func TestWriteErrorDoesNotEnrichRequestLogFor4xx(t *testing.T) {
 	}))
 	r.Use(chimiddleware.RequestID)
 	r.Get("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
-		err := BadRequest("bad_request", "bad request", map[string]any{
+		err := errx.BadRequest("bad_request", "bad request", map[string]any{
 			"field": "name",
 			"code":  "required",
 		})
 		_ = WriteError(w, r, err)
 	})
-
 	req := httptest.NewRequest(http.MethodGet, "/users/u_123", nil)
 	req.Header.Set(chimiddleware.RequestIDHeader, "req-456")
 	rr := httptest.NewRecorder()
@@ -901,7 +897,7 @@ func TestWriteErrorDoesNotBuildDiagnosticAttrsFor4xx(t *testing.T) {
 	rr := httptest.NewRecorder()
 
 	calls := 0
-	err := WriteError(rr, req, wrapError(
+	err := WriteError(rr, req, errx.NewHTTPErrorWithCause(
 		http.StatusBadRequest,
 		"bad_request",
 		"bad request",
@@ -939,7 +935,6 @@ func TestWriteErrorLogsServerErrorToDefaultLogger(t *testing.T) {
 	r.Get("/failure", func(w http.ResponseWriter, r *http.Request) {
 		_ = WriteError(w, r, errors.New("db timeout"))
 	})
-
 	req := httptest.NewRequest(http.MethodGet, "/failure", nil)
 	req.Header.Set(chimiddleware.RequestIDHeader, "req-server")
 	rr := httptest.NewRecorder()
@@ -985,9 +980,6 @@ func TestWriteErrorLogsServerErrorToDefaultLogger(t *testing.T) {
 	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
 		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
 	}
-	if got := logEntry["http.route"]; got != "/failure" {
-		t.Fatalf("http.route = %#v, want /failure", got)
-	}
 	if got := logEntry["http.response.status_code"]; got != float64(http.StatusInternalServerError) {
 		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusInternalServerError)
 	}
@@ -1001,7 +993,7 @@ func TestWriteErrorWithNilRequestLogsWriteFailureToDefaultLogger(t *testing.T) {
 	defer slog.SetDefault(previousDefault)
 
 	w := &failingWriter{}
-	err := WriteError(w, nil, NewError(http.StatusInternalServerError, "internal_error", "Internal Server Error"))
+	err := WriteError(w, nil, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"))
 	if err == nil {
 		t.Fatal("expected write error, got nil")
 	}
@@ -1037,7 +1029,7 @@ func TestLogErrorResponseWriteFailureFallsBackToDefaultLogger(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/failure", nil)
 	logErrorResponseWriteFailure(
 		req,
-		NewError(http.StatusInternalServerError, "internal_error", "Internal Server Error"),
+		errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"),
 		errors.New("socket closed"),
 	)
 

@@ -4,26 +4,28 @@
 [![CI](https://github.com/kanata996/chix/workflows/CI/badge.svg)](https://github.com/kanata996/chix/actions/workflows/ci.yml)
 [![Codecov](https://codecov.io/github/kanata996/chix/graph/badge.svg)](https://codecov.io/github/kanata996/chix)
 
-`chix` 是一个基于 `chi` 和 `net/http` 的轻量级 JSON API HTTP 边界工具包。
+`chix` 是一个面向 `chi` 的轻量级 JSON API HTTP 边界工具包。
 
-它聚焦在服务的请求与响应边界：
+它主要解决四件事：
 
 - 将 path/query/header/JSON body 绑定到 DTO
-- 使用 `validator/v10` 对 DTO 进行校验
+- 使用 `validator/v10` 校验 DTO
 - 写出 JSON 成功响应
-- 写出一致的结构化错误响应
+- 写出统一的结构化错误响应
 
-当前仓库对外主要暴露三个包：
+当前仓库对外主要暴露五个包：
 
-- `github.com/kanata996/chix`：面向大多数 handler 的根包入口
+- `github.com/kanata996/chix`：大多数 handler 直接使用的根包入口
 - `github.com/kanata996/chix/reqx`：请求侧绑定、校验与 path 参数辅助
-- `github.com/kanata996/chix/resp`：响应写回、错误类型与快捷错误构造
+- `github.com/kanata996/chix/resp`：响应写回与错误响应输出
+- `github.com/kanata996/chix/errx`：共享公共 HTTP 错误模型
+- `github.com/kanata996/chix/middleware`：可选的 request log 辅助中间件
 
 ## 状态
 
-`chix` 当前仍处于 `v1.0.0` 之前阶段。库已经可用，但在 `v1.0.0` 之前，小版本发布中仍可能出现破坏性变更。
+`chix` 仍处于 `v1.0.0` 之前阶段。在 `v1.0.0` 之前，小版本发布中仍可能出现破坏性变更。
 
-公开 API 以及 README 中描述的 HTTP 行为变更，应在 [CHANGELOG.md](./CHANGELOG.md) 中明确记录。
+公开 API 和对外 HTTP 行为变更会记录在 [CHANGELOG.md](./CHANGELOG.md)。
 
 ## 安装
 
@@ -37,16 +39,7 @@ go get github.com/kanata996/chix@latest
 
 ## 快速开始
 
-如果你想直接看一份可运行的 `chi + chix` 推荐接入示例，见 [`_example`](./_example)。
-
-下面的示例展示了 `chix` 最常见的 handler 形态：
-
-- `chi` 负责路由
-- `chix.BindAndValidate(...)` 负责请求输入边界
-- `chix.Created(...)` 负责成功 JSON 响应
-- `chix.WriteError(...)` 负责统一错误响应
-
-这段代码只展示最小 handler 接线；生产场景下的日志、中间件、`http.Server` timeout 和优雅停机，见 [`_example`](./_example)。
+如果你想直接看一份可运行的 `chi + chix` 示例，见 [`_example`](./_example)。
 
 ```go
 package main
@@ -83,8 +76,6 @@ func main() {
 	_ = http.ListenAndServe(":8080", r)
 }
 ```
-
-启动服务后，可以直接验证成功和失败两条路径。
 
 成功请求：
 
@@ -126,56 +117,43 @@ Content-Type: application/problem+json
 
 支持的 tag：
 
-- `param:"..."`：匹配到的请求 path 命名 wildcard（通过 `http.Request.PathValue(...)` 读取；以 `http.Request.Pattern` 中的命名 wildcard 为准，例如 `/{id}`、`/{path...}`）
-- `query:"..."`：查询字符串参数
-- `json:"..."`：JSON 请求体
-- `header:"..."`：请求头
+- `param:"..."`：path 参数
+- `query:"..."`：query 参数
+- `json:"..."`：JSON body
+- `header:"..."`：header
 - `validate:"..."`：`validator/v10` 校验规则
 
-`Bind(...)` 遵循 Echo 风格的绑定顺序：
+根包常用请求 API：
 
-1. path 参数
-2. `GET` 和 `DELETE` 请求上的 query 参数
-3. JSON body
-
-这个顺序意味着：
-
-- 后绑定的数据会覆盖先绑定的数据，例如 body 会覆盖同名 path/query 字段
-- `POST`、`PUT`、`PATCH` 等请求不会在 `Bind(...)` 中自动绑定 query；如果你需要它们，显式调用 `BindQueryParams(...)` 或 `BindAndValidateQuery(...)`
-- 缺失的 path/query/header/body 不会把目标 DTO 清零，而是保留目标对象已有值
-- 任一绑定阶段失败时，不会对目标 DTO 部分落值，调用方拿到的仍是原对象
-
-path 绑定的兼容边界：
-
-- `reqx` 只依赖 `net/http` 暴露的 `PathValue` / `Pattern` 语义
-- `param:"..."` 只面向命名 wildcard；它不是 `chi.RouteContext` 的兼容层
-- `chi` 专有的 `*` catch-all 不属于 `reqx` 的公开 path 契约
-
-根包中常用的请求侧 API：
-
-- `Bind`、`BindBody`、`BindQueryParams`、`BindPathValues`、`BindHeaders`
-- `BindAndValidate`、`BindAndValidateBody`、`BindAndValidateQuery`、`BindAndValidatePath`、`BindAndValidateHeaders`
-- `ParamString`、`ParamInt`、`ParamUUID`
+- `Bind`
+- `BindBody`
+- `BindQueryParams`
+- `BindPathValues`
+- `BindHeaders`
+- `BindAndValidate`
+- `BindAndValidateBody`
+- `BindAndValidateQuery`
+- `BindAndValidatePath`
+- `BindAndValidateHeaders`
+- `ParamString`
+- `ParamInt`
+- `ParamUUID`
 - `WithMaxBodyBytes`
 
-默认请求行为：
+`Bind(...)` 的绑定顺序是：
 
-- 未知的 query 和 header 字段默认忽略
-- 未知 JSON 字段默认忽略
-- JSON body 使用 Go 标准库解码
-- 非空 body 需要 `application/json` 或 `application/*+json` 类型的 `Content-Type`
-- `Bind(...)` 在空 body 下会把 body 阶段视为 no-op，并忽略空 body 场景下的无效 `Content-Type`
-- `BindBody(...)` 和 `BindAndValidateBody(...)` 在空 body 下也会保留已有值；但如果请求显式声明了非 JSON `Content-Type`，仍会返回 `415 Unsupported Media Type`
-- 默认 body 读取上限为 `1 MiB`；可通过 `WithMaxBodyBytes(...)` 覆盖
+1. path
+2. query（仅 `GET` / `DELETE`）
+3. JSON body
 
-如果你只想绑定单一来源，优先使用源专用 API：
+如果你只处理单一输入来源，优先使用源专用 API：
 
 - 只处理 JSON body：`BindBody(...)`、`BindAndValidateBody(...)`
 - 只处理 query：`BindQueryParams(...)`、`BindAndValidateQuery(...)`
 - 只处理 path：`BindPathValues(...)`、`BindAndValidatePath(...)`
 - 只处理 header：`BindHeaders(...)`、`BindAndValidateHeaders(...)`
 
-`BindAndValidate*` 会在 `validator/v10` 校验前自动执行 DTO 的 `Normalize()`。如果你的 DTO 实现了根包导出的 `Normalizer` 接口，可以在其中做裁剪、大小写归一化或默认值补齐。
+如果 DTO 需要在校验前做裁剪、大小写归一化或默认值补齐，实现 `Normalize()` 即可：
 
 ```go
 type listAccountsRequest struct {
@@ -187,20 +165,29 @@ func (r *listAccountsRequest) Normalize() {
 }
 ```
 
-校验错误中的字段名会优先使用请求侧 tag 名，而不是 Go struct 字段名。例如 `json:"name"` 失败时，返回的错误项会是 `field: "name", in: "body"`。
+如果需要限制 body 大小，可以传入 `WithMaxBodyBytes(...)`：
+
+```go
+var req createAccountRequest
+if err := chix.BindAndValidate(r, &req, chix.WithMaxBodyBytes(1<<20)); err != nil {
+	_ = chix.WriteError(w, r, err)
+	return
+}
+```
 
 ## 响应
 
-成功响应辅助：
+根包常用响应 API：
 
 - `OK`
 - `Created`
 - `NoContent`
-- `JSON`、`JSONPretty`、`JSONBlob`
+- `JSON`
+- `JSONPretty`
+- `JSONBlob`
+- `WriteError`
 
-`JSON(...)`、`OK(...)` 和 `Created(...)` 会在请求 URL 带有 `?pretty` 时自动输出 pretty JSON。
-
-`WriteError(...)` 会将任意错误归一化为稳定的公开错误响应结构：
+`WriteError(...)` 会把错误写成统一的 problem 风格 JSON：
 
 ```json
 {
@@ -219,39 +206,29 @@ func (r *listAccountsRequest) Normalize() {
 }
 ```
 
-当前公开错误模型采用 problem 风格字段命名，但不返回 `type` 和 `instance`。字段约定如下：
+成功响应使用 `application/json`，错误响应使用 `application/problem+json`。
 
-- 成功 JSON 响应使用 `application/json`
-- 错误 JSON 响应使用 `application/problem+json`
-- 顶层固定字段为 `title`、`status`、`detail`、`code`
-- `title` 始终由 HTTP status text 生成，例如 `422 -> "Unprocessable Entity"`
-- `detail` 承载对外公开的人类可读说明
-- `code` 承载稳定的机器错误码，便于客户端分支处理
-- `errors` 仅在存在公开结构化错误详情时出现
-- 对于 `reqx` 生成的字段级错误，`errors[]` 子项固定为 `field`、`in`、`code`、`detail`
-- `in` 表示错误来源，当前可能为 `body`、`query`、`path`、`header`、`request`
+## 共享错误模型
 
-常见归一化规则：
+如果你需要在 handler、service、repository 之间共享公共 HTTP 错误，直接使用 `errx`：
 
-- `reqx` 产生的绑定/校验错误默认返回 `422 Unprocessable Entity`，错误码为 `invalid_request`
-- 非法 JSON 返回 `400 Bad Request`，错误码为 `invalid_json`
-- 非 JSON `Content-Type` 返回 `415 Unsupported Media Type`，错误码为 `unsupported_media_type`
-- 超过 body 上限返回 `413 Request Entity Too Large`，错误码为 `request_too_large`
-- `context.Canceled` 返回 `499 Client Closed Request`，错误码为 `client_closed_request`
-- `context.DeadlineExceeded` 返回 `504 Gateway Timeout`，错误码为 `timeout`
-- 未知错误默认返回 `500 Internal Server Error`，错误码为 `internal_error`
-- `HEAD` 错误响应只写状态码和 `application/problem+json`，不写响应体
-- `title` 始终由状态码生成，`detail` 承载公开说明，`code` 承载稳定机器码
-- `errors` 仅在存在公开结构化错误详情时出现；其中 `reqx` 生成的字段级错误项使用 `field`、`in`、`code`、`detail`
-
-如果你需要可复用的公共错误值，可以直接使用 `resp.HTTPError`，以及 `resp.BadRequest(...)`、`resp.NotFound(...)`、`resp.UnprocessableEntity(...)` 等辅助构造函数。
+- `errx.NewHTTPError(...)`
+- `errx.NewHTTPErrorWithCause(...)`
+- `errx.BadRequest(...)`
+- `errx.Unauthorized(...)`
+- `errx.Forbidden(...)`
+- `errx.NotFound(...)`
+- `errx.MethodNotAllowed(...)`
+- `errx.Conflict(...)`
+- `errx.UnprocessableEntity(...)`
+- `errx.TooManyRequests(...)`
 
 例如：
 
 ```go
 if err := repo.DeleteAccount(ctx, accountID); err != nil {
 	if errors.Is(err, sql.ErrNoRows) {
-		_ = chix.WriteError(w, r, resp.NotFound("account_not_found", "account not found"))
+		_ = chix.WriteError(w, r, errx.NotFound("account_not_found", "account not found"))
 		return
 	}
 
@@ -260,32 +237,16 @@ if err := repo.DeleteAccount(ctx, accountID); err != nil {
 }
 ```
 
-## 错误日志
+## 可选中间件
 
-`chix` 不再统一接管 access log。请求日志配置建议由每个服务直接使用
-`chi + httplog` 自己决定，例如：
+`middleware.RequestLogAttrs()` 用于把请求上下文中的关联字段补到当前 request log。
 
-- 是否挂 `RequestID` / `traceid.Middleware`
-- 是否记录 request / response headers
-- 是否额外挂 `middleware.RequestLogAttrs()` 给所有 access log 追加 `traceId` / `request.id`
-- 是否跳过 `/healthz` 等低价值路由
-- 成功请求是否还需要额外业务日志
+建议挂载顺序：
 
-`resp.WriteError(...)` 负责的是错误语义，而不是整套日志策略。
-
-当错误最终收敛为 `5xx` 时，`WriteError(...)` 会做两件事：
-
-- 如果当前请求经过了 `httplog.RequestLogger(...)`，通过 `httplog.SetAttrs(...)` 给 request log 补少量错误字段和关联字段：`error.code`、`error.timeout`、`error.canceled`，以及上下文里已有的 `traceId` / `request.id`
-- 通过 `slog.Default()` 输出一条独立的 error 日志，便于在 access log 之外排查问题
-
-默认示例不挂 `middleware.RequestLogAttrs()`；它是一个可选辅助中间件，适合你希望所有
-access log 都带上 `traceId` / `request.id` 的场景。
-
-当错误响应自身写出失败时，还会再输出一条：
-
-- `resp: failed to write error response`
-
-下面这段代码只展示日志接线；更完整的 `http.Server` timeout 与优雅停机写法见 [`_example`](./_example)。
+1. `chimw.RequestID`
+2. `traceid.Middleware`
+3. `httplog.RequestLogger(...)`
+4. `middleware.RequestLogAttrs()`
 
 示例：
 
@@ -301,11 +262,11 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
+	"github.com/kanata996/chix/middleware"
 )
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	slog.SetDefault(logger)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -315,17 +276,16 @@ func main() {
 		Schema:        httplog.SchemaECS,
 		RecoverPanics: true,
 	}))
+	r.Use(middleware.RequestLogAttrs())
 
 	_ = http.ListenAndServe(":8080", r)
 }
 ```
 
-完整的错误日志行为说明见 [docs/error-logging.md](./docs/error-logging.md)。
+## 什么时候用哪个包
 
-## 包结构
-
-- `chix`：面向大多数 handler 的常用入口
-- `reqx`：请求侧绑定、校验与 path 参数辅助
-- `resp`：响应写回、错误类型与快捷错误构造
-
-如果你只需要常用 handler 接线，优先使用根包；如果你需要请求侧或响应侧的包级 API，再直接导入 `reqx` 或 `resp`。
+- `chix`：大多数 handler 直接用这个
+- `reqx`：只想用请求绑定和校验
+- `resp`：只想用响应写回
+- `errx`：想显式构造和传递公共 HTTP 错误
+- `middleware`：想给 request log 增加关联字段

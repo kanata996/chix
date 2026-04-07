@@ -19,7 +19,7 @@ import (
 	"github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
 	"github.com/kanata996/chix"
-	"github.com/kanata996/chix/resp"
+	"github.com/kanata996/chix/errx"
 )
 
 type createAccountRequest struct {
@@ -66,7 +66,7 @@ func (s *accountStore) Create(orgID, name string) (account, error) {
 		Name:  strings.ToLower(name),
 	}
 	if _, exists := s.nameIndex[nameKey]; exists {
-		return account{}, resp.Conflict("account_name_conflict", fmt.Sprintf("account %q already exists in org %q", name, orgID), map[string]any{
+		return account{}, errx.Conflict("account_name_conflict", fmt.Sprintf("account %q already exists in org %q", name, orgID), map[string]any{
 			"field":  "name",
 			"in":     "body",
 			"code":   "already_exists",
@@ -113,7 +113,7 @@ func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) 
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if draining != nil && draining.Load() {
-			_ = chix.WriteError(w, r, resp.NewError(http.StatusServiceUnavailable, "", "server is shutting down"))
+			_ = chix.WriteError(w, r, errx.NewHTTPError(http.StatusServiceUnavailable, "", "server is shutting down"))
 			return
 		}
 		_ = chix.NoContent(w, r)
@@ -150,7 +150,7 @@ func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) 
 
 		acct, ok := store.Get(orgID, accountID)
 		if !ok {
-			_ = chix.WriteError(w, r, resp.NotFound("account_not_found", "account not found"))
+			_ = chix.WriteError(w, r, errx.NotFound("account_not_found", "account not found"))
 			return
 		}
 

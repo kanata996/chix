@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"reflect"
 
-	"github.com/kanata996/chix/resp"
+	"github.com/kanata996/chix/errx"
 )
 
 const (
@@ -44,7 +44,7 @@ func describeJSONType(t reflect.Type) string {
 }
 
 func invalidJSONError(message string) error {
-	return resp.NewError(http.StatusBadRequest, CodeInvalidJSON, message)
+	return errx.NewHTTPError(http.StatusBadRequest, CodeInvalidJSON, message)
 }
 
 func emptyBodyError() error {
@@ -52,7 +52,7 @@ func emptyBodyError() error {
 }
 
 func unsupportedMediaTypeError() error {
-	return resp.NewError(
+	return errx.NewHTTPError(
 		http.StatusUnsupportedMediaType,
 		CodeUnsupportedMediaType,
 		"Content-Type must be application/json or application/*+json",
@@ -60,7 +60,7 @@ func unsupportedMediaTypeError() error {
 }
 
 func requestTooLargeError() error {
-	return resp.NewError(
+	return errx.NewHTTPError(
 		http.StatusRequestEntityTooLarge,
 		CodeRequestTooLarge,
 		"request body is too large",

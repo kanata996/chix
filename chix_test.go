@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/kanata996/chix/resp"
+	"github.com/kanata996/chix/errx"
 )
 
 // 测试清单：
@@ -488,12 +488,12 @@ func decodeRootPayload(t *testing.T, body []byte) rootPayloadMap {
 	return payload
 }
 
-func assertRootHTTPError(t *testing.T, err error, wantStatus int, wantCode, wantDetail string) *resp.HTTPError {
+func assertRootHTTPError(t *testing.T, err error, wantStatus int, wantCode, wantDetail string) *errx.HTTPError {
 	t.Helper()
 
-	httpErr, ok := err.(*resp.HTTPError)
+	httpErr, ok := err.(*errx.HTTPError)
 	if !ok {
-		t.Fatalf("error type = %T, want *resp.HTTPError", err)
+		t.Fatalf("error type = %T, want *errx.HTTPError", err)
 	}
 	if got := httpErr.Status(); got != wantStatus {
 		t.Fatalf("Status() = %d, want %d", got, wantStatus)

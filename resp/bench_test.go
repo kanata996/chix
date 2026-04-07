@@ -17,9 +17,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/traceid"
+	"github.com/kanata996/chix/errx"
 )
 
 type benchmarkResponseWriter struct {
@@ -60,7 +60,7 @@ var (
 		},
 	}
 	benchmarkJSONBlobPayload = []byte(`{"id":"acct_123456","name":"kanata","email":"kanata@example.com","active":true,"roles":["owner","billing"],"profile":{"plan":"pro","region":"ap-southeast-1","tags":["prod","priority"]}}`)
-	benchmarkClientHTTPError = UnprocessableEntity(
+	benchmarkClientHTTPError = errx.UnprocessableEntity(
 		"validation_failed",
 		"request validation failed",
 		benchmarkValidationError{Field: "email", Reason: "must be a valid email"},
@@ -139,7 +139,7 @@ func BenchmarkWriteError_ServerError500(b *testing.B) {
 	restore := setBenchmarkDefaultLogger()
 	defer restore()
 
-	req := benchmarkRequestWithRouteAndIDs(http.MethodGet, "/accounts/{id}", "/accounts/acct_123456")
+	req := benchmarkRequestWithIDs(http.MethodGet, "/accounts/acct_123456")
 	w := &benchmarkResponseWriter{header: make(http.Header, 1)}
 
 	for b.Loop() {
@@ -149,13 +149,9 @@ func BenchmarkWriteError_ServerError500(b *testing.B) {
 	}
 }
 
-func benchmarkRequestWithRouteAndIDs(method, routePattern, target string) *http.Request {
+func benchmarkRequestWithIDs(method, target string) *http.Request {
 	req := httptest.NewRequest(method, target, nil)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.RoutePatterns = []string{routePattern}
-
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
-	ctx = traceid.NewContext(ctx)
+	ctx := traceid.NewContext(req.Context())
 	ctx = context.WithValue(ctx, chimw.RequestIDKey, "req-bench")
 
 	return req.WithContext(ctx)

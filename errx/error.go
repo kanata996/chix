@@ -1,4 +1,4 @@
-package resp
+package errx
 
 import (
 	"net/http"
@@ -21,16 +21,16 @@ type HTTPError struct {
 	cause error
 }
 
-// NewError 构造一个不带底层 cause 的公共 HTTP 错误。
+// NewHTTPError 构造一个不带底层 cause 的公共 HTTP 错误。
 // 它会统一补齐默认 status/code/detail，并对 errors 做防御性浅拷贝。
-func NewError(status int, code, detail string, errors ...any) *HTTPError {
-	return wrapError(status, code, detail, nil, errors...)
+func NewHTTPError(status int, code, detail string, errors ...any) *HTTPError {
+	return NewHTTPErrorWithCause(status, code, detail, nil, errors...)
 }
 
-// wrapError 基于给定 cause 构造公共 HTTP 错误。
+// NewHTTPErrorWithCause 基于给定 cause 构造公共 HTTP 错误。
 // 非法状态码会被归一化，缺省 code/detail 也会按状态码补全。
-// 这里在入口一次性做标准化，保证后续写响应时不会因为原始输入脏数据而漂移。
-func wrapError(status int, code, detail string, cause error, errors ...any) *HTTPError {
+// 这里在入口一次性做标准化，保证后续使用时不会因为原始输入脏数据而漂移。
+func NewHTTPErrorWithCause(status int, code, detail string, cause error, errors ...any) *HTTPError {
 	status = normalizeErrorStatus(status)
 	return &HTTPError{
 		status: status,
@@ -116,42 +116,42 @@ func (e *HTTPError) Errors() []any {
 
 // BadRequest 构造 400 Bad Request 公共错误。
 func BadRequest(code, detail string, errors ...any) *HTTPError {
-	return NewError(http.StatusBadRequest, code, detail, errors...)
+	return NewHTTPError(http.StatusBadRequest, code, detail, errors...)
 }
 
 // Unauthorized 构造 401 Unauthorized 公共错误。
 func Unauthorized(code, detail string, errors ...any) *HTTPError {
-	return NewError(http.StatusUnauthorized, code, detail, errors...)
+	return NewHTTPError(http.StatusUnauthorized, code, detail, errors...)
 }
 
 // Forbidden 构造 403 Forbidden 公共错误。
 func Forbidden(code, detail string, errors ...any) *HTTPError {
-	return NewError(http.StatusForbidden, code, detail, errors...)
+	return NewHTTPError(http.StatusForbidden, code, detail, errors...)
 }
 
 // NotFound 构造 404 Not Found 公共错误。
 func NotFound(code, detail string, errors ...any) *HTTPError {
-	return NewError(http.StatusNotFound, code, detail, errors...)
+	return NewHTTPError(http.StatusNotFound, code, detail, errors...)
 }
 
 // MethodNotAllowed 构造 405 Method Not Allowed 公共错误。
 func MethodNotAllowed(code, detail string, errors ...any) *HTTPError {
-	return NewError(http.StatusMethodNotAllowed, code, detail, errors...)
+	return NewHTTPError(http.StatusMethodNotAllowed, code, detail, errors...)
 }
 
 // Conflict 构造 409 Conflict 公共错误。
 func Conflict(code, detail string, errors ...any) *HTTPError {
-	return NewError(http.StatusConflict, code, detail, errors...)
+	return NewHTTPError(http.StatusConflict, code, detail, errors...)
 }
 
 // UnprocessableEntity 构造 422 Unprocessable Entity 公共错误。
 func UnprocessableEntity(code, detail string, errors ...any) *HTTPError {
-	return NewError(http.StatusUnprocessableEntity, code, detail, errors...)
+	return NewHTTPError(http.StatusUnprocessableEntity, code, detail, errors...)
 }
 
 // TooManyRequests 构造 429 Too Many Requests 公共错误。
 func TooManyRequests(code, detail string, errors ...any) *HTTPError {
-	return NewError(http.StatusTooManyRequests, code, detail, errors...)
+	return NewHTTPError(http.StatusTooManyRequests, code, detail, errors...)
 }
 
 // cloneErrors 返回 errors 的浅拷贝，避免调用方后续修改影响已构造的错误对象。
@@ -226,7 +226,7 @@ func normalizeErrorTitle(status int) string {
 }
 
 // normalizeErrorDetail 根据状态码补齐默认公共错误详情。
-// 显式 detail 优先；若为空白则与 Title 保持一致，避免对外响应出现空 detail。
+// 显式 detail 优先；若为空白则与 Title 保持一致，避免对外语义出现空 detail。
 func normalizeErrorDetail(status int, detail string) string {
 	if trimmed := strings.TrimSpace(detail); trimmed != "" {
 		return trimmed

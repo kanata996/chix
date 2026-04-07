@@ -27,10 +27,10 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
+	"github.com/kanata996/chix/errx"
 )
 
 const (
@@ -54,7 +54,7 @@ func annotateRequestErrorLogAttrs(r *http.Request, attrs []slog.Attr) {
 
 // requestErrorLogAttrs 生成请求级错误日志字段。
 // 4xx 仅保留外层请求日志；5xx 只补充低噪音、可聚合且便于关联的字段。
-func requestErrorLogAttrs(r *http.Request, err error, httpErr *HTTPError) []slog.Attr {
+func requestErrorLogAttrs(r *http.Request, err error, httpErr *errx.HTTPError) []slog.Attr {
 	if err == nil || httpErr == nil {
 		return nil
 	}
@@ -79,7 +79,7 @@ func requestErrorLogAttrs(r *http.Request, err error, httpErr *HTTPError) []slog
 	return attrs
 }
 
-func diagnosticErrorLogAttrs(err error, httpErr *HTTPError) []slog.Attr {
+func diagnosticErrorLogAttrs(err error, httpErr *errx.HTTPError) []slog.Attr {
 	if err == nil || httpErr == nil {
 		return nil
 	}
@@ -113,16 +113,18 @@ func diagnosticErrorLogAttrs(err error, httpErr *HTTPError) []slog.Attr {
 // errorForDiagnostics 返回用于日志诊断的起始 error。
 // 如果 HTTPError 已包住原始 cause，则优先从 cause 开始展开错误链，
 // 避免把 *HTTPError 本身误当成主要错误类型。
-func errorForDiagnostics(err error, httpErr *HTTPError) error {
-	if httpErr != nil && httpErr.cause != nil {
-		return httpErr.cause
+func errorForDiagnostics(err error, httpErr *errx.HTTPError) error {
+	if httpErr != nil {
+		if cause := httpErr.Unwrap(); cause != nil {
+			return cause
+		}
 	}
 	return err
 }
 
 // logErrorResponseWriteFailure 只记录“错误响应自身写出失败”的异常。
 // 这是基础设施级问题，不属于普通业务失败，因此需要单独打一条 error 日志。
-func logErrorResponseWriteFailure(r *http.Request, httpErr *HTTPError, err error) {
+func logErrorResponseWriteFailure(r *http.Request, httpErr *errx.HTTPError, err error) {
 	if err == nil || httpErr == nil {
 		return
 	}
@@ -150,7 +152,7 @@ func logErrorResponseWriteFailure(r *http.Request, httpErr *HTTPError, err error
 }
 
 // logServerError 记录一次独立的 5xx 错误日志，便于在 access log 之外排查问题。
-func logServerError(r *http.Request, httpErr *HTTPError, err error) {
+func logServerError(r *http.Request, httpErr *errx.HTTPError, err error) {
 	if err == nil || httpErr == nil || httpErr.Status() < http.StatusInternalServerError {
 		return
 	}
@@ -158,7 +160,7 @@ func logServerError(r *http.Request, httpErr *HTTPError, err error) {
 	logServerErrorAttrs(r, httpErr, diagnosticErrorLogAttrs(err, httpErr))
 }
 
-func logServerErrorAttrs(r *http.Request, httpErr *HTTPError, diagnosticAttrs []slog.Attr) {
+func logServerErrorAttrs(r *http.Request, httpErr *errx.HTTPError, diagnosticAttrs []slog.Attr) {
 	if httpErr == nil || httpErr.Status() < http.StatusInternalServerError {
 		return
 	}
@@ -335,16 +337,6 @@ func limitErrorLogString(value string) string {
 
 func requestContextAttrs(ctx context.Context) []slog.Attr {
 	attrs := requestCorrelationAttrs(ctx)
-	if ctx == nil {
-		return attrs
-	}
-
-	if rctx := chi.RouteContext(ctx); rctx != nil {
-		if route := strings.TrimSpace(rctx.RoutePattern()); route != "" {
-			attrs = append(attrs, slog.String("http.route", route))
-		}
-	}
-
 	return attrs
 }
 
