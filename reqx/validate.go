@@ -263,14 +263,6 @@ func violationInForTag(tagName string) string {
 	return ViolationInRequest
 }
 
-func resolveValidationField(target any, structNamespace string) (reflect.StructField, bool) {
-	fields, ok := resolveValidationFieldPath(target, structNamespace)
-	if !ok || len(fields) == 0 {
-		return reflect.StructField{}, false
-	}
-	return fields[len(fields)-1], true
-}
-
 func resolveValidationFieldPath(target any, structNamespace string) ([]reflect.StructField, bool) {
 	t := reflect.TypeOf(target)
 	for t != nil && t.Kind() == reflect.Pointer {

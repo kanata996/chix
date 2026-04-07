@@ -563,7 +563,7 @@ func TestViolationInputHelpers(t *testing.T) {
 	}
 }
 
-func TestResolveValidationFieldAndNamespaceParsing(t *testing.T) {
+func TestResolveValidationFieldPathAndNamespaceParsing(t *testing.T) {
 	type nestedItem struct {
 		Value string `header:"x-value"`
 	}
@@ -572,12 +572,15 @@ func TestResolveValidationFieldAndNamespaceParsing(t *testing.T) {
 		Plain  string        `json:"plain"`
 	}
 
-	field, ok := resolveValidationField(&request{}, "request.Nested[0].Value")
+	fields, ok := resolveValidationFieldPath(&request{}, "request.Nested[0].Value")
 	if !ok {
-		t.Fatal("resolveValidationField() = false, want true")
+		t.Fatal("resolveValidationFieldPath() = false, want true")
 	}
-	if field.Name != "Value" {
-		t.Fatalf("field.Name = %q, want Value", field.Name)
+	if len(fields) != 2 {
+		t.Fatalf("len(fields) = %d, want 2", len(fields))
+	}
+	if fields[0].Name != "Nested" || fields[1].Name != "Value" {
+		t.Fatalf("fields = %#v, want [Nested Value]", fields)
 	}
 
 	testCases := []struct {
@@ -595,8 +598,8 @@ func TestResolveValidationFieldAndNamespaceParsing(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, ok := resolveValidationField(tc.target, tc.namespace); ok {
-				t.Fatalf("resolveValidationField(%#v, %q) = true, want false", tc.target, tc.namespace)
+			if _, ok := resolveValidationFieldPath(tc.target, tc.namespace); ok {
+				t.Fatalf("resolveValidationFieldPath(%#v, %q) = true, want false", tc.target, tc.namespace)
 			}
 		})
 	}
