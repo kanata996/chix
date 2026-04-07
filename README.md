@@ -240,6 +240,8 @@ if err := repo.DeleteAccount(ctx, accountID); err != nil {
 ## 可选中间件
 
 `middleware.RequestLogAttrs()` 用于把请求上下文中的关联字段补到当前 request log。
+`WriteError(...)` 只会在 5xx access log 上补 `error.*` 诊断字段，不再隐式注入
+`traceId` / `request.id`。
 
 建议挂载顺序：
 
