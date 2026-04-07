@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -185,8 +186,8 @@ func TestWriteStatusWritesStatusWithoutBodyOrContentType(t *testing.T) {
 // JSON 编码阶段遇到不支持的值时直接返回编码错误。
 func TestEncodeJSONRejectsUnsupportedValue(t *testing.T) {
 	_, err := encodeJSON(make(chan int), "")
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	if err == nil || err.Error() != "json: unsupported type: chan int" {
+		t.Fatalf("encodeJSON() error = %v, want unsupported type error", err)
 	}
 }
 
@@ -209,14 +210,16 @@ func TestEncodeJSONRecoversFromMarshalPanic(t *testing.T) {
 
 // HTTP 状态码校验会接受标准范围并拒绝越界值。
 func TestValidateHTTPStatus(t *testing.T) {
-	if err := validateHTTPStatus(http.StatusOK); err != nil {
-		t.Fatalf("validateHTTPStatus(200) error = %v", err)
+	for _, status := range []int{http.StatusContinue, http.StatusOK, 999} {
+		if err := validateHTTPStatus(status); err != nil {
+			t.Fatalf("validateHTTPStatus(%d) error = %v, want nil", status, err)
+		}
 	}
 
 	testCases := []int{99, 1000}
 	for _, status := range testCases {
-		if err := validateHTTPStatus(status); err == nil {
-			t.Fatalf("validateHTTPStatus(%d) expected error, got nil", status)
+		if err := validateHTTPStatus(status); err == nil || err.Error() != "resp: invalid HTTP status "+strconv.Itoa(status) {
+			t.Fatalf("validateHTTPStatus(%d) error = %v, want invalid status error", status, err)
 		}
 	}
 }

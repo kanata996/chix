@@ -127,6 +127,7 @@ func TestHTTPErrorConstructors(t *testing.T) {
 		build      func() *HTTPError
 		wantStatus int
 		wantCode   string
+		wantTitle  string
 		wantDetail string
 	}{
 		{
@@ -134,6 +135,7 @@ func TestHTTPErrorConstructors(t *testing.T) {
 			build:      func() *HTTPError { return BadRequest("", "", "detail") },
 			wantStatus: http.StatusBadRequest,
 			wantCode:   "bad_request",
+			wantTitle:  http.StatusText(http.StatusBadRequest),
 			wantDetail: http.StatusText(http.StatusBadRequest),
 		},
 		{
@@ -141,6 +143,7 @@ func TestHTTPErrorConstructors(t *testing.T) {
 			build:      func() *HTTPError { return Unauthorized("", "", "detail") },
 			wantStatus: http.StatusUnauthorized,
 			wantCode:   "unauthorized",
+			wantTitle:  http.StatusText(http.StatusUnauthorized),
 			wantDetail: http.StatusText(http.StatusUnauthorized),
 		},
 		{
@@ -148,6 +151,7 @@ func TestHTTPErrorConstructors(t *testing.T) {
 			build:      func() *HTTPError { return Forbidden("", "", "detail") },
 			wantStatus: http.StatusForbidden,
 			wantCode:   "forbidden",
+			wantTitle:  http.StatusText(http.StatusForbidden),
 			wantDetail: http.StatusText(http.StatusForbidden),
 		},
 		{
@@ -155,6 +159,7 @@ func TestHTTPErrorConstructors(t *testing.T) {
 			build:      func() *HTTPError { return NotFound("", "", "detail") },
 			wantStatus: http.StatusNotFound,
 			wantCode:   "not_found",
+			wantTitle:  http.StatusText(http.StatusNotFound),
 			wantDetail: http.StatusText(http.StatusNotFound),
 		},
 		{
@@ -162,6 +167,7 @@ func TestHTTPErrorConstructors(t *testing.T) {
 			build:      func() *HTTPError { return MethodNotAllowed("", "", "detail") },
 			wantStatus: http.StatusMethodNotAllowed,
 			wantCode:   "method_not_allowed",
+			wantTitle:  http.StatusText(http.StatusMethodNotAllowed),
 			wantDetail: http.StatusText(http.StatusMethodNotAllowed),
 		},
 		{
@@ -169,6 +175,7 @@ func TestHTTPErrorConstructors(t *testing.T) {
 			build:      func() *HTTPError { return Conflict("", "", "detail") },
 			wantStatus: http.StatusConflict,
 			wantCode:   "conflict",
+			wantTitle:  http.StatusText(http.StatusConflict),
 			wantDetail: http.StatusText(http.StatusConflict),
 		},
 		{
@@ -176,6 +183,7 @@ func TestHTTPErrorConstructors(t *testing.T) {
 			build:      func() *HTTPError { return UnprocessableEntity("", "", "detail") },
 			wantStatus: http.StatusUnprocessableEntity,
 			wantCode:   "unprocessable_entity",
+			wantTitle:  http.StatusText(http.StatusUnprocessableEntity),
 			wantDetail: http.StatusText(http.StatusUnprocessableEntity),
 		},
 		{
@@ -183,6 +191,7 @@ func TestHTTPErrorConstructors(t *testing.T) {
 			build:      func() *HTTPError { return TooManyRequests("", "", "detail") },
 			wantStatus: http.StatusTooManyRequests,
 			wantCode:   "too_many_requests",
+			wantTitle:  http.StatusText(http.StatusTooManyRequests),
 			wantDetail: http.StatusText(http.StatusTooManyRequests),
 		},
 	}
@@ -196,8 +205,14 @@ func TestHTTPErrorConstructors(t *testing.T) {
 			if got := err.Code(); got != tc.wantCode {
 				t.Fatalf("Code() = %q, want %q", got, tc.wantCode)
 			}
+			if got := err.Title(); got != tc.wantTitle {
+				t.Fatalf("Title() = %q, want %q", got, tc.wantTitle)
+			}
 			if got := err.Detail(); got != tc.wantDetail {
 				t.Fatalf("Detail() = %q, want %q", got, tc.wantDetail)
+			}
+			if got := err.Error(); got != tc.wantDetail {
+				t.Fatalf("Error() = %q, want %q", got, tc.wantDetail)
 			}
 			if got := err.Errors(); len(got) != 1 || got[0] != "detail" {
 				t.Fatalf("Errors() = %#v, want [detail]", got)
