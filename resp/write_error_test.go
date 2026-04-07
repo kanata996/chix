@@ -127,6 +127,10 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 	if !ok || len(errors) != 1 {
 		t.Fatalf("errors = %#v, want 1 item", body["errors"])
 	}
+	assertPublicErrorObject(t, errors[0], map[string]any{
+		"field": "name",
+		"code":  "required",
+	})
 }
 
 // 显式传入的公共 code/detail/errors 应原样进入 problem JSON，而不是被默认值覆盖。
@@ -158,6 +162,10 @@ func TestWriteErrorPreservesExplicitPublicFields(t *testing.T) {
 	if !ok || len(errors) != 1 {
 		t.Fatalf("errors = %#v, want 1 item", body["errors"])
 	}
+	assertPublicErrorObject(t, errors[0], map[string]any{
+		"field": "name",
+		"code":  "required",
+	})
 }
 
 // 传入 nil 错误时，WriteError 应是纯 no-op。
@@ -167,8 +175,17 @@ func TestWriteErrorNilErrorIsNoop(t *testing.T) {
 	if err := WriteError(rr, httptest.NewRequest(http.MethodGet, "/", nil), nil); err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want recorder default %d", rr.Code, http.StatusOK)
+	}
 	if rr.Body.Len() != 0 {
 		t.Fatalf("body = %q, want empty", rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); got != "" {
+		t.Fatalf("Content-Type = %q, want empty", got)
+	}
+	if len(rr.Header()) != 0 {
+		t.Fatalf("headers = %#v, want empty", rr.Header())
 	}
 }
 
@@ -413,8 +430,21 @@ func TestMarshalProblemPayloadNilHTTPError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshalProblemPayload(nil) error = %v", err)
 	}
-	if got := string(body); got != `{"title":"","status":0,"detail":"","code":""}` {
-		t.Fatalf("body = %q", got)
+	payload := decodePayload(t, body)
+	if got := payload["title"]; got != "" {
+		t.Fatalf("title = %#v, want empty", got)
+	}
+	if got := payload["status"]; got != float64(0) {
+		t.Fatalf("status = %#v, want 0", got)
+	}
+	if got := payload["detail"]; got != "" {
+		t.Fatalf("detail = %#v, want empty", got)
+	}
+	if got := payload["code"]; got != "" {
+		t.Fatalf("code = %#v, want empty", got)
+	}
+	if _, exists := payload["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", payload["errors"])
 	}
 }
 
@@ -505,6 +535,9 @@ func TestProblemPayloadFromHTTPErrorIncludeErrorsToggle(t *testing.T) {
 	if len(withErrors.Errors) != 1 {
 		t.Fatalf("problemPayloadFromHTTPError(includeErrors=true).Errors = %#v, want 1 item", withErrors.Errors)
 	}
+	assertPublicErrorObject(t, withErrors.Errors[0], map[string]any{
+		"field": "name",
+	})
 
 	withoutErrors := problemPayloadFromHTTPError(httpErr, false)
 	if withoutErrors.Errors != nil {
@@ -1024,5 +1057,22 @@ func TestLogErrorResponseWriteFailureFallsBackToDefaultLogger(t *testing.T) {
 	}
 	if got := logEntry["http.response.status_code"]; got != float64(http.StatusInternalServerError) {
 		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusInternalServerError)
+	}
+}
+
+func assertPublicErrorObject(t *testing.T, got any, want map[string]any) {
+	t.Helper()
+
+	gotMap, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("error item = %#v, want object", got)
+	}
+	for key, wantValue := range want {
+		if gotValue := gotMap[key]; gotValue != wantValue {
+			t.Fatalf("error item %q = %#v, want %#v", key, gotValue, wantValue)
+		}
+	}
+	if len(gotMap) != len(want) {
+		t.Fatalf("error item = %#v, want only %#v", gotMap, want)
 	}
 }

@@ -1,11 +1,11 @@
 package reqx
 
-// 用例清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
-// - [✓] `validate(..., sourceX)` 会使用来源专属字段别名和 `in` 值。
-// - [✓] `invalidFieldsError` 会规范化 violation 默认值并写成稳定 HTTP 错误。
-// - [✓] `validateRequest` 会按 param/query/json/header/plain 选择字段名，但统一以 `request` 作为 `in`。
-// - [✓] `validateRequest` 的空目标错误契约会透传当前包装器的参数校验错误。
+// 测试清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
+// - [✓] 内部 `validate(..., sourceX)` 会使用来源专属字段别名和 `in` 值。
+// - [✓] 内部 `invalidFieldsError` 会规范化 violation 默认值并写成稳定 HTTP 错误。
+// - [✓] 内部 `validate(sourceRequest)` 会按 param/query/json/header/plain 选择字段名，但统一以 `request` 作为 `in`。
+// - [✓] 内部 `validate(sourceRequest)` 的空目标错误契约会透传当前包装器的参数校验错误。
 
 import "testing"
 

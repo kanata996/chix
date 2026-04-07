@@ -43,13 +43,20 @@ func wrapError(status int, code, detail string, cause error, errors ...any) *HTT
 
 // Error 实现 error 接口。
 // 若保留了底层 cause，则优先返回 cause 的文本，便于日志和 errors.Is/As 诊断；
-// 否则回退为当前对象稳定的公开 Detail。
-func (e *HTTPError) Error() string {
+// 若 cause 文本为空白或其 Error() 实现不安全，则回退为当前对象稳定的公开 Detail。
+func (e *HTTPError) Error() (message string) {
 	if e == nil {
 		return ""
 	}
 	if e.cause != nil {
-		return e.cause.Error()
+		defer func() {
+			if recover() != nil {
+				message = e.Detail()
+			}
+		}()
+		if message = strings.TrimSpace(e.cause.Error()); message != "" {
+			return message
+		}
 	}
 	return e.Detail()
 }

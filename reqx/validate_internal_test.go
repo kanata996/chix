@@ -1,11 +1,11 @@
 package reqx
 
-// 用例清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
-// - [✓] `BindAndValidate*` 包装器的成功路径与绑定错误优先级。
-// - [✓] `validate`、`validateStruct`、`validateTarget` 的边界分支与无效目标错误。
-// - [✓] violation 规范化、字段解析、来源推断与标签优先级辅助分支。
-// - [✓] 这组测试覆盖内部校验辅助逻辑，断言具体返回值和 panic 分支，不是假测试。
+// 测试清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
+// - [✓] `BindAndValidate*` 包装器会优先返回绑定错误，并与“单源绑定 + validate”组合保持一致。
+// - [✓] 内部 `validate`、`validateStruct`、`validateTarget` 会对 typed nil、非 struct 和 validator 非法输入维持稳定契约。
+// - [✓] 内部 violation 规范化、字段解析、来源推断与请求标签优先级会产出稳定结果。
+// - [✓] 对不支持的来源和非法注册，内部 helper 会明确 panic，而不是静默回退。
 
 import (
 	"errors"
@@ -88,6 +88,279 @@ func TestBindAndValidateWrappersSuccessPaths(t *testing.T) {
 	if err := BindAndValidateHeaders(headerReq, &headerDst); err != nil {
 		t.Fatalf("BindAndValidateHeaders() error = %v", err)
 	}
+}
+
+// 各个 BindAndValidate 包装器的结果应与“先绑定，再按对应来源校验”的组合一致。
+func TestBindAndValidateWrappersMatchBindPlusValidate(t *testing.T) {
+	t.Run("request success", func(t *testing.T) {
+		type request struct {
+			ID   string `param:"id" validate:"required,uuid"`
+			Name string `query:"name" validate:"required,nospace"`
+		}
+
+		newReq := func() *http.Request {
+			req := requestWithPathParams(map[string][]string{
+				"id": {"550e8400-e29b-41d4-a716-446655440000"},
+			})
+			req.Method = http.MethodGet
+			req.URL.RawQuery = "name=kanata"
+			return req
+		}
+
+		var got request
+		gotErr := BindAndValidate(newReq(), &got)
+
+		var want request
+		wantErr := Bind(newReq(), &want)
+		if wantErr == nil {
+			wantErr = validate(&want, sourceRequest)
+		}
+
+		if gotErr != nil || wantErr != nil {
+			t.Fatalf("gotErr = %v, wantErr = %v", gotErr, wantErr)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("request validation failure", func(t *testing.T) {
+		type request struct {
+			ID   string `param:"id" validate:"required"`
+			Name string `query:"name" validate:"required,nospace"`
+		}
+
+		newReq := func() *http.Request {
+			req := requestWithPathParams(map[string][]string{
+				"id": {"route-id"},
+			})
+			req.Method = http.MethodGet
+			req.URL.RawQuery = "name=bad%20value"
+			return req
+		}
+
+		var got request
+		gotErr := BindAndValidate(newReq(), &got)
+
+		var want request
+		wantErr := Bind(newReq(), &want)
+		if wantErr == nil {
+			wantErr = validate(&want, sourceRequest)
+		}
+
+		_ = assertSameHTTPError(t, gotErr, wantErr)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("body success", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name" validate:"required,nospace"`
+		}
+
+		newReq := func() *http.Request {
+			return newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
+		}
+
+		var got request
+		gotErr := BindAndValidateBody(newReq(), &got)
+
+		var want request
+		wantErr := BindBody(newReq(), &want)
+		if wantErr == nil {
+			wantErr = validate(&want, sourceBody)
+		}
+
+		if gotErr != nil || wantErr != nil {
+			t.Fatalf("gotErr = %v, wantErr = %v", gotErr, wantErr)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("body validation failure", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name" validate:"required,nospace"`
+		}
+
+		newReq := func() *http.Request {
+			return newJSONRequest(http.MethodPost, "/", `{"name":"bad value"}`)
+		}
+
+		var got request
+		gotErr := BindAndValidateBody(newReq(), &got)
+
+		var want request
+		wantErr := BindBody(newReq(), &want)
+		if wantErr == nil {
+			wantErr = validate(&want, sourceBody)
+		}
+
+		_ = assertSameHTTPError(t, gotErr, wantErr)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("query success", func(t *testing.T) {
+		type request struct {
+			Cursor string `query:"cursor" validate:"required,nospace"`
+		}
+
+		newReq := func() *http.Request {
+			return httptest.NewRequest(http.MethodGet, "/?cursor=abc", nil)
+		}
+
+		var got request
+		gotErr := BindAndValidateQuery(newReq(), &got)
+
+		var want request
+		wantErr := BindQueryParams(newReq(), &want)
+		if wantErr == nil {
+			wantErr = validate(&want, sourceQuery)
+		}
+
+		if gotErr != nil || wantErr != nil {
+			t.Fatalf("gotErr = %v, wantErr = %v", gotErr, wantErr)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("query validation failure", func(t *testing.T) {
+		type request struct {
+			Cursor string `query:"cursor" validate:"required,nospace"`
+		}
+
+		newReq := func() *http.Request {
+			return httptest.NewRequest(http.MethodGet, "/?cursor=bad%20value", nil)
+		}
+
+		var got request
+		gotErr := BindAndValidateQuery(newReq(), &got)
+
+		var want request
+		wantErr := BindQueryParams(newReq(), &want)
+		if wantErr == nil {
+			wantErr = validate(&want, sourceQuery)
+		}
+
+		_ = assertSameHTTPError(t, gotErr, wantErr)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("path success", func(t *testing.T) {
+		type request struct {
+			ID string `param:"id" validate:"required,nospace"`
+		}
+
+		newReq := func() *http.Request {
+			return requestWithPathParams(map[string][]string{
+				"id": {"route-id"},
+			})
+		}
+
+		var got request
+		gotErr := BindAndValidatePath(newReq(), &got)
+
+		var want request
+		wantErr := BindPathValues(newReq(), &want)
+		if wantErr == nil {
+			wantErr = validate(&want, sourcePath)
+		}
+
+		if gotErr != nil || wantErr != nil {
+			t.Fatalf("gotErr = %v, wantErr = %v", gotErr, wantErr)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("path validation failure", func(t *testing.T) {
+		type request struct {
+			ID string `param:"id" validate:"required,nospace"`
+		}
+
+		newReq := func() *http.Request {
+			return requestWithPathParams(map[string][]string{
+				"id": {"bad value"},
+			})
+		}
+
+		var got request
+		gotErr := BindAndValidatePath(newReq(), &got)
+
+		var want request
+		wantErr := BindPathValues(newReq(), &want)
+		if wantErr == nil {
+			wantErr = validate(&want, sourcePath)
+		}
+
+		_ = assertSameHTTPError(t, gotErr, wantErr)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("header success", func(t *testing.T) {
+		type request struct {
+			RequestID string `header:"x-request-id" validate:"required,nospace"`
+		}
+
+		newReq := func() *http.Request {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("X-Request-Id", "req-1")
+			return req
+		}
+
+		var got request
+		gotErr := BindAndValidateHeaders(newReq(), &got)
+
+		var want request
+		wantErr := BindHeaders(newReq(), &want)
+		if wantErr == nil {
+			wantErr = validate(&want, sourceHeader)
+		}
+
+		if gotErr != nil || wantErr != nil {
+			t.Fatalf("gotErr = %v, wantErr = %v", gotErr, wantErr)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("header validation failure", func(t *testing.T) {
+		type request struct {
+			RequestID string `header:"x-request-id" validate:"required,nospace"`
+		}
+
+		newReq := func() *http.Request {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("X-Request-Id", "bad value")
+			return req
+		}
+
+		var got request
+		gotErr := BindAndValidateHeaders(newReq(), &got)
+
+		var want request
+		wantErr := BindHeaders(newReq(), &want)
+		if wantErr == nil {
+			wantErr = validate(&want, sourceHeader)
+		}
+
+		_ = assertSameHTTPError(t, gotErr, wantErr)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got = %#v, want %#v", got, want)
+		}
+	})
 }
 
 // validate 会覆盖成功、typed nil 和非结构体目标分支。
@@ -290,7 +563,7 @@ func TestViolationInputHelpers(t *testing.T) {
 	}
 }
 
-func TestResolveValidationFieldAndNamespaceParsing(t *testing.T) {
+func TestResolveValidationFieldPathAndNamespaceParsing(t *testing.T) {
 	type nestedItem struct {
 		Value string `header:"x-value"`
 	}
@@ -299,12 +572,15 @@ func TestResolveValidationFieldAndNamespaceParsing(t *testing.T) {
 		Plain  string        `json:"plain"`
 	}
 
-	field, ok := resolveValidationField(&request{}, "request.Nested[0].Value")
+	fields, ok := resolveValidationFieldPath(&request{}, "request.Nested[0].Value")
 	if !ok {
-		t.Fatal("resolveValidationField() = false, want true")
+		t.Fatal("resolveValidationFieldPath() = false, want true")
 	}
-	if field.Name != "Value" {
-		t.Fatalf("field.Name = %q, want Value", field.Name)
+	if len(fields) != 2 {
+		t.Fatalf("len(fields) = %d, want 2", len(fields))
+	}
+	if fields[0].Name != "Nested" || fields[1].Name != "Value" {
+		t.Fatalf("fields = %#v, want [Nested Value]", fields)
 	}
 
 	testCases := []struct {
@@ -322,8 +598,8 @@ func TestResolveValidationFieldAndNamespaceParsing(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, ok := resolveValidationField(tc.target, tc.namespace); ok {
-				t.Fatalf("resolveValidationField(%#v, %q) = true, want false", tc.target, tc.namespace)
+			if _, ok := resolveValidationFieldPath(tc.target, tc.namespace); ok {
+				t.Fatalf("resolveValidationFieldPath(%#v, %q) = true, want false", tc.target, tc.namespace)
 			}
 		})
 	}

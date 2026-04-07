@@ -20,7 +20,7 @@ import (
 // [✓] 错误链摘要兼容 nil、普通包装、不可比较 error、typed-nil 和 panic Error()
 // [✓] 错误链展开兼容深度限制、errors.Join、多分支 unwrap 和循环引用
 // [✓] 诊断起点优先使用 HTTPError 的内部 cause，没有 cause 时回退原始 error
-// [✓] 请求日志字段仅在 5xx 场景补充诊断信息，并正确提取 route / root cause
+// [✓] 请求日志字段仅在 5xx 场景补充低噪音关联字段；route 提取与 root cause 诊断保持稳定
 // [✓] 错误类型名与错误文本裁剪对 nil、空白、超长输入保持稳定
 
 type cycleTestError struct{}
@@ -225,6 +225,9 @@ func TestRequestErrorLogAttrs(t *testing.T) {
 	if got, ok := values["traceId"].(string); !ok || got == "" {
 		t.Fatalf("traceId = %#v, want non-empty string", values["traceId"])
 	}
+	if _, exists := values["http.route"]; exists {
+		t.Fatalf("http.route unexpectedly present: %#v", values["http.route"])
+	}
 	if _, exists := values["error.root_message"]; exists {
 		t.Fatalf("error.root_message unexpectedly present: %#v", values["error.root_message"])
 	}
@@ -270,6 +273,20 @@ func TestLogServerError(t *testing.T) {
 	if buf.Len() == 0 {
 		t.Fatal("logServerError() did not write 5xx output")
 	}
+
+	logEntry := decodePayload(t, buf.Bytes())
+	if got := logEntry["msg"]; got != "resp: request failed with server error" {
+		t.Fatalf("msg = %#v, want resp: request failed with server error", got)
+	}
+	if got := logEntry["error.code"]; got != "internal_error" {
+		t.Fatalf("error.code = %#v, want internal_error", got)
+	}
+	if got := logEntry["error.message"]; got != "db timeout" {
+		t.Fatalf("error.message = %#v, want db timeout", got)
+	}
+	if got := logEntry["http.response.status_code"]; got != float64(http.StatusInternalServerError) {
+		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusInternalServerError)
+	}
 }
 
 func TestLogServerErrorAttrs(t *testing.T) {
@@ -291,6 +308,17 @@ func TestLogServerErrorAttrs(t *testing.T) {
 	})
 	if buf.Len() == 0 {
 		t.Fatal("logServerErrorAttrs() did not write 5xx output")
+	}
+
+	logEntry := decodePayload(t, buf.Bytes())
+	if got := logEntry["msg"]; got != "resp: request failed with server error" {
+		t.Fatalf("msg = %#v, want resp: request failed with server error", got)
+	}
+	if got := logEntry["error.code"]; got != "internal_error" {
+		t.Fatalf("error.code = %#v, want internal_error", got)
+	}
+	if got := logEntry["http.response.status_code"]; got != float64(http.StatusInternalServerError) {
+		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusInternalServerError)
 	}
 }
 

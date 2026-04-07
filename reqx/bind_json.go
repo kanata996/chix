@@ -103,10 +103,22 @@ func validateJSONContentType(contentType string) error {
 	if err != nil {
 		return unsupportedMediaTypeError()
 	}
-	if mediaType == "application/json" || strings.HasSuffix(mediaType, "+json") {
+	if isSupportedJSONMediaType(mediaType) {
 		return nil
 	}
 	return unsupportedMediaTypeError()
+}
+
+func isSupportedJSONMediaType(mediaType string) bool {
+	if mediaType == "application/json" {
+		return true
+	}
+	if !strings.HasPrefix(mediaType, "application/") || !strings.HasSuffix(mediaType, "+json") {
+		return false
+	}
+
+	subtype := strings.TrimPrefix(mediaType, "application/")
+	return len(subtype) > len("+json")
 }
 
 func mapDecodeError(err error) error {

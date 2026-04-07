@@ -1,11 +1,12 @@
 package reqx
 
-// 用例清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
-// - [✓] `BindBody` 的 Content-Type、空 body、未知字段、类型错误与非法 JSON 契约。
-// - [✓] `BindBody` 的单值 JSON、尾随空白、body 大小上限与空请求参数错误。
+// 测试清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
+// - [✓] `BindBody` 的 Content-Type、空 body、未知字段、类型错误、非法 JSON、多值 JSON、body 大小上限与空输入参数契约。
+// - [✓] `BindBody` 在成功绑定和 empty-body no-op 场景下会保留未提供字段或已有值。
 // - [✓] `BindAndValidateBody` 会在校验前执行 `Normalize()`，并使用 `json` tag 字段名。
-// - [✓] 空 body 但显式声明非 JSON `Content-Type` 时，`BindBody`/`BindAndValidateBody` 返回 415。
+// - [✓] `BindAndValidateBody` 在绑定失败时优先返回绑定错误，并透传公开空输入参数错误。
+// - [✓] 内部 body 绑定辅助会维持 empty-body 跳过 Content-Type 与默认 body 上限回退的稳定契约。
 
 import (
 	"errors"
@@ -44,6 +45,12 @@ func TestBindBody_ContentTypeContract(t *testing.T) {
 		{
 			name:          "rejects missing content type",
 			setHeader:     false,
+			wantErrStatus: http.StatusUnsupportedMediaType,
+		},
+		{
+			name:          "rejects non application json suffix media type",
+			contentType:   "text/problem+json",
+			setHeader:     true,
 			wantErrStatus: http.StatusUnsupportedMediaType,
 		},
 		{
@@ -257,6 +264,19 @@ func TestBindBody_RequestMustNotBeNil(t *testing.T) {
 	}
 }
 
+// 公开 body 绑定入口会直接拒绝空目标对象。
+func TestBindBody_DestinationMustNotBeNil(t *testing.T) {
+	req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
+
+	err := BindBody[struct{}](req, nil)
+	if err == nil {
+		t.Fatal("BindBody() error = nil")
+	}
+	if got := err.Error(); got != "reqx: destination must not be nil" {
+		t.Fatalf("error = %q, want reqx: destination must not be nil", got)
+	}
+}
+
 // 空 body 忽略模式下，不校验 Content-Type。
 func TestBindJSONWithConfig_IgnoresEmptyBodyWithoutCheckingContentType(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(" \n\t "))
@@ -318,6 +338,31 @@ func TestBindAndValidateBody_UsesJSONTagNameInValidationError(t *testing.T) {
 	}
 }
 
+// body 包装器会在绑定前直接拒绝空输入参数。
+func TestBindAndValidateBody_RejectsNilInputs(t *testing.T) {
+	t.Run("nil request", func(t *testing.T) {
+		var dst struct{}
+		err := BindAndValidateBody[struct{}](nil, &dst)
+		if err == nil {
+			t.Fatal("BindAndValidateBody() error = nil")
+		}
+		if got := err.Error(); got != "reqx: request must not be nil" {
+			t.Fatalf("error = %q", got)
+		}
+	})
+
+	t.Run("nil destination", func(t *testing.T) {
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
+		err := BindAndValidateBody[struct{}](req, nil)
+		if err == nil {
+			t.Fatal("BindAndValidateBody() error = nil")
+		}
+		if got := err.Error(); got != "reqx: destination must not be nil" {
+			t.Fatalf("error = %q", got)
+		}
+	})
+}
+
 // 空 body 但显式声明了非 JSON Content-Type 时，包装器也应优先返回 415。
 func TestBindAndValidateBody_RejectsExplicitInvalidContentTypeOnEmptyBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
@@ -328,5 +373,28 @@ func TestBindAndValidateBody_RejectsExplicitInvalidContentTypeOnEmptyBody(t *tes
 	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json or application/*+json")
 	if dst.Name != "kanata" {
 		t.Fatalf("name = %q, want kanata", dst.Name)
+	}
+}
+
+// body 包装器在绑定失败时不会进入校验阶段，也不会污染目标对象。
+func TestBindAndValidateBody_ReturnsBindingErrorBeforeValidation(t *testing.T) {
+	type request struct {
+		Name string `json:"name" validate:"required,nospace"`
+		Age  int    `json:"age" validate:"min=1"`
+	}
+
+	req := newJSONRequest(http.MethodPost, "/", `{"name":"bad value","age":"oops"}`)
+	dst := request{
+		Name: "existing name",
+		Age:  3,
+	}
+
+	err := BindAndValidateBody(req, &dst)
+	violation := assertSingleViolation(t, err)
+	if violation.Field != "age" || violation.In != ViolationInBody || violation.Code != ViolationCodeType || violation.Detail != "must be number" {
+		t.Fatalf("violation = %#v", violation)
+	}
+	if dst.Name != "existing name" || dst.Age != 3 {
+		t.Fatalf("dst = %#v, want destination preserved when bind fails", dst)
 	}
 }

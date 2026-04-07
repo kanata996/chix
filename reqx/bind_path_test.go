@@ -1,11 +1,12 @@
 package reqx
 
-// 用例清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// 测试清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
 // - [✓] `BindPathValues` 的空输入、未知字段、无匹配 pattern 与类型错误契约。
 // - [✓] 非法 path 绑定定义会在解码计划阶段被拒绝。
 // - [✓] `ParamString`、`ParamInt`、`ParamUUID` 的裁剪、解析与错误映射行为。
 // - [✓] `BindAndValidatePath` 会在校验前执行 `Normalize()`，并使用 `param` tag 字段名。
+// - [✓] `BindAndValidatePath` 在绑定失败时优先返回绑定错误，并透传公开空输入参数错误。
 
 import (
 	"net/http"
@@ -85,6 +86,34 @@ func TestBindPathValues_RejectsNilInputs(t *testing.T) {
 		err := BindPathValues[struct{}](req, nil)
 		if err == nil {
 			t.Fatal("BindPathValues() error = nil")
+		}
+		if got := err.Error(); got != "reqx: destination must not be nil" {
+			t.Fatalf("error = %q", got)
+		}
+	})
+}
+
+// path 包装器会在绑定前直接拒绝空输入参数。
+func TestBindAndValidatePath_RejectsNilInputs(t *testing.T) {
+	t.Run("nil request", func(t *testing.T) {
+		var dst struct{}
+		err := BindAndValidatePath[struct{}](nil, &dst)
+		if err == nil {
+			t.Fatal("BindAndValidatePath() error = nil")
+		}
+		if got := err.Error(); got != "reqx: request must not be nil" {
+			t.Fatalf("error = %q", got)
+		}
+	})
+
+	t.Run("nil destination", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{
+			"id": {"1"},
+		})
+
+		err := BindAndValidatePath[struct{}](req, nil)
+		if err == nil {
+			t.Fatal("BindAndValidatePath() error = nil")
 		}
 		if got := err.Error(); got != "reqx: destination must not be nil" {
 			t.Fatalf("error = %q", got)
@@ -229,6 +258,32 @@ func TestBindPathValues_RejectsInvalidBindingSchema(t *testing.T) {
 			t.Fatalf("error = %q", got)
 		}
 	})
+}
+
+// path 包装器在绑定失败时不会进入校验阶段，也不会污染目标对象。
+func TestBindAndValidatePath_ReturnsBindingErrorBeforeValidation(t *testing.T) {
+	type pathRequest struct {
+		State string `param:"state" validate:"required,oneof=active disabled"`
+		ID    int    `param:"id" validate:"min=1"`
+	}
+
+	req := requestWithPathParams(map[string][]string{
+		"state": {"bad state"},
+		"id":    {"oops"},
+	})
+	dst := pathRequest{
+		State: "existing state",
+		ID:    3,
+	}
+
+	err := BindAndValidatePath(req, &dst)
+	violation := assertSingleViolation(t, err)
+	if violation.Field != "id" || violation.In != ViolationInPath || violation.Code != ViolationCodeType || violation.Detail != "must be number" {
+		t.Fatalf("violation = %#v", violation)
+	}
+	if dst.State != "existing state" || dst.ID != 3 {
+		t.Fatalf("dst = %#v, want destination preserved when bind fails", dst)
+	}
 }
 
 // path helper 会裁剪输入，并在需要时做解析或规范化。

@@ -1,11 +1,9 @@
 package reqx
 
-// 用例清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
-// - [✓] `BindBody` 在小型 JSON 请求上的基准性能。
-// - [✓] `BindQueryParams` 的典型查询绑定基准性能。
-// - [✓] `BindPathValues`、`BindHeaders` 的典型绑定基准性能。
-// - [✓] `Bind`、`BindAndValidate` 在 GET 请求场景下的整体基准性能。
+// 测试清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
+// - [✓] 本文件定义 `BindBody`、`BindQueryParams`、`BindPathValues`、`BindHeaders`、`Bind`、`BindAndValidate` 的典型 benchmark 场景。
+// - [✓] 这些 benchmark 仅用于性能观测，不作为功能验收覆盖。
 
 import (
 	"io"
