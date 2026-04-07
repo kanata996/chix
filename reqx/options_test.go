@@ -1,8 +1,8 @@
 package reqx
 
-// 用例清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
-// - [✓] `WithMaxBodyBytes` 会覆盖 body 限制，同时保留其余默认绑定配置。
+// 测试清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
+// - [✓] 内部配置辅助 `applyBindOptions` 会应用 `WithMaxBodyBytes`，并保留默认 body/query/header 绑定配置。
 
 import "testing"
 

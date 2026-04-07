@@ -1,11 +1,11 @@
 package reqx
 
-// 用例清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
-// - [✓] `BindAndValidate*` 包装器的成功路径与绑定错误优先级。
-// - [✓] `validate`、`validateStruct`、`validateTarget` 的边界分支与无效目标错误。
-// - [✓] violation 规范化、字段解析、来源推断与标签优先级辅助分支。
-// - [✓] 这组测试覆盖内部校验辅助逻辑，断言具体返回值和 panic 分支，不是假测试。
+// 测试清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
+// - [✓] `BindAndValidate*` 包装器会优先返回绑定错误，并覆盖代表性成功路径。
+// - [✓] 内部 `validate`、`validateStruct`、`validateTarget` 会对 typed nil、非 struct 和 validator 非法输入维持稳定契约。
+// - [✓] 内部 violation 规范化、字段解析、来源推断与请求标签优先级会产出稳定结果。
+// - [✓] 对不支持的来源和非法注册，内部 helper 会明确 panic，而不是静默回退。
 
 import (
 	"errors"

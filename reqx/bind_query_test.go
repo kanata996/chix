@@ -1,12 +1,13 @@
 package reqx
 
-// 用例清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 本轮审查发现缺口后补测。
+// 测试清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
 // - [✓] `BindQueryParams` 能绑定支持的标量、指针、切片和 `encoding.TextUnmarshaler` 类型。
 // - [✓] `BindQueryParams` 的未知字段、空输入、nil URL 与非法绑定定义契约。
 // - [✓] `BindQueryParams` 会把重复值、类型错误和无效文本解码稳定映射为 violation。
 // - [✓] 多字段同时失败时会聚合 violation 且保持目标对象不变。
 // - [✓] `BindAndValidateQuery` 会在校验前执行 `Normalize()`，并使用 `query` tag 字段名。
+// - [✓] `BindAndValidateQuery` 在绑定失败时优先返回绑定错误，并透传公开空输入参数错误。
 
 import (
 	"errors"
@@ -344,6 +345,54 @@ func TestBindAndValidateQuery_NormalizesBeforeValidation(t *testing.T) {
 	}
 	if dst.Name != "kanata" {
 		t.Fatalf("name = %q, want kanata", dst.Name)
+	}
+}
+
+// query 包装器会在绑定前直接拒绝空输入参数。
+func TestBindAndValidateQuery_RejectsNilInputs(t *testing.T) {
+	t.Run("nil request", func(t *testing.T) {
+		var dst struct{}
+		err := BindAndValidateQuery[struct{}](nil, &dst)
+		if err == nil {
+			t.Fatal("BindAndValidateQuery() error = nil")
+		}
+		if got := err.Error(); got != "reqx: request must not be nil" {
+			t.Fatalf("error = %q", got)
+		}
+	})
+
+	t.Run("nil destination", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/?cursor=abc", nil)
+		err := BindAndValidateQuery[struct{}](req, nil)
+		if err == nil {
+			t.Fatal("BindAndValidateQuery() error = nil")
+		}
+		if got := err.Error(); got != "reqx: destination must not be nil" {
+			t.Fatalf("error = %q", got)
+		}
+	})
+}
+
+// query 包装器在绑定失败时不会继续进入校验阶段，也不会污染目标对象。
+func TestBindAndValidateQuery_ReturnsBindingErrorBeforeValidation(t *testing.T) {
+	type request struct {
+		Name string `query:"name" validate:"required,nospace"`
+		Page int    `query:"page" validate:"min=1"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/?name=bad%20value&page=oops", nil)
+	dst := request{
+		Name: "existing name",
+		Page: 3,
+	}
+
+	err := BindAndValidateQuery(req, &dst)
+	violation := assertSingleViolation(t, err)
+	if violation.Field != "page" || violation.In != ViolationInQuery || violation.Code != ViolationCodeType || violation.Detail != "must be number" {
+		t.Fatalf("violation = %#v", violation)
+	}
+	if dst.Name != "existing name" || dst.Page != 3 {
+		t.Fatalf("dst = %#v, want destination preserved when bind fails", dst)
 	}
 }
 

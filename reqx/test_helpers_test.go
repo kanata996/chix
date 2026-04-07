@@ -1,11 +1,13 @@
 package reqx
 
-// 用例清单：
-// - [✓] 测试辅助文件：提供 JSON 请求构造与 HTTP/violation 断言辅助，无独立业务用例。
+// 测试清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
+// - [✓] 测试辅助文件：提供 JSON 请求构造与 HTTP/violation 断言辅助，不声明独立业务覆盖。
 
 import (
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -68,4 +70,34 @@ func assertSingleViolation(t *testing.T, err error) Violation {
 		t.Fatalf("details len = %d, want 1", len(violations))
 	}
 	return violations[0]
+}
+
+func assertSameHTTPError(t *testing.T, gotErr, wantErr error) *resp.HTTPError {
+	t.Helper()
+
+	got, ok := gotErr.(*resp.HTTPError)
+	if !ok {
+		t.Fatalf("got error type = %T, want *resp.HTTPError", gotErr)
+	}
+	want, ok := wantErr.(*resp.HTTPError)
+	if !ok {
+		t.Fatalf("want error type = %T, want *resp.HTTPError", wantErr)
+	}
+
+	if got.Status() != want.Status() || got.Code() != want.Code() || got.Detail() != want.Detail() {
+		t.Fatalf(
+			"got error = (%d, %q, %q), want (%d, %q, %q)",
+			got.Status(),
+			got.Code(),
+			got.Detail(),
+			want.Status(),
+			want.Code(),
+			want.Detail(),
+		)
+	}
+	if !reflect.DeepEqual(got.Errors(), want.Errors()) {
+		t.Fatalf("got error details = %#v, want %#v", got.Errors(), want.Errors())
+	}
+
+	return got
 }
