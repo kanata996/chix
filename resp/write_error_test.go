@@ -985,9 +985,6 @@ func TestWriteErrorLogsServerErrorToDefaultLogger(t *testing.T) {
 	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
 		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
 	}
-	if got := logEntry["http.route"]; got != "/failure" {
-		t.Fatalf("http.route = %#v, want /failure", got)
-	}
 	if got := logEntry["http.response.status_code"]; got != float64(http.StatusInternalServerError) {
 		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusInternalServerError)
 	}

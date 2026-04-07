@@ -27,7 +27,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
@@ -335,16 +334,6 @@ func limitErrorLogString(value string) string {
 
 func requestContextAttrs(ctx context.Context) []slog.Attr {
 	attrs := requestCorrelationAttrs(ctx)
-	if ctx == nil {
-		return attrs
-	}
-
-	if rctx := chi.RouteContext(ctx); rctx != nil {
-		if route := strings.TrimSpace(rctx.RoutePattern()); route != "" {
-			attrs = append(attrs, slog.String("http.route", route))
-		}
-	}
-
 	return attrs
 }
 

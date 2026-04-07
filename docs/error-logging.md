@@ -122,7 +122,6 @@
 - `error.canceled`
 - `traceId`
 - `request.id`
-- `http.route`
 
 ### 错误响应写出失败
 
@@ -141,7 +140,6 @@
 - `error.root_type`
 - `traceId`
 - `request.id`
-- `http.route`
 
 如果错误可解出 `ErrorWriteDegraded`，还会追加：
 

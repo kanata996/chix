@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/traceid"
 )
@@ -20,7 +19,7 @@ import (
 // [✓] 错误链摘要兼容 nil、普通包装、不可比较 error、typed-nil 和 panic Error()
 // [✓] 错误链展开兼容深度限制、errors.Join、多分支 unwrap 和循环引用
 // [✓] 诊断起点优先使用 HTTPError 的内部 cause，没有 cause 时回退原始 error
-// [✓] 请求日志字段仅在 5xx 场景补充低噪音关联字段；route 提取与 root cause 诊断保持稳定
+// [✓] 请求日志字段仅在 5xx 场景补充低噪音关联字段；关联字段与 root cause 诊断保持稳定
 // [✓] 错误类型名与错误文本裁剪对 nil、空白、超长输入保持稳定
 
 type cycleTestError struct{}
@@ -205,7 +204,7 @@ func TestRequestErrorLogAttrs(t *testing.T) {
 		t.Fatalf("requestErrorLogAttrs(nil, nil, nil) = %#v, want nil", got)
 	}
 
-	req := newRequestWithRoute(t, http.MethodGet, "/users/{id}", "/users/u_1")
+	req := httptest.NewRequest(http.MethodGet, "/users/u_1", nil)
 	ctx := traceid.NewContext(req.Context())
 	ctx = context.WithValue(ctx, chimw.RequestIDKey, "req-123")
 	req = req.WithContext(ctx)
@@ -224,9 +223,6 @@ func TestRequestErrorLogAttrs(t *testing.T) {
 	}
 	if got, ok := values["traceId"].(string); !ok || got == "" {
 		t.Fatalf("traceId = %#v, want non-empty string", values["traceId"])
-	}
-	if _, exists := values["http.route"]; exists {
-		t.Fatalf("http.route unexpectedly present: %#v", values["http.route"])
 	}
 	if _, exists := values["error.root_message"]; exists {
 		t.Fatalf("error.root_message unexpectedly present: %#v", values["error.root_message"])
@@ -348,9 +344,6 @@ func TestRequestContextAttrs(t *testing.T) {
 
 	ctx := traceid.NewContext(context.Background())
 	ctx = context.WithValue(ctx, chimw.RequestIDKey, "req-123")
-	routeCtx := chi.NewRouteContext()
-	routeCtx.RoutePatterns = []string{"  /users/{id}  "}
-	ctx = context.WithValue(ctx, chi.RouteCtxKey, routeCtx)
 
 	attrs := attrsToMap(requestContextAttrs(ctx))
 	if got := attrs["request.id"]; got != "req-123" {
@@ -358,9 +351,6 @@ func TestRequestContextAttrs(t *testing.T) {
 	}
 	if got, ok := attrs["traceId"].(string); !ok || got == "" {
 		t.Fatalf("traceId = %#v, want non-empty string", attrs["traceId"])
-	}
-	if got := attrs["http.route"]; got != "/users/{id}" {
-		t.Fatalf("http.route = %#v, want /users/{id}", got)
 	}
 }
 
@@ -404,15 +394,6 @@ func attrsToMap(attrs []slog.Attr) map[string]any {
 		out[attr.Key] = attr.Value.Any()
 	}
 	return out
-}
-
-func newRequestWithRoute(t *testing.T, method, routePattern, target string) *http.Request {
-	t.Helper()
-
-	req := httptest.NewRequest(method, target, nil)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.RoutePatterns = []string{routePattern}
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
 }
 
 func nilContext() context.Context {
