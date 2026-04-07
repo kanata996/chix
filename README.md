@@ -123,6 +123,8 @@ Content-Type: application/problem+json
 - `header:"..."`：header
 - `validate:"..."`：`validator/v10` 校验规则
 
+请求侧 JSON body 接受 `application/json` 和 `application/*+json`。
+
 根包常用请求 API：
 
 - `Bind`
@@ -165,11 +167,12 @@ func (r *listAccountsRequest) Normalize() {
 }
 ```
 
-如果需要限制 body 大小，可以传入 `WithMaxBodyBytes(...)`：
+默认 body 读取上限是 `chix.DefaultMaxBodyBytes`（当前为 `1 MiB`）。
+如果需要限制 body 大小，可以传入 `WithMaxBodyBytes(...)`，例如把单个请求体收紧到 `256 KiB`：
 
 ```go
 var req createAccountRequest
-if err := chix.BindAndValidate(r, &req, chix.WithMaxBodyBytes(1<<20)); err != nil {
+if err := chix.BindAndValidate(r, &req, chix.WithMaxBodyBytes(256<<10)); err != nil {
 	_ = chix.WriteError(w, r, err)
 	return
 }

@@ -27,7 +27,6 @@ import (
 	"reflect"
 	"strings"
 
-	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
 	"github.com/kanata996/chix/errx"
@@ -343,12 +342,9 @@ func requestCorrelationAttrs(ctx context.Context) []slog.Attr {
 		return nil
 	}
 
-	attrs := make([]slog.Attr, 0, 2)
+	attrs := make([]slog.Attr, 0, 1)
 	if traceID := traceid.FromContext(ctx); traceID != "" {
 		attrs = append(attrs, slog.String(traceid.LogKey, traceID))
-	}
-	if requestID := chimw.GetReqID(ctx); requestID != "" {
-		attrs = append(attrs, slog.String("request.id", requestID))
 	}
 
 	return attrs
