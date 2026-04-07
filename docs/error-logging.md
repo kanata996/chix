@@ -150,7 +150,7 @@
 
 5xx 诊断起点规则为：
 
-- 如果 `HTTPError` 持有 `cause`，优先从 `httpErr.cause` 开始
+- 如果 `HTTPError` 可通过 `Unwrap()` 解出底层 cause，优先从该 cause 开始
 - 否则从原始 `err` 开始
 
 错误链展开同时兼容：

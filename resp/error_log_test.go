@@ -13,6 +13,7 @@ import (
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/traceid"
+	"github.com/kanata996/chix/errx"
 )
 
 // 测试清单：
@@ -208,7 +209,7 @@ func TestRequestErrorLogAttrs(t *testing.T) {
 	ctx := traceid.NewContext(req.Context())
 	ctx = context.WithValue(ctx, chimw.RequestIDKey, "req-123")
 	req = req.WithContext(ctx)
-	httpErr := wrapError(http.StatusInternalServerError, "internal_error", "", errors.New("db timeout"))
+	httpErr := errx.NewHTTPErrorWithCause(http.StatusInternalServerError, "internal_error", "", errors.New("db timeout"))
 	attrs := requestErrorLogAttrs(req, httpErr, httpErr)
 	if len(attrs) == 0 {
 		t.Fatal("requestErrorLogAttrs() = nil, want attrs")
@@ -228,7 +229,7 @@ func TestRequestErrorLogAttrs(t *testing.T) {
 		t.Fatalf("error.root_message unexpectedly present: %#v", values["error.root_message"])
 	}
 
-	clientErr := BadRequest("bad_request", "bad request")
+	clientErr := errx.BadRequest("bad_request", "bad request")
 	if got := requestErrorLogAttrs(req, clientErr, clientErr); got != nil {
 		t.Fatalf("requestErrorLogAttrs(4xx) = %#v, want nil", got)
 	}
@@ -239,14 +240,14 @@ func TestDiagnosticErrorLogAttrs(t *testing.T) {
 		t.Fatalf("diagnosticErrorLogAttrs(nil, nil) = %#v, want nil", got)
 	}
 
-	canceledErr := wrapError(http.StatusInternalServerError, "internal_error", "", context.Canceled)
+	canceledErr := errx.NewHTTPErrorWithCause(http.StatusInternalServerError, "internal_error", "", context.Canceled)
 	canceledAttrs := attrsToMap(diagnosticErrorLogAttrs(canceledErr, canceledErr))
 	if got := canceledAttrs["error.canceled"]; got != true {
 		t.Fatalf("error.canceled = %#v, want true", got)
 	}
 
 	timeoutCause := fmt.Errorf("query timeout: %w", context.DeadlineExceeded)
-	timeoutErr := wrapError(http.StatusInternalServerError, "internal_error", "", timeoutCause)
+	timeoutErr := errx.NewHTTPErrorWithCause(http.StatusInternalServerError, "internal_error", "", timeoutCause)
 	timeoutAttrs := attrsToMap(diagnosticErrorLogAttrs(timeoutErr, timeoutErr))
 	if got := timeoutAttrs["error.timeout"]; got != true {
 		t.Fatalf("error.timeout = %#v, want true", got)
@@ -260,12 +261,12 @@ func TestLogServerError(t *testing.T) {
 	defer slog.SetDefault(previousDefault)
 
 	logServerError(nil, nil, nil)
-	logServerError(nil, BadRequest("bad_request", "bad request"), errors.New("client error"))
+	logServerError(nil, errx.BadRequest("bad_request", "bad request"), errors.New("client error"))
 	if buf.Len() != 0 {
 		t.Fatalf("logServerError() unexpectedly wrote output: %s", buf.Bytes())
 	}
 
-	logServerError(nil, NewError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), errors.New("db timeout"))
+	logServerError(nil, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), errors.New("db timeout"))
 	if buf.Len() == 0 {
 		t.Fatal("logServerError() did not write 5xx output")
 	}
@@ -292,14 +293,14 @@ func TestLogServerErrorAttrs(t *testing.T) {
 	defer slog.SetDefault(previousDefault)
 
 	logServerErrorAttrs(nil, nil, nil)
-	logServerErrorAttrs(nil, BadRequest("bad_request", "bad request"), []slog.Attr{
+	logServerErrorAttrs(nil, errx.BadRequest("bad_request", "bad request"), []slog.Attr{
 		slog.String("error.code", "bad_request"),
 	})
 	if buf.Len() != 0 {
 		t.Fatalf("logServerErrorAttrs() unexpectedly wrote output: %s", buf.Bytes())
 	}
 
-	logServerErrorAttrs(nil, NewError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), []slog.Attr{
+	logServerErrorAttrs(nil, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), []slog.Attr{
 		slog.String("error.code", "internal_error"),
 	})
 	if buf.Len() == 0 {
@@ -321,13 +322,13 @@ func TestLogServerErrorAttrs(t *testing.T) {
 func TestErrorForDiagnostics(t *testing.T) {
 	original := errors.New("original")
 	cause := errors.New("db timeout")
-	httpErr := wrapError(http.StatusInternalServerError, "", "", cause)
+	httpErr := errx.NewHTTPErrorWithCause(http.StatusInternalServerError, "", "", cause)
 
 	if got := errorForDiagnostics(original, httpErr); !errors.Is(got, cause) {
 		t.Fatalf("errorForDiagnostics() = %v, want cause %v", got, cause)
 	}
 
-	withoutCause := NewError(http.StatusInternalServerError, "", "")
+	withoutCause := errx.NewHTTPError(http.StatusInternalServerError, "", "")
 	if got := errorForDiagnostics(original, withoutCause); !errors.Is(got, original) {
 		t.Fatalf("errorForDiagnostics() without cause = %v, want original %v", got, original)
 	}

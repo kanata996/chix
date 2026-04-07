@@ -3,7 +3,7 @@ package reqx
 import (
 	"net/http"
 
-	"github.com/kanata996/chix/resp"
+	"github.com/kanata996/chix/errx"
 )
 
 const (
@@ -47,7 +47,7 @@ func invalidFieldsError(violations []Violation) error {
 	for _, violation := range violations {
 		details = append(details, normalizeViolation(violation))
 	}
-	return resp.NewError(
+	return errx.NewHTTPError(
 		http.StatusUnprocessableEntity,
 		CodeInvalidRequest,
 		"request contains invalid fields",

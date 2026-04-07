@@ -13,11 +13,12 @@
 - 写出 JSON 成功响应
 - 写出一致的结构化错误响应
 
-当前仓库对外主要暴露三个包：
+当前仓库对外主要暴露四个包：
 
 - `github.com/kanata996/chix`：面向大多数 handler 的根包入口
+- `github.com/kanata996/chix/errx`：共享公共 HTTP 错误模型
 - `github.com/kanata996/chix/reqx`：请求侧绑定、校验与 path 参数辅助
-- `github.com/kanata996/chix/resp`：响应写回、错误类型与快捷错误构造
+- `github.com/kanata996/chix/resp`：响应写回与错误响应输出
 
 ## 状态
 
@@ -244,14 +245,14 @@ func (r *listAccountsRequest) Normalize() {
 - `title` 始终由状态码生成，`detail` 承载公开说明，`code` 承载稳定机器码
 - `errors` 仅在存在公开结构化错误详情时出现；其中 `reqx` 生成的字段级错误项使用 `field`、`in`、`code`、`detail`
 
-如果你需要可复用的公共错误值，可以直接使用 `resp.HTTPError`，以及 `resp.BadRequest(...)`、`resp.NotFound(...)`、`resp.UnprocessableEntity(...)` 等辅助构造函数。
+如果你需要在请求侧和响应侧之间共享公共错误值，直接使用 `errx.HTTPError`，以及 `errx.BadRequest(...)`、`errx.NotFound(...)`、`errx.UnprocessableEntity(...)` 等辅助构造函数。
 
 例如：
 
 ```go
 if err := repo.DeleteAccount(ctx, accountID); err != nil {
 	if errors.Is(err, sql.ErrNoRows) {
-		_ = chix.WriteError(w, r, resp.NotFound("account_not_found", "account not found"))
+		_ = chix.WriteError(w, r, errx.NotFound("account_not_found", "account not found"))
 		return
 	}
 

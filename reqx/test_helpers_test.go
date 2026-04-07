@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kanata996/chix/resp"
+	"github.com/kanata996/chix/errx"
 )
 
 func newJSONRequest(method, target, body string) *http.Request {
@@ -20,12 +20,12 @@ func newJSONRequest(method, target, body string) *http.Request {
 	return req
 }
 
-func assertHTTPError(t *testing.T, err error, wantStatus int, wantCode, wantDetail string) *resp.HTTPError {
+func assertHTTPError(t *testing.T, err error, wantStatus int, wantCode, wantDetail string) *errx.HTTPError {
 	t.Helper()
 
-	httpErr, ok := err.(*resp.HTTPError)
+	httpErr, ok := err.(*errx.HTTPError)
 	if !ok {
-		t.Fatalf("error type = %T, want *resp.HTTPError", err)
+		t.Fatalf("error type = %T, want *errx.HTTPError", err)
 	}
 	if got := httpErr.Status(); got != wantStatus {
 		t.Fatalf("status = %d, want %d", got, wantStatus)
@@ -72,16 +72,16 @@ func assertSingleViolation(t *testing.T, err error) Violation {
 	return violations[0]
 }
 
-func assertSameHTTPError(t *testing.T, gotErr, wantErr error) *resp.HTTPError {
+func assertSameHTTPError(t *testing.T, gotErr, wantErr error) *errx.HTTPError {
 	t.Helper()
 
-	got, ok := gotErr.(*resp.HTTPError)
+	got, ok := gotErr.(*errx.HTTPError)
 	if !ok {
-		t.Fatalf("got error type = %T, want *resp.HTTPError", gotErr)
+		t.Fatalf("got error type = %T, want *errx.HTTPError", gotErr)
 	}
-	want, ok := wantErr.(*resp.HTTPError)
+	want, ok := wantErr.(*errx.HTTPError)
 	if !ok {
-		t.Fatalf("want error type = %T, want *resp.HTTPError", wantErr)
+		t.Fatalf("want error type = %T, want *errx.HTTPError", wantErr)
 	}
 
 	if got.Status() != want.Status() || got.Code() != want.Code() || got.Detail() != want.Detail() {

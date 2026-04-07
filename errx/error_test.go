@@ -1,10 +1,22 @@
-package resp
+package errx
 
 import (
 	"errors"
 	"net/http"
 	"testing"
 )
+
+type panicWriteCause struct{}
+
+type blankWriteCause struct{}
+
+func (panicWriteCause) Error() string {
+	panic("boom")
+}
+
+func (blankWriteCause) Error() string {
+	return "   "
+}
 
 // 测试清单：
 // [✓] nil 接收者返回安全默认值
@@ -43,7 +55,7 @@ func TestHTTPErrorNilReceiverUsesSafeDefaults(t *testing.T) {
 // HTTPError 会优先暴露底层 cause，并对 details 做防御性拷贝。
 func TestHTTPErrorUsesCauseAndClonesDetails(t *testing.T) {
 	cause := errors.New("db timeout")
-	err := wrapError(http.StatusConflict, "", "", cause, "detail")
+	err := NewHTTPErrorWithCause(http.StatusConflict, "", "", cause, "detail")
 
 	if got := err.Error(); got != cause.Error() {
 		t.Fatalf("Error() = %q, want %q", got, cause.Error())
@@ -73,7 +85,7 @@ func TestHTTPErrorUsesCauseAndClonesDetails(t *testing.T) {
 
 // cause 的 Error() 实现不安全时，HTTPError.Error 也应退化到稳定公开文案。
 func TestHTTPErrorErrorFallsBackWhenCausePanics(t *testing.T) {
-	err := wrapError(http.StatusBadRequest, "", "", panicWriteCause{})
+	err := NewHTTPErrorWithCause(http.StatusBadRequest, "", "", panicWriteCause{})
 
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -88,7 +100,7 @@ func TestHTTPErrorErrorFallsBackWhenCausePanics(t *testing.T) {
 
 // cause 文本为空白时，HTTPError.Error 也不应返回空串。
 func TestHTTPErrorErrorFallsBackWhenCauseMessageBlank(t *testing.T) {
-	err := wrapError(http.StatusBadRequest, "", "", blankWriteCause{})
+	err := NewHTTPErrorWithCause(http.StatusBadRequest, "", "", blankWriteCause{})
 
 	if got := err.Error(); got != http.StatusText(http.StatusBadRequest) {
 		t.Fatalf("Error() = %q, want %q", got, http.StatusText(http.StatusBadRequest))
@@ -97,7 +109,7 @@ func TestHTTPErrorErrorFallsBackWhenCauseMessageBlank(t *testing.T) {
 
 // Detail/Errors 会暴露公共字段，并返回独立的切片副本给调用方修改。
 func TestHTTPErrorDetailAndErrorsExposePublicFields(t *testing.T) {
-	err := NewError(http.StatusBadRequest, " invalid_json ", " invalid payload ", "detail")
+	err := NewHTTPError(http.StatusBadRequest, " invalid_json ", " invalid payload ", "detail")
 
 	if got := err.Detail(); got != "invalid payload" {
 		t.Fatalf("Detail() = %q, want %q", got, "invalid payload")
@@ -114,9 +126,9 @@ func TestHTTPErrorDetailAndErrorsExposePublicFields(t *testing.T) {
 }
 
 // 构造 HTTPError 时会立刻拷贝 errors 入参，避免调用方后续修改原切片影响错误对象。
-func TestNewErrorClonesInputErrorsSlice(t *testing.T) {
+func TestNewHTTPErrorClonesInputErrorsSlice(t *testing.T) {
 	input := []any{"detail"}
-	err := NewError(http.StatusBadRequest, "bad_request", "bad request", input...)
+	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request", input...)
 
 	input[0] = "changed"
 
@@ -128,16 +140,16 @@ func TestNewErrorClonesInputErrorsSlice(t *testing.T) {
 
 // 没有 cause 时，HTTPError.Error 会回退为公开消息本身。
 func TestHTTPErrorErrorReturnsMessageWithoutCause(t *testing.T) {
-	err := NewError(http.StatusBadRequest, "bad_request", "bad request")
+	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")
 
 	if got := err.Error(); got != "bad request" {
 		t.Fatalf("Error() = %q, want %q", got, "bad request")
 	}
 }
 
-// 即使内部 detail 字段为空，Error 也应与公开 Detail 保持一致，不返回空串。
+// 即使 detail 为空，Error 也应与公开 Detail 保持一致，不返回空串。
 func TestHTTPErrorErrorFallsBackToNormalizedDetail(t *testing.T) {
-	err := &HTTPError{status: http.StatusBadRequest}
+	err := NewHTTPErrorWithCause(http.StatusBadRequest, "", "", nil)
 
 	if got := err.Error(); got != http.StatusText(http.StatusBadRequest) {
 		t.Fatalf("Error() = %q, want %q", got, http.StatusText(http.StatusBadRequest))
@@ -310,8 +322,8 @@ func TestNormalizeErrorDetail(t *testing.T) {
 	}
 }
 
-func TestNewErrorSupports499Defaults(t *testing.T) {
-	err := NewError(499, "", "")
+func TestNewHTTPErrorSupports499Defaults(t *testing.T) {
+	err := NewHTTPError(499, "", "")
 
 	if got := err.Status(); got != 499 {
 		t.Fatalf("Status() = %d, want 499", got)

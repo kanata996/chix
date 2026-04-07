@@ -19,6 +19,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/kanata996/chix/errx"
 )
 
 func FuzzRespPublicContracts(f *testing.F) {
@@ -180,7 +182,7 @@ func fuzzWriteErrorContracts(t *testing.T, variant uint8, status int, detail, fi
 	default:
 		hiddenCause = "internal cause sentinel"
 		wantErrors = map[string]any{"field": jsonSafeString(field)}
-		httpErr := wrapError(status, "", detail, errors.New(hiddenCause), map[string]any{"field": field})
+		httpErr := errx.NewHTTPErrorWithCause(status, "", detail, errors.New(hiddenCause), map[string]any{"field": field})
 		input = fmt.Errorf("wrapped: %w", httpErr)
 		wantStatus = httpErr.Status()
 		wantCode = httpErr.Code()

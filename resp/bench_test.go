@@ -19,6 +19,7 @@ import (
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/traceid"
+	"github.com/kanata996/chix/errx"
 )
 
 type benchmarkResponseWriter struct {
@@ -59,7 +60,7 @@ var (
 		},
 	}
 	benchmarkJSONBlobPayload = []byte(`{"id":"acct_123456","name":"kanata","email":"kanata@example.com","active":true,"roles":["owner","billing"],"profile":{"plan":"pro","region":"ap-southeast-1","tags":["prod","priority"]}}`)
-	benchmarkClientHTTPError = UnprocessableEntity(
+	benchmarkClientHTTPError = errx.UnprocessableEntity(
 		"validation_failed",
 		"request validation failed",
 		benchmarkValidationError{Field: "email", Reason: "must be a valid email"},
