@@ -661,7 +661,6 @@ func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 		)
 		_ = WriteError(w, r, err)
 	})
-
 	req := httptest.NewRequest(http.MethodGet, "/users/u_123", nil)
 	req.Header.Set(chimiddleware.RequestIDHeader, "req-123")
 	rr := httptest.NewRecorder()
@@ -735,7 +734,6 @@ func TestWriteErrorEnrichesRequestLogFromWrappedHTTPErrorWithoutCause(t *testing
 		))
 		_ = WriteError(w, r, err)
 	})
-
 	req := httptest.NewRequest(http.MethodGet, "/wrapped", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -777,7 +775,6 @@ func TestWriteErrorEnrichesRequestLogWithTimeoutFlag(t *testing.T) {
 		)
 		_ = WriteError(w, r, err)
 	})
-
 	req := httptest.NewRequest(http.MethodGet, "/timeout", nil)
 	req.Header.Set(chimiddleware.RequestIDHeader, "req-timeout")
 	rr := httptest.NewRecorder()
@@ -824,7 +821,6 @@ func TestWriteErrorEnrichesRequestLogWithCanceledFlag(t *testing.T) {
 		)
 		_ = WriteError(w, r, err)
 	})
-
 	req := httptest.NewRequest(http.MethodGet, "/canceled", nil)
 	req.Header.Set(chimiddleware.RequestIDHeader, "req-canceled")
 	rr := httptest.NewRecorder()
@@ -872,7 +868,6 @@ func TestWriteErrorDoesNotEnrichRequestLogFor4xx(t *testing.T) {
 		})
 		_ = WriteError(w, r, err)
 	})
-
 	req := httptest.NewRequest(http.MethodGet, "/users/u_123", nil)
 	req.Header.Set(chimiddleware.RequestIDHeader, "req-456")
 	rr := httptest.NewRecorder()
@@ -940,7 +935,6 @@ func TestWriteErrorLogsServerErrorToDefaultLogger(t *testing.T) {
 	r.Get("/failure", func(w http.ResponseWriter, r *http.Request) {
 		_ = WriteError(w, r, errors.New("db timeout"))
 	})
-
 	req := httptest.NewRequest(http.MethodGet, "/failure", nil)
 	req.Header.Set(chimiddleware.RequestIDHeader, "req-server")
 	rr := httptest.NewRecorder()
