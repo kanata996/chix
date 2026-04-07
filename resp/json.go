@@ -38,6 +38,16 @@ func NoContent(w http.ResponseWriter, _ *http.Request) error {
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any, indent string) error {
+	if w == nil {
+		return errNilResponseWriter
+	}
+	if err := validateHTTPStatus(status); err != nil {
+		return err
+	}
+	if err := validateStatusAllowsBody(status, "JSON body writers"); err != nil {
+		return err
+	}
+
 	body, err := encodeJSON(data, indent)
 	if err != nil {
 		return err

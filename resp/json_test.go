@@ -516,6 +516,17 @@ func TestWriteJSONPropagatesStatusValidationError(t *testing.T) {
 	}
 }
 
+// writeJSON 应先校验响应边界，再进行编码，避免非法状态掩盖更根本的写回错误。
+func TestWriteJSONValidatesStatusBeforeEncoding(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	err := writeJSON(rr, http.StatusNoContent, panicSuccessJSONValue{}, "")
+	if err == nil || err.Error() != "resp: JSON body writers cannot use bodyless status 204" {
+		t.Fatalf("writeJSON() error = %v, want bodyless status error", err)
+	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
+}
+
 // writeSuccess 会拒绝非成功状态码。
 func TestWriteSuccessRejectsInvalidStatus(t *testing.T) {
 	err := writeSuccess(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil), http.StatusBadRequest, map[string]any{"id": "u_1"})

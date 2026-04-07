@@ -71,6 +71,30 @@ func TestHTTPErrorUsesCauseAndClonesDetails(t *testing.T) {
 	}
 }
 
+// cause 的 Error() 实现不安全时，HTTPError.Error 也应退化到稳定公开文案。
+func TestHTTPErrorErrorFallsBackWhenCausePanics(t *testing.T) {
+	err := wrapError(http.StatusBadRequest, "", "", panicWriteCause{})
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("Error() panicked: %v", recovered)
+		}
+	}()
+
+	if got := err.Error(); got != http.StatusText(http.StatusBadRequest) {
+		t.Fatalf("Error() = %q, want %q", got, http.StatusText(http.StatusBadRequest))
+	}
+}
+
+// cause 文本为空白时，HTTPError.Error 也不应返回空串。
+func TestHTTPErrorErrorFallsBackWhenCauseMessageBlank(t *testing.T) {
+	err := wrapError(http.StatusBadRequest, "", "", blankWriteCause{})
+
+	if got := err.Error(); got != http.StatusText(http.StatusBadRequest) {
+		t.Fatalf("Error() = %q, want %q", got, http.StatusText(http.StatusBadRequest))
+	}
+}
+
 // Detail/Errors 会暴露公共字段，并返回独立的切片副本给调用方修改。
 func TestHTTPErrorDetailAndErrorsExposePublicFields(t *testing.T) {
 	err := NewError(http.StatusBadRequest, " invalid_json ", " invalid payload ", "detail")

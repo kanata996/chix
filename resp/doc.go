@@ -18,6 +18,8 @@
 //   - 错误响应入口：WriteError
 //   - 公开错误类型：HTTPError
 //   - HTTPError 公开方法：Error、Unwrap、Status、Code、Title、Detail、Errors
+//   - HTTPError.Error 优先返回底层 cause 文本；当 cause 不可用、为空白或其 Error()
+//     实现不安全时，会回退到稳定的公开 Detail
 //   - 公开错误构造：NewError、BadRequest、Unauthorized、Forbidden、NotFound、
 //     MethodNotAllowed、Conflict、UnprocessableEntity、TooManyRequests
 //   - 公开写回降级类型：ErrorWriteDegraded
