@@ -234,14 +234,16 @@ func validationInput(source sourceKind, target any, err validator.FieldError) st
 		return violationInForSource(source)
 	}
 
-	field, ok := resolveValidationField(target, err.StructNamespace())
+	fields, ok := resolveValidationFieldPath(target, err.StructNamespace())
 	if !ok {
 		return ViolationInRequest
 	}
 
-	for _, tagName := range sourceTagPriority(sourceRequest) {
-		if name := tagValue(field, tagName); name != "" {
-			return violationInForTag(tagName)
+	for i := len(fields) - 1; i >= 0; i-- {
+		for _, tagName := range sourceTagPriority(sourceRequest) {
+			if name := tagValue(fields[i], tagName); name != "" {
+				return violationInForTag(tagName)
+			}
 		}
 	}
 	return ViolationInRequest
@@ -262,41 +264,52 @@ func violationInForTag(tagName string) string {
 }
 
 func resolveValidationField(target any, structNamespace string) (reflect.StructField, bool) {
+	fields, ok := resolveValidationFieldPath(target, structNamespace)
+	if !ok || len(fields) == 0 {
+		return reflect.StructField{}, false
+	}
+	return fields[len(fields)-1], true
+}
+
+func resolveValidationFieldPath(target any, structNamespace string) ([]reflect.StructField, bool) {
 	t := reflect.TypeOf(target)
 	for t != nil && t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t == nil || t.Kind() != reflect.Struct {
-		return reflect.StructField{}, false
+		return nil, false
 	}
 
 	path := parseStructNamespace(structNamespace)
 	if len(path) == 0 {
-		return reflect.StructField{}, false
+		return nil, false
 	}
 
 	current := t
+	fields := make([]reflect.StructField, 0, len(path))
 	for _, name := range path[:len(path)-1] {
 		field, ok := current.FieldByName(name)
 		if !ok {
-			return reflect.StructField{}, false
+			return nil, false
 		}
+		fields = append(fields, field)
 
 		next := field.Type
 		for next.Kind() == reflect.Pointer || next.Kind() == reflect.Slice || next.Kind() == reflect.Array {
 			next = next.Elem()
 		}
 		if next.Kind() != reflect.Struct {
-			return reflect.StructField{}, false
+			return nil, false
 		}
 		current = next
 	}
 
 	field, ok := current.FieldByName(path[len(path)-1])
 	if !ok {
-		return reflect.StructField{}, false
+		return nil, false
 	}
-	return field, true
+	fields = append(fields, field)
+	return fields, true
 }
 
 func parseStructNamespace(namespace string) []string {

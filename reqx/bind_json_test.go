@@ -48,6 +48,12 @@ func TestBindBody_ContentTypeContract(t *testing.T) {
 			wantErrStatus: http.StatusUnsupportedMediaType,
 		},
 		{
+			name:          "rejects non application json suffix media type",
+			contentType:   "text/problem+json",
+			setHeader:     true,
+			wantErrStatus: http.StatusUnsupportedMediaType,
+		},
+		{
 			name:        "allows parameterized application json",
 			contentType: "application/json; charset=utf-8",
 			setHeader:   true,

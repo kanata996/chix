@@ -333,6 +333,24 @@ func TestBindAndValidate_UsesRequestTagNames(t *testing.T) {
 	}
 }
 
+// 请求级校验在嵌套 body 字段上也应继承父级 json 来源，而不是退回 request。
+func TestBindAndValidate_InheritsNestedBodyInputSource(t *testing.T) {
+	type profile struct {
+		Name string `validate:"required"`
+	}
+	type request struct {
+		Profile profile `json:"profile"`
+	}
+
+	req := newJSONRequest(http.MethodPost, "/", `{"profile":{}}`)
+
+	var bound request
+	violation := assertSingleViolation(t, BindAndValidate(req, &bound))
+	if violation.Field != "profile.Name" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+		t.Fatalf("BindAndValidate() violation = %#v", violation)
+	}
+}
+
 // 顶层 Bind 会直接返回各阶段产生的错误，而不会吞掉或改写来源语义。
 func TestBind_PropagatesStageErrors(t *testing.T) {
 	t.Run("query binding error on get", func(t *testing.T) {

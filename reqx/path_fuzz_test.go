@@ -12,7 +12,6 @@ package reqx
 import (
 	"encoding/json"
 	"fmt"
-	"mime"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
@@ -375,16 +374,7 @@ func decodeFuzzJSONString(value string) string {
 }
 
 func emptyBodyAllowsContentType(contentType string) bool {
-	contentType = strings.TrimSpace(contentType)
-	if contentType == "" {
-		return true
-	}
-
-	mediaType, _, err := mime.ParseMediaType(contentType)
-	if err != nil {
-		return false
-	}
-	return mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")
+	return validateJSONContentType(contentType) == nil
 }
 
 func nonEmptyBodyAllowsContentType(contentType string) bool {
@@ -392,12 +382,7 @@ func nonEmptyBodyAllowsContentType(contentType string) bool {
 	if contentType == "" {
 		return false
 	}
-
-	mediaType, _, err := mime.ParseMediaType(contentType)
-	if err != nil {
-		return false
-	}
-	return mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")
+	return validateJSONContentType(contentType) == nil
 }
 
 func containsViolation(violations []Violation, want Violation) bool {
