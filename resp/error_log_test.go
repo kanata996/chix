@@ -336,8 +336,8 @@ func TestRequestContextAttrs(t *testing.T) {
 	ctx = context.WithValue(ctx, chimw.RequestIDKey, "req-123")
 
 	attrs := attrsToMap(requestContextAttrs(ctx))
-	if got := attrs["request.id"]; got != "req-123" {
-		t.Fatalf("request.id = %#v, want req-123", got)
+	if _, exists := attrs["request.id"]; exists {
+		t.Fatalf("request.id unexpectedly present: %#v", attrs["request.id"])
 	}
 	if got, ok := attrs["traceId"].(string); !ok || got == "" {
 		t.Fatalf("traceId = %#v, want non-empty string", attrs["traceId"])

@@ -121,7 +121,6 @@
 - `error.timeout`
 - `error.canceled`
 - `traceId`
-- `request.id`
 
 ### 错误响应写出失败
 
@@ -139,7 +138,6 @@
 - `error.root_message`
 - `error.root_type`
 - `traceId`
-- `request.id`
 
 如果错误可解出 `ErrorWriteDegraded`，还会追加：
 

@@ -989,8 +989,8 @@ func TestWriteErrorLogsServerErrorToDefaultLogger(t *testing.T) {
 	if got := logEntry["error.message"]; got != "db timeout" {
 		t.Fatalf("error.message = %#v, want db timeout", got)
 	}
-	if got := logEntry["request.id"]; got != "req-server" {
-		t.Fatalf("request.id = %#v, want req-server", got)
+	if _, exists := logEntry["request.id"]; exists {
+		t.Fatalf("request.id unexpectedly present: %#v", logEntry["request.id"])
 	}
 	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
 		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
