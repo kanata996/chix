@@ -3,7 +3,10 @@ package reqx
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
 // - [✓] path wildcard 解析与存在性判断在任意 pattern/name 输入下保持稳定且不 panic。
-// - [✓] `BindPathValues`、`ParamInt`、`BindQueryParams`、`BindBody`、`BindHeaders` 在任意输入下维持稳定的公开契约。
+// - [✓] `BindPathValues` 与 `ParamInt` 在任意 path pattern/value 输入下维持稳定的公开契约。
+// - [✓] `BindQueryParams` 在任意 query 输入下维持稳定的公开契约。
+// - [✓] `BindBody` 在任意 body 与 Content-Type 输入下维持稳定的公开契约。
+// - [✓] `BindHeaders` 在任意 header key/value 输入下维持稳定的公开契约。
 // - [✓] 本文件提供单一 `FuzzReqxPublicContracts` 入口，可直接配合仓库规范中的 `-fuzz=Fuzz` 执行。
 
 import (
@@ -334,6 +337,7 @@ func fuzzHeaderContracts(t *testing.T, variant uint8, headerKey, requestID, retr
 func fuzzBodyPayload(variant uint8, name, ageText string) (payload, wantName string, wantAge int, expectAgePreserved bool) {
 	quotedName := fuzzJSONString(name)
 	quotedAge := fuzzJSONString(ageText)
+	normalizedName := decodeFuzzJSONString(quotedName)
 	validAge := len(ageText)
 
 	switch variant % 7 {
@@ -346,11 +350,11 @@ func fuzzBodyPayload(variant uint8, name, ageText string) (payload, wantName str
 	case 3:
 		return fmt.Sprintf(`{"name":%s}{"age":1}`, quotedName), "existing", 7, true
 	case 4:
-		return fmt.Sprintf(`{"name":%s,"age":%d}`, quotedName, validAge), name, validAge, false
+		return fmt.Sprintf(`{"name":%s,"age":%d}`, quotedName, validAge), normalizedName, validAge, false
 	case 5:
-		return fmt.Sprintf("{\"name\":%s} \n\t ", quotedName), name, 7, true
+		return fmt.Sprintf("{\"name\":%s} \n\t ", quotedName), normalizedName, 7, true
 	default:
-		return fmt.Sprintf(`{"name":%s,"extra":1}`, quotedName), name, 7, true
+		return fmt.Sprintf(`{"name":%s,"extra":1}`, quotedName), normalizedName, 7, true
 	}
 }
 
@@ -360,6 +364,14 @@ func fuzzJSONString(value string) string {
 		panic(err)
 	}
 	return string(data)
+}
+
+func decodeFuzzJSONString(value string) string {
+	var decoded string
+	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
+		panic(err)
+	}
+	return decoded
 }
 
 func emptyBodyAllowsContentType(contentType string) bool {
