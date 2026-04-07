@@ -9,7 +9,7 @@ package resp
 //
 // 职责：
 //   - 从 error / HTTPError 提取更适合排障的结构化字段。
-//   - request log 只补低噪音、可关联字段；独立 error log 保留完整诊断摘要。
+//   - request log 只补低噪音诊断字段；独立 error log 保留完整诊断摘要。
 //   - 在不泄露不可控内部对象的前提下，尽量保留原始错误文本、类型以及首层/根因摘要。
 //   - 仅在“错误响应自身写出失败”这类基础设施异常时，额外输出一条独立 error 日志。
 //
@@ -53,8 +53,9 @@ func annotateRequestErrorLogAttrs(r *http.Request, attrs []slog.Attr) {
 }
 
 // requestErrorLogAttrs 生成请求级错误日志字段。
-// 4xx 仅保留外层请求日志；5xx 只补充低噪音、可聚合且便于关联的字段。
-func requestErrorLogAttrs(r *http.Request, err error, httpErr *errx.HTTPError) []slog.Attr {
+// 4xx 仅保留外层请求日志；5xx 只补充低噪音、可聚合的诊断字段。
+// request correlation attrs 应由服务自己的 httplog 集成负责。
+func requestErrorLogAttrs(err error, httpErr *errx.HTTPError) []slog.Attr {
 	if err == nil || httpErr == nil {
 		return nil
 	}
@@ -71,9 +72,6 @@ func requestErrorLogAttrs(r *http.Request, err error, httpErr *errx.HTTPError) [
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		attrs = append(attrs, slog.Bool("error.timeout", true))
-	}
-	if r != nil {
-		attrs = append(attrs, requestCorrelationAttrs(r.Context())...)
 	}
 
 	return attrs

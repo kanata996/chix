@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
 	"github.com/kanata996/chix/errx"
+	chixmiddleware "github.com/kanata996/chix/middleware"
 )
 
 // 测试清单：
@@ -27,7 +28,7 @@ import (
 // [✓] 响应已经开始写出时不会被二次改写，但 5xx 仍会输出独立错误日志
 // [✓] asHTTPError 会保留 HTTPError，并把 context/普通 error 收敛为稳定公共语义
 // [✓] problem payload 会按 includeErrors 开关决定是否暴露公开 errors
-// [✓] 5xx 请求日志只补充低噪音关联字段并输出独立错误日志，4xx 不会；错误响应写出失败会记录独立日志
+// [✓] 5xx 请求日志只补充低噪音 error.* 诊断字段并输出独立错误日志，关联字段由 httplog 集成负责
 
 type failingWriter struct {
 	header http.Header
@@ -674,12 +675,6 @@ func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 	if got := logEntry["error.code"]; got != "internal_error" {
 		t.Fatalf("error.code = %#v, want internal_error", got)
 	}
-	if got := logEntry["request.id"]; got != "req-123" {
-		t.Fatalf("request.id = %#v, want req-123", got)
-	}
-	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
-		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
-	}
 	if _, exists := logEntry["error.message"]; exists {
 		t.Fatalf("error.message unexpectedly present: %#v", logEntry["error.message"])
 	}
@@ -712,6 +707,44 @@ func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 	}
 	if _, exists := logEntry["error.details_count"]; exists {
 		t.Fatalf("error.details_count unexpectedly present: %#v", logEntry["error.details_count"])
+	}
+}
+
+// request correlation attrs 应由服务自己的 httplog 集成负责，而不是 WriteError 隐式注入。
+func TestWriteErrorUsesRequestLogAttrsMiddlewareForCorrelationFields(t *testing.T) {
+	var buf bytes.Buffer
+
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	r := chi.NewRouter()
+	r.Use(chimiddleware.RequestID)
+	r.Use(traceid.Middleware)
+	r.Use(httplog.RequestLogger(logger, &httplog.Options{
+		Level:         slog.LevelInfo,
+		Schema:        httplog.SchemaECS,
+		RecoverPanics: true,
+	}))
+	r.Use(chixmiddleware.RequestLogAttrs())
+	r.Get("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+		_ = WriteError(w, r, errors.New("db timeout"))
+	})
+	req := httptest.NewRequest(http.MethodGet, "/users/u_123", nil)
+	req.Header.Set(chimiddleware.RequestIDHeader, "req-123")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+
+	logEntry := decodePayload(t, buf.Bytes())
+	if got := logEntry["request.id"]; got != "req-123" {
+		t.Fatalf("request.id = %#v, want req-123", got)
+	}
+	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
+		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
+	}
+	if got := logEntry["error.code"]; got != "internal_error" {
+		t.Fatalf("error.code = %#v, want internal_error", got)
 	}
 }
 
@@ -791,12 +824,6 @@ func TestWriteErrorEnrichesRequestLogWithTimeoutFlag(t *testing.T) {
 	if _, exists := logEntry["error.canceled"]; exists {
 		t.Fatalf("error.canceled unexpectedly present: %#v", logEntry["error.canceled"])
 	}
-	if got := logEntry["request.id"]; got != "req-timeout" {
-		t.Fatalf("request.id = %#v, want req-timeout", got)
-	}
-	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
-		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
-	}
 }
 
 // 5xx 请求日志会显式标记 canceled 错误，即使公开响应仍是 500。
@@ -836,12 +863,6 @@ func TestWriteErrorEnrichesRequestLogWithCanceledFlag(t *testing.T) {
 	}
 	if _, exists := logEntry["error.timeout"]; exists {
 		t.Fatalf("error.timeout unexpectedly present: %#v", logEntry["error.timeout"])
-	}
-	if got := logEntry["request.id"]; got != "req-canceled" {
-		t.Fatalf("request.id = %#v, want req-canceled", got)
-	}
-	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
-		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
 	}
 }
 
@@ -953,12 +974,6 @@ func TestWriteErrorLogsServerErrorToDefaultLogger(t *testing.T) {
 	accessLog := decodePayload(t, requestBuf.Bytes())
 	if got := accessLog["error.code"]; got != "internal_error" {
 		t.Fatalf("access log error.code = %#v, want internal_error", got)
-	}
-	if got := accessLog["request.id"]; got != "req-server" {
-		t.Fatalf("access log request.id = %#v, want req-server", got)
-	}
-	if got, ok := accessLog["traceId"].(string); !ok || got == "" {
-		t.Fatalf("access log traceId = %#v, want non-empty string", accessLog["traceId"])
 	}
 	if _, exists := accessLog["error.message"]; exists {
 		t.Fatalf("access log error.message unexpectedly present: %#v", accessLog["error.message"])

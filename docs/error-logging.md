@@ -66,22 +66,22 @@
 - `error.code`
 - `error.timeout`
 - `error.canceled`
-- `traceId`
-- `request.id`
 
 其中：
 
 - `error.code` 始终来自 `HTTPError.Code()`
 - `error.timeout` 仅在 `errors.Is(err, context.DeadlineExceeded)` 时写入
 - `error.canceled` 仅在 `errors.Is(err, context.Canceled)` 时写入
-- `traceId` / `request.id` 仅在当前上下文里已有对应值时写入
 
-如果你希望所有 access log 都带上 `traceId`、`request.id`，需要在服务
-自己的 `chi + httplog` 链路里额外挂 `middleware.RequestLogAttrs()`；`WriteError(...)`
-自己的 5xx request log 注解不依赖这个中间件。
+如果你希望 access log 带上 `traceId`、`request.id`，需要在服务自己的
+`chi + httplog` 链路里显式挂 `middleware.RequestLogAttrs()`，或自行在
+`httplog` 集成里通过 `httplog.SetAttrs(...)` 补这些字段。
 
-默认示例不会挂这个中间件，因为 `WriteError(...)` 已经会在 5xx request log 上补
-`traceId` / `request.id`。如果两者同时使用，5xx access log 会再次追加同名字段。
+`WriteError(...)` 自己不再隐式注入 request correlation attrs，这样：
+
+- access log 的字段来源只在中间件层
+- 2xx / 4xx / 5xx 的关联字段行为保持一致
+- `resp` 不需要替服务兜底 `httplog` 关联字段策略
 
 ### 不再写入 Request Log 的字段
 

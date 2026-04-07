@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/traceid"
 	"github.com/kanata996/chix"
 	"github.com/kanata996/chix/errx"
+	chixmw "github.com/kanata996/chix/middleware"
 )
 
 type createAccountRequest struct {
@@ -110,6 +111,7 @@ func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) 
 		LogRequestHeaders:  []string{"Content-Type", "Origin"},
 		LogResponseHeaders: []string{"Content-Type"},
 	}))
+	r.Use(chixmw.RequestLogAttrs())
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if draining != nil && draining.Load() {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -20,7 +19,7 @@ import (
 // [✓] 错误链摘要兼容 nil、普通包装、不可比较 error、typed-nil 和 panic Error()
 // [✓] 错误链展开兼容深度限制、errors.Join、多分支 unwrap 和循环引用
 // [✓] 诊断起点优先使用 HTTPError 的内部 cause，没有 cause 时回退原始 error
-// [✓] 请求日志字段仅在 5xx 场景补充低噪音关联字段；关联字段与 root cause 诊断保持稳定
+// [✓] 请求日志字段仅在 5xx 场景补充低噪音诊断字段；关联字段与 root cause 诊断保持稳定
 // [✓] 错误类型名与错误文本裁剪对 nil、空白、超长输入保持稳定
 
 type cycleTestError struct{}
@@ -199,18 +198,14 @@ func TestUnwrapErrors(t *testing.T) {
 	}
 }
 
-// 请求日志属性提取会在 nil 输入时返回空，并对 5xx 错误补充低噪音关联字段。
+// 请求日志属性提取会在 nil 输入时返回空，并对 5xx 错误补充低噪音诊断字段。
 func TestRequestErrorLogAttrs(t *testing.T) {
-	if got := requestErrorLogAttrs(nil, nil, nil); got != nil {
-		t.Fatalf("requestErrorLogAttrs(nil, nil, nil) = %#v, want nil", got)
+	if got := requestErrorLogAttrs(nil, nil); got != nil {
+		t.Fatalf("requestErrorLogAttrs(nil, nil) = %#v, want nil", got)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/users/u_1", nil)
-	ctx := traceid.NewContext(req.Context())
-	ctx = context.WithValue(ctx, chimw.RequestIDKey, "req-123")
-	req = req.WithContext(ctx)
 	httpErr := errx.NewHTTPErrorWithCause(http.StatusInternalServerError, "internal_error", "", errors.New("db timeout"))
-	attrs := requestErrorLogAttrs(req, httpErr, httpErr)
+	attrs := requestErrorLogAttrs(httpErr, httpErr)
 	if len(attrs) == 0 {
 		t.Fatal("requestErrorLogAttrs() = nil, want attrs")
 	}
@@ -219,18 +214,12 @@ func TestRequestErrorLogAttrs(t *testing.T) {
 	if got := values["error.code"]; got != "internal_error" {
 		t.Fatalf("error.code = %#v, want internal_error", got)
 	}
-	if got := values["request.id"]; got != "req-123" {
-		t.Fatalf("request.id = %#v, want req-123", got)
-	}
-	if got, ok := values["traceId"].(string); !ok || got == "" {
-		t.Fatalf("traceId = %#v, want non-empty string", values["traceId"])
-	}
 	if _, exists := values["error.root_message"]; exists {
 		t.Fatalf("error.root_message unexpectedly present: %#v", values["error.root_message"])
 	}
 
 	clientErr := errx.BadRequest("bad_request", "bad request")
-	if got := requestErrorLogAttrs(req, clientErr, clientErr); got != nil {
+	if got := requestErrorLogAttrs(clientErr, clientErr); got != nil {
 		t.Fatalf("requestErrorLogAttrs(4xx) = %#v, want nil", got)
 	}
 }
