@@ -1,4 +1,4 @@
-package reqx
+package bind
 
 import (
 	"net/http"

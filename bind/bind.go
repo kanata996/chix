@@ -2,129 +2,664 @@ package bind
 
 import (
 	"bytes"
+	"encoding"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
+	"reflect"
+	"strconv"
 	"strings"
+	"time"
 
-	echo "github.com/labstack/echo/v5"
+	"github.com/kanata996/chix/errx"
 )
 
-// 本文件是 bind 包的主入口，定义默认 binder 的公开 API 和当前版本的 body 绑定策略。
-//
-// 核心功能：
-//   - 暴露 `Bind`、`BindBody`、`BindPathValues`、`BindQueryParams`、`BindHeaders`
-//   - 定义默认综合绑定顺序：path -> query(GET/DELETE/HEAD) -> body
-//   - 承载当前版本唯一的 body 绑定实现 `bindJSONBody`
-//
-// 职责边界：
-//   - 这里只负责“把 HTTP 输入写入目标对象”，不负责 Normalize、请求规则校验或字段校验
-//   - path/query/header 的具体字段写入逻辑直接复用 Echo v5 binder
-//   - body 绑定在当前版本刻意收窄为 JSON-only，不处理 XML、form、multipart 等其它 body 语义
-//
-// 当前实现情况：
-//   - 综合绑定顺序和覆盖关系对齐 Echo v5.1.0：后阶段允许覆盖前阶段已写入的字段
-//   - `BindBody` 先遵循 Echo 的 empty-body no-op 语义，再检查 `Content-Type`
-//   - 非空 body 仅接受严格的 `application/json`；非法 JSON 统一映射为 `400 invalid_json`
-//   - 这里是后续补齐 JSON 相关单元测试时最核心的行为基线，应优先覆盖顺序、空 body、媒体类型和解码失败几类场景
-//
+const defaultMaxBodyBytes int64 = 1 << 20
+
+const (
+	mimeApplicationJSON = "application/json"
+)
+
+const (
+	CodeInvalidJSON          = "invalid_json"
+	CodeUnsupportedMediaType = "unsupported_media_type"
+	CodeRequestTooLarge      = "request_too_large"
+)
+
 // Binder 定义默认请求绑定器接口。
 type Binder interface {
 	Bind(r *http.Request, target any) error
 }
 
-// DefaultBinder 是默认绑定器实现。
+// DefaultBinder 是面向 JSON API 的默认绑定器。
 type DefaultBinder struct{}
 
-// BindUnmarshaler 允许字段从单个字符串值自定义解码。
-type BindUnmarshaler = echo.BindUnmarshaler
-
-// BindPathValues 只绑定 path 参数。
-func BindPathValues(r *http.Request, target any) error {
-	if err := validateRequestAndTarget(r, target); err != nil {
-		return err
-	}
-	return mapEchoError(echo.BindPathValues(newContext(r), target))
+// BindUnmarshaler 允许字段从单个字符串输入值自定义解码。
+type BindUnmarshaler interface {
+	UnmarshalParam(param string) error
 }
 
-// BindQueryParams 只绑定 query 参数。
-func BindQueryParams(r *http.Request, target any) error {
-	if err := validateRequestAndTarget(r, target); err != nil {
-		return err
-	}
-	return mapEchoError(echo.BindQueryParams(newContext(r), target))
+type bindMultipleUnmarshaler interface {
+	UnmarshalParams(params []string) error
 }
 
-// BindBody 只绑定请求体。
-func BindBody(r *http.Request, target any) error {
-	if err := validateRequestAndTarget(r, target); err != nil {
-		return err
-	}
-	return bindJSONBody(newContext(r), target)
+type bindBodyConfig struct {
+	maxBodyBytes       int64
+	allowUnknownFields bool
 }
 
-// BindHeaders 只绑定 header。
-func BindHeaders(r *http.Request, target any) error {
-	if err := validateRequestAndTarget(r, target); err != nil {
-		return err
-	}
-	return mapEchoError(echo.BindHeaders(newContext(r), target))
+type bindConfig struct {
+	body bindBodyConfig
 }
 
-// Bind 按默认顺序绑定：path -> query(GET/DELETE/HEAD) -> body。
+func defaultBindConfig() bindConfig {
+	return bindConfig{
+		body: bindBodyConfig{
+			maxBodyBytes:       defaultMaxBodyBytes,
+			allowUnknownFields: true,
+		},
+	}
+}
+
+// Bind 按默认顺序绑定请求数据：path -> query(GET/DELETE/HEAD) -> body。
 func Bind(r *http.Request, target any) error {
-	if err := validateRequestAndTarget(r, target); err != nil {
-		return err
+	if r == nil {
+		return errorsf("request must not be nil")
 	}
-	if err := BindPathValues(r, target); err != nil {
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+
+	return bindWithConfig(r, target, defaultBindConfig())
+}
+
+// BindBody 只从请求 body 绑定数据。
+func BindBody(r *http.Request, target any) error {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+
+	return bindBodyDefault(r, target, defaultBindConfig().body)
+}
+
+// BindQueryParams 只从 query 参数绑定数据。
+func BindQueryParams(r *http.Request, target any) error {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+
+	return bindQueryParamsDefault(r, target)
+}
+
+// BindPathValues 只从 path 参数绑定数据。
+func BindPathValues(r *http.Request, target any) error {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+
+	return bindPathValuesDefault(r, target)
+}
+
+// BindHeaders 只从 header 绑定数据。
+func BindHeaders(r *http.Request, target any) error {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+
+	return bindHeadersDefault(r, target)
+}
+
+func (b *DefaultBinder) Bind(r *http.Request, target any) error {
+	return bindWithConfig(r, target, defaultBindConfig())
+}
+
+func bindWithConfig(r *http.Request, target any, cfg bindConfig) error {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if err := validateBindingDestination(target); err != nil {
 		return err
 	}
 
-	method := r.Method
+	if err := bindPathValuesDefault(r, target); err != nil {
+		return err
+	}
+
+	method := strings.ToUpper(strings.TrimSpace(r.Method))
 	if method == http.MethodGet || method == http.MethodDelete || method == http.MethodHead {
-		if err := BindQueryParams(r, target); err != nil {
+		if err := bindQueryParamsDefault(r, target); err != nil {
 			return err
 		}
 	}
 
-	return BindBody(r, target)
+	return bindBodyDefault(r, target, cfg.body)
 }
 
-// Bind 实现 Binder 接口。
-func (b *DefaultBinder) Bind(r *http.Request, target any) error {
-	return Bind(r, target)
+func validateBindingDestination(target any) error {
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+	value := reflect.ValueOf(target)
+	if value.Kind() != reflect.Pointer || value.IsNil() {
+		return errorsf("destination must not be nil")
+	}
+	return nil
 }
 
-func bindJSONBody(c *echo.Context, target any) error {
-	req := c.Request()
-	if req.ContentLength == 0 {
+func bindPathValuesDefault(r *http.Request, target any) error {
+	params := map[string][]string{}
+	if r != nil {
+		for _, name := range pathWildcardNames(r.Pattern) {
+			params[name] = []string{r.PathValue(name)}
+		}
+	}
+	if err := bindDataDefault(target, params, "param", nil); err != nil {
+		return badRequestWrap(err)
+	}
+	return nil
+}
+
+func bindQueryParamsDefault(r *http.Request, target any) error {
+	params := map[string][]string{}
+	if r != nil && r.URL != nil {
+		params = r.URL.Query()
+	}
+	if err := bindDataDefault(target, params, "query", nil); err != nil {
+		return badRequestWrap(err)
+	}
+	return nil
+}
+
+func bindHeadersDefault(r *http.Request, target any) error {
+	params := map[string][]string{}
+	if r != nil {
+		for key, values := range r.Header {
+			trimmed := strings.TrimSpace(key)
+			if trimmed == "" {
+				continue
+			}
+			params[textproto.CanonicalMIMEHeaderKey(trimmed)] = values
+		}
+	}
+	if err := bindDataDefault(target, params, "header", nil); err != nil {
+		return badRequestWrap(err)
+	}
+	return nil
+}
+
+func bindBodyDefault(r *http.Request, target any, cfg bindBodyConfig) error {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if err := validateBindingDestination(target); err != nil {
+		return err
+	}
+
+	if r.ContentLength == 0 {
 		return nil
 	}
 
-	base, _, _ := strings.Cut(req.Header.Get(echo.HeaderContentType), ";")
-	if strings.TrimSpace(base) != echo.MIMEApplicationJSON {
+	body, err := readBody(r.Body, cfg.maxBodyBytes)
+	if err != nil {
+		if errors.Is(err, errRequestTooLarge) {
+			return requestTooLargeError()
+		}
+		return err
+	}
+
+	mediaType := strings.TrimSpace(bodyMediaType(r))
+	switch mediaType {
+	case mimeApplicationJSON:
+		return decodeJSONBody(body, target, cfg.allowUnknownFields)
+	default:
 		return unsupportedMediaTypeError()
 	}
+}
 
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		return invalidJSONError(err)
+func bodyMediaType(r *http.Request) string {
+	if r == nil {
+		return ""
 	}
-	req.Body = io.NopCloser(bytes.NewReader(body))
+	base, _, _ := strings.Cut(r.Header.Get("Content-Type"), ";")
+	return strings.TrimSpace(base)
+}
 
-	if err := c.Echo().JSONSerializer.Deserialize(c, target); err != nil {
-		var httpErr *echo.HTTPError
-		if errors.As(err, &httpErr) && httpErr != nil && httpErr.Code == http.StatusBadRequest {
-			if cause := errors.Unwrap(httpErr); cause != nil {
-				return invalidJSONError(cause)
+func decodeJSONBody(body []byte, target any, allowUnknownFields bool) error {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	if !allowUnknownFields {
+		dec.DisallowUnknownFields()
+	}
+	if err := dec.Decode(target); err != nil {
+		return mapJSONBodyDecodeError(err)
+	}
+	return nil
+}
+
+func mapJSONBodyDecodeError(err error) error {
+	var invalidUnmarshalErr *json.InvalidUnmarshalError
+	if errors.As(err, &invalidUnmarshalErr) {
+		return err
+	}
+
+	return errx.NewHTTPErrorWithCause(
+		http.StatusBadRequest,
+		CodeInvalidJSON,
+		"request body must be valid JSON",
+		err,
+	)
+}
+
+func badRequestWrap(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var httpErr *errx.HTTPError
+	if errors.As(err, &httpErr) && httpErr != nil {
+		return err
+	}
+
+	return errx.NewHTTPErrorWithCause(http.StatusBadRequest, "", "", err)
+}
+
+func bindDataDefault(destination any, data map[string][]string, tag string, dataFiles map[string][]*multipart.FileHeader) error {
+	if destination == nil || (len(data) == 0 && len(dataFiles) == 0) {
+		return nil
+	}
+
+	typ := reflect.TypeOf(destination)
+	val := reflect.ValueOf(destination)
+	if typ.Kind() != reflect.Pointer || val.IsNil() {
+		return errors.New("binding element must be a pointer")
+	}
+
+	typ = typ.Elem()
+	val = val.Elem()
+	hasFiles := len(dataFiles) > 0
+
+	if typ.Kind() == reflect.Map && typ.Key().Kind() == reflect.String {
+		elemKind := typ.Elem().Kind()
+		isElemInterface := elemKind == reflect.Interface
+		isElemString := elemKind == reflect.String
+		isElemSliceOfStrings := elemKind == reflect.Slice && typ.Elem().Elem().Kind() == reflect.String
+		if !isElemSliceOfStrings && !isElemString && !isElemInterface {
+			return nil
+		}
+		if val.IsNil() {
+			val.Set(reflect.MakeMap(typ))
+		}
+		for key, values := range data {
+			switch {
+			case isElemString, isElemInterface:
+				if len(values) == 0 {
+					continue
+				}
+				val.SetMapIndex(reflect.ValueOf(key), reflect.ValueOf(values[0]))
+			default:
+				val.SetMapIndex(reflect.ValueOf(key), reflect.ValueOf(values))
 			}
 		}
-		return invalidJSONError(err)
+		return nil
 	}
-	if !json.Valid(body) {
-		return invalidJSONError(errors.New("request body must contain exactly one JSON value"))
+
+	if typ.Kind() != reflect.Struct {
+		if tag == "param" || tag == "query" || tag == "header" {
+			return nil
+		}
+		return errors.New("binding element must be a struct")
+	}
+
+	for i := 0; i < typ.NumField(); i++ {
+		typeField := typ.Field(i)
+		structField := val.Field(i)
+		if typeField.Anonymous && structField.Kind() == reflect.Pointer {
+			if structField.IsNil() {
+				continue
+			}
+			structField = structField.Elem()
+		}
+		if !structField.CanSet() {
+			continue
+		}
+
+		structFieldKind := structField.Kind()
+		inputFieldName := typeField.Tag.Get(tag)
+		if typeField.Anonymous && structFieldKind == reflect.Struct && inputFieldName != "" {
+			return errors.New("query/param/form tags are not allowed with anonymous struct field")
+		}
+
+		if inputFieldName == "" {
+			if _, ok := structField.Addr().Interface().(BindUnmarshaler); !ok && structFieldKind == reflect.Struct {
+				if err := bindDataDefault(structField.Addr().Interface(), data, tag, dataFiles); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+
+		if hasFiles {
+			if ok, err := isFieldMultipartFile(structField.Type()); err != nil {
+				return err
+			} else if ok {
+				if ok := setMultipartFileHeaderTypes(structField, inputFieldName, dataFiles); ok {
+					continue
+				}
+			}
+		}
+
+		inputValue, exists := data[inputFieldName]
+		if !exists {
+			for key, values := range data {
+				if strings.EqualFold(key, inputFieldName) {
+					inputValue = values
+					exists = true
+					break
+				}
+			}
+		}
+		if !exists {
+			continue
+		}
+
+		if ok, err := unmarshalInputsToFieldDefault(typeField.Type.Kind(), inputValue, structField); ok {
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
+		formatTag := typeField.Tag.Get("format")
+		if ok, err := unmarshalInputToFieldDefault(typeField.Type.Kind(), inputValue[0], structField, formatTag); ok {
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
+		if structFieldKind == reflect.Pointer {
+			structFieldKind = structField.Elem().Kind()
+			structField = structField.Elem()
+		}
+
+		if structFieldKind == reflect.Slice {
+			sliceOf := structField.Type().Elem().Kind()
+			numElems := len(inputValue)
+			slice := reflect.MakeSlice(structField.Type(), numElems, numElems)
+			for j := 0; j < numElems; j++ {
+				if err := setWithProperTypeDefault(sliceOf, inputValue[j], slice.Index(j)); err != nil {
+					return err
+				}
+			}
+			structField.Set(slice)
+			continue
+		}
+
+		if err := setWithProperTypeDefault(structFieldKind, inputValue[0], structField); err != nil {
+			return err
+		}
 	}
 
 	return nil
+}
+
+func unmarshalInputsToFieldDefault(valueKind reflect.Kind, values []string, field reflect.Value) (bool, error) {
+	if valueKind == reflect.Pointer {
+		if field.IsNil() {
+			field.Set(reflect.New(field.Type().Elem()))
+		}
+		field = field.Elem()
+	}
+
+	fieldIValue := field.Addr().Interface()
+	unmarshaler, ok := fieldIValue.(bindMultipleUnmarshaler)
+	if !ok {
+		return false, nil
+	}
+	return true, unmarshaler.UnmarshalParams(values)
+}
+
+func unmarshalInputToFieldDefault(valueKind reflect.Kind, value string, field reflect.Value, formatTag string) (bool, error) {
+	if valueKind == reflect.Pointer {
+		if field.IsNil() {
+			field.Set(reflect.New(field.Type().Elem()))
+		}
+		field = field.Elem()
+	}
+
+	fieldIValue := field.Addr().Interface()
+	if formatTag != "" {
+		if _, isTime := fieldIValue.(*time.Time); isTime {
+			t, err := time.Parse(formatTag, value)
+			if err != nil {
+				return true, err
+			}
+			field.Set(reflect.ValueOf(t))
+			return true, nil
+		}
+	}
+
+	switch unmarshaler := fieldIValue.(type) {
+	case BindUnmarshaler:
+		return true, unmarshaler.UnmarshalParam(value)
+	case encoding.TextUnmarshaler:
+		return true, unmarshaler.UnmarshalText([]byte(value))
+	}
+
+	return false, nil
+}
+
+func setWithProperTypeDefault(valueKind reflect.Kind, value string, structField reflect.Value) error {
+	if ok, err := unmarshalInputToFieldDefault(valueKind, value, structField, ""); ok {
+		return err
+	}
+
+	switch valueKind {
+	case reflect.Pointer:
+		return setWithProperTypeDefault(structField.Elem().Kind(), value, structField.Elem())
+	case reflect.Int:
+		return setIntFieldDefault(value, 0, structField)
+	case reflect.Int8:
+		return setIntFieldDefault(value, 8, structField)
+	case reflect.Int16:
+		return setIntFieldDefault(value, 16, structField)
+	case reflect.Int32:
+		return setIntFieldDefault(value, 32, structField)
+	case reflect.Int64:
+		return setIntFieldDefault(value, 64, structField)
+	case reflect.Uint:
+		return setUintFieldDefault(value, 0, structField)
+	case reflect.Uint8:
+		return setUintFieldDefault(value, 8, structField)
+	case reflect.Uint16:
+		return setUintFieldDefault(value, 16, structField)
+	case reflect.Uint32:
+		return setUintFieldDefault(value, 32, structField)
+	case reflect.Uint64:
+		return setUintFieldDefault(value, 64, structField)
+	case reflect.Bool:
+		return setBoolFieldDefault(value, structField)
+	case reflect.Float32:
+		return setFloatFieldDefault(value, 32, structField)
+	case reflect.Float64:
+		return setFloatFieldDefault(value, 64, structField)
+	case reflect.String:
+		structField.SetString(value)
+	default:
+		return errors.New("unknown type")
+	}
+	return nil
+}
+
+func setIntFieldDefault(value string, bitSize int, field reflect.Value) error {
+	if value == "" {
+		value = "0"
+	}
+	intVal, err := strconv.ParseInt(value, 10, bitSize)
+	if err == nil {
+		field.SetInt(intVal)
+	}
+	return err
+}
+
+func setUintFieldDefault(value string, bitSize int, field reflect.Value) error {
+	if value == "" {
+		value = "0"
+	}
+	uintVal, err := strconv.ParseUint(value, 10, bitSize)
+	if err == nil {
+		field.SetUint(uintVal)
+	}
+	return err
+}
+
+func setBoolFieldDefault(value string, field reflect.Value) error {
+	if value == "" {
+		value = "false"
+	}
+	boolVal, err := strconv.ParseBool(value)
+	if err == nil {
+		field.SetBool(boolVal)
+	}
+	return err
+}
+
+func setFloatFieldDefault(value string, bitSize int, field reflect.Value) error {
+	if value == "" {
+		value = "0.0"
+	}
+	floatVal, err := strconv.ParseFloat(value, bitSize)
+	if err == nil {
+		field.SetFloat(floatVal)
+	}
+	return err
+}
+
+var (
+	multipartFileHeaderType             = reflect.TypeFor[multipart.FileHeader]()
+	multipartFileHeaderPointerType      = reflect.TypeFor[*multipart.FileHeader]()
+	multipartFileHeaderSliceType        = reflect.TypeFor[[]multipart.FileHeader]()
+	multipartFileHeaderPointerSliceType = reflect.TypeFor[[]*multipart.FileHeader]()
+)
+
+func isFieldMultipartFile(field reflect.Type) (bool, error) {
+	switch field {
+	case multipartFileHeaderPointerType, multipartFileHeaderSliceType, multipartFileHeaderPointerSliceType:
+		return true, nil
+	case multipartFileHeaderType:
+		return true, errors.New("binding to multipart.FileHeader struct is not supported, use pointer to struct")
+	default:
+		return false, nil
+	}
+}
+
+func setMultipartFileHeaderTypes(structField reflect.Value, inputFieldName string, files map[string][]*multipart.FileHeader) bool {
+	fileHeaders := files[inputFieldName]
+	if len(fileHeaders) == 0 {
+		return false
+	}
+
+	result := true
+	switch structField.Type() {
+	case multipartFileHeaderPointerSliceType:
+		structField.Set(reflect.ValueOf(fileHeaders))
+	case multipartFileHeaderSliceType:
+		headers := make([]multipart.FileHeader, len(fileHeaders))
+		for i, fileHeader := range fileHeaders {
+			headers[i] = *fileHeader
+		}
+		structField.Set(reflect.ValueOf(headers))
+	case multipartFileHeaderPointerType:
+		structField.Set(reflect.ValueOf(fileHeaders[0]))
+	default:
+		result = false
+	}
+
+	return result
+}
+
+func pathWildcardNames(pattern string) []string {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return nil
+	}
+
+	names := make([]string, 0, 2)
+	for i := 0; i < len(pattern); i++ {
+		if pattern[i] != '{' {
+			continue
+		}
+
+		end := strings.IndexByte(pattern[i+1:], '}')
+		if end < 0 {
+			break
+		}
+
+		token := strings.TrimSpace(pattern[i+1 : i+1+end])
+		token = strings.TrimSuffix(token, "...")
+		token, _, _ = strings.Cut(token, ":")
+		token = strings.TrimSpace(token)
+		if token != "" && token != "$" {
+			names = append(names, token)
+		}
+
+		i += end + 1
+	}
+
+	return names
+}
+
+var errRequestTooLarge = errors.New("bind: request body too large")
+
+func readBody(body io.ReadCloser, maxBytes int64) ([]byte, error) {
+	if body == nil {
+		return nil, nil
+	}
+	if maxBytes <= 0 {
+		maxBytes = defaultMaxBodyBytes
+	}
+
+	data, err := io.ReadAll(io.LimitReader(body, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, errRequestTooLarge
+	}
+	return data, nil
+}
+
+func unsupportedMediaTypeError() error {
+	return errx.NewHTTPError(
+		http.StatusUnsupportedMediaType,
+		CodeUnsupportedMediaType,
+		"Content-Type must be application/json",
+	)
+}
+
+func requestTooLargeError() error {
+	return errx.NewHTTPError(
+		http.StatusRequestEntityTooLarge,
+		CodeRequestTooLarge,
+		"request body is too large",
+	)
+}
+
+func errorsf(format string, args ...any) error {
+	return fmt.Errorf("bind: "+format, args...)
 }

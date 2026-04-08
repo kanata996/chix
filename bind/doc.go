@@ -1,10 +1,12 @@
-// Package bind 提供独立的请求绑定能力。
+// Package bind 为基于 net/http 的 JSON API 提供请求绑定能力。
 //
-// 它的目标是把 binding 从 reqx 中拆出，作为单独的职责层：
-//   - 负责把 path/query/header/body 输入映射到目标值
-//   - 提供 Echo v5 风格的 ValueBinder 与泛型 extractor
-//   - 不负责 Normalize、RequestValidator 或字段校验
+// 它只负责把 HTTP 输入映射到目标值，不处理 Normalize、请求级规则或字段校验。
 //
-// 当前实现基于 *http.Request 做宿主适配，并对齐 Echo v5.1.0 的核心绑定行为；
-// 默认 body binder 在当前版本刻意收窄为 JSON-only。
+// 公开 API：
+//   - 绑定入口：Bind、BindBody、BindQueryParams、BindPathValues、BindHeaders
+//   - binder 相关类型：Binder、DefaultBinder、BindUnmarshaler
+//   - 公开错误码常量：CodeInvalidJSON、CodeUnsupportedMediaType、CodeRequestTooLarge
+//
+// 默认 Bind 顺序固定为：path -> query(GET/DELETE/HEAD) -> body。
+// header 不参与默认 Bind。
 package bind

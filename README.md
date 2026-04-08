@@ -16,7 +16,8 @@
 当前仓库对外主要暴露五个包：
 
 - `github.com/kanata996/chix`：大多数 handler 直接使用的根包入口
-- `github.com/kanata996/chix/reqx`：请求侧绑定、校验与 path 参数辅助
+- `github.com/kanata996/chix/bind`：独立的请求绑定层
+- `github.com/kanata996/chix/reqx`：请求侧校验、Normalize、RequestValidator 与 invalid_request 违规模型
 - `github.com/kanata996/chix/resp`：响应写回与错误响应输出
 - `github.com/kanata996/chix/errx`：共享公共 HTTP 错误模型
 - `github.com/kanata996/chix/middleware`：可选的 request log 辅助中间件
@@ -110,7 +111,7 @@ curl -i \
 HTTP/1.1 422 Unprocessable Entity
 Content-Type: application/problem+json
 
-{"title":"Unprocessable Entity","status":422,"detail":"request contains invalid fields","code":"invalid_request","errors":[{"field":"name","in":"body","code":"required","detail":"is required"}]}
+{"title":"Unprocessable Entity","status":422,"detail":"request contains invalid fields","code":"invalid_request","errors":[{"field":"name","in":"request","code":"required","detail":"is required"}]}
 ```
 
 ## 请求绑定与校验
@@ -125,6 +126,7 @@ Content-Type: application/problem+json
 
 请求侧 body 绑定当前只支持 `application/json`。
 更完整的绑定契约说明见 [docs/request-binding.md](./docs/request-binding.md)。
+如果需要更细粒度的 binding API，直接使用 [`bind`](./bind) 包。
 
 根包常用请求 API：
 
@@ -160,9 +162,11 @@ Content-Type: application/problem+json
 
 body 绑定契约：
 
-- binding 层默认对齐 Echo：`Bind(...)` / `BindAndValidate(...)` / `BindBody(...)` / `BindAndValidateBody(...)` 在 `Content-Length == 0` 时都会把 body 视为 no-op
+- binding 层默认采用当前约定：`Bind(...)` / `BindAndValidate(...)` / `BindBody(...)` / `BindAndValidateBody(...)` 在 `Content-Length == 0` 时都会把 body 视为 no-op
 - 非空 body 当前只支持 `application/json`
 - `application/json` 默认遵循标准 decoder 语义；默认 binder 只接受标准 `application/json`
+- `BindBody(...)` 遵循标准 decoder 目标能力，可以绑定到 struct、slice、map 等 JSON 目标
+- `BindAndValidate*` 是 DTO 组合入口，目标必须是非 nil 的 `*struct`
 - `BindAndValidate*` 会在字段校验前先执行请求级规则；如果业务要求“即使字段全是可选也必须提交 body”，请在 DTO 上实现 `ValidateRequest(*http.Request) error`
 
 如果 DTO 需要在校验前做裁剪、大小写归一化或默认值补齐，实现 `Normalize()` 即可：
@@ -198,7 +202,6 @@ func (*createAccountRequest) ValidateRequest(r *http.Request) error {
 - `Created`
 - `NoContent`
 - `JSON`
-- `JSONPretty`
 - `JSONBlob`
 - `WriteError`
 
@@ -213,7 +216,7 @@ func (*createAccountRequest) ValidateRequest(r *http.Request) error {
   "errors": [
     {
       "field": "name",
-      "in": "body",
+      "in": "request",
       "code": "required",
       "detail": "is required"
     }
@@ -302,7 +305,8 @@ func main() {
 ## 什么时候用哪个包
 
 - `chix`：大多数 handler 直接用这个
-- `reqx`：只想用请求绑定和校验
+- `bind`：只想用独立的 binding 能力
+- `reqx`：只想用组合校验、RequestValidator 和 invalid_request 违规模型
 - `resp`：只想用响应写回
 - `errx`：想显式构造和传递公共 HTTP 错误
 - `middleware`：想给 request log 增加关联字段

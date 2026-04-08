@@ -3,17 +3,18 @@ package chix
 import (
 	"net/http"
 
+	"github.com/kanata996/chix/bind"
 	"github.com/kanata996/chix/reqx"
 	"github.com/kanata996/chix/resp"
 )
 
 type (
 	// Binder 定义默认请求绑定器接口。
-	Binder = reqx.Binder
+	Binder = bind.Binder
 	// DefaultBinder 是默认请求绑定器实现。
-	DefaultBinder = reqx.DefaultBinder
+	DefaultBinder = bind.DefaultBinder
 	// BindUnmarshaler 允许字段从单个字符串输入值自定义解码。
-	BindUnmarshaler = reqx.BindUnmarshaler
+	BindUnmarshaler = bind.BindUnmarshaler
 	// RequestValidator 允许 DTO 在 binding 之后声明请求级规则。
 	RequestValidator = reqx.RequestValidator
 	// Normalizer 允许 DTO 在校验前做标准化处理。
@@ -22,27 +23,27 @@ type (
 
 // Bind 按默认顺序绑定请求数据：path -> query(GET/DELETE/HEAD) -> body。
 func Bind(r *http.Request, target any) error {
-	return reqx.Bind(r, target)
+	return bind.Bind(r, target)
 }
 
 // BindBody 只从请求 body 绑定数据。
 func BindBody(r *http.Request, target any) error {
-	return reqx.BindBody(r, target)
+	return bind.BindBody(r, target)
 }
 
 // BindQueryParams 只从 query 参数绑定数据。
 func BindQueryParams(r *http.Request, target any) error {
-	return reqx.BindQueryParams(r, target)
+	return bind.BindQueryParams(r, target)
 }
 
 // BindPathValues 只从 path 参数绑定数据。
 func BindPathValues(r *http.Request, target any) error {
-	return reqx.BindPathValues(r, target)
+	return bind.BindPathValues(r, target)
 }
 
 // BindHeaders 只从 header 绑定数据。
 func BindHeaders(r *http.Request, target any) error {
-	return reqx.BindHeaders(r, target)
+	return bind.BindHeaders(r, target)
 }
 
 // BindAndValidate 绑定后执行 Normalize、请求级规则和字段校验。

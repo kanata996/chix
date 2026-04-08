@@ -1,4 +1,4 @@
-package reqx
+package bind
 
 import (
 	"net/http"
@@ -76,16 +76,4 @@ func TestBindHeaders_BindingErrorsAreBadRequest(t *testing.T) {
 
 	var dst request
 	_ = assertHTTPError(t, BindHeaders(req, &dst), http.StatusBadRequest, "bad_request", "Bad Request")
-}
-
-func TestBindAndValidateHeaders_ReturnsBindingErrorBeforeValidation(t *testing.T) {
-	type request struct {
-		Retry int `header:"x-retry" validate:"required"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("X-Retry", "oops")
-
-	var dst request
-	_ = assertHTTPError(t, BindAndValidateHeaders(req, &dst), http.StatusBadRequest, "bad_request", "Bad Request")
 }

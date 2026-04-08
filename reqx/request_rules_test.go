@@ -98,7 +98,7 @@ func TestBindAndValidate_RequestValidatorCanRequireBodyForMixedSourceRoute(t *te
 		"org_id": {"org_1"},
 	})
 	req.Method = http.MethodPost
-	req.Header.Set("Content-Type", mimeApplicationJSON)
+	req.Header.Set("Content-Type", "application/json")
 	req.Body = io.NopCloser(strings.NewReader(""))
 	req.ContentLength = 0
 

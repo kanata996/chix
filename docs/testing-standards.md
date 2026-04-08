@@ -25,6 +25,8 @@
 
 ### 1.2 禁止“假测试”
 
+红线：任何测试如果主要目的只是抬高覆盖率数字，却不能证明一个公开行为或稳定契约成立，也不能在错误实现存在时稳定失败，一律按“假测试”处理，不计入验收。
+
 以下情况不计入验收：
 
 - 只调用函数但不验证可观察结果
@@ -135,6 +137,7 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 - 公开行为变更没有测试
 - 只有 happy path，没有失败和边界用例
 - 只测内部 helper，未测公开入口
+- 新增测试只是为了抬高覆盖率数字，不能直接证明行为正确
 - 测试文件缺少文件头清单
 - 清单写成 `[✓]`，但测试实现并未覆盖对应行为
 - 测试依赖随机、时序、外部服务或全局状态残留
@@ -156,17 +159,17 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 
 若 facade 只是透传，也应至少有代表性测试，防止签名、返回值或行为漂移。
 
-### 3.2 `reqx`
+### 3.2 `bind` / `reqx`
 
-`reqx` 是请求边界核心包，测试必须覆盖输入来源、顺序、校验和错误语义。
+`bind` 负责默认 binding，`reqx` 负责组合校验；两层都必须有各自的契约测试。
 
 至少覆盖：
 
 - path/query/header/body 的独立绑定
 - `Bind(...)` 的绑定顺序与覆盖规则
-- 空 body、错误 `Content-Type`、超大 body、未知字段
+- 空 body、错误 `Content-Type`、非法 JSON
 - DTO 已有值时的保留语义
-- 绑定失败时不发生部分落值
+- 绑定失败时前序阶段已写入值仍然保留
 - `Normalize()` 在校验前执行
 - 校验错误字段名映射到请求 tag，而不是 Go 字段名
 - 常见 violation 的状态码、错误码、detail 与结构化错误项
@@ -181,11 +184,11 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 至少覆盖：
 
 - `OK` / `Created` / `NoContent`
-- `JSON` / `JSONPretty` / `JSONBlob`
+- `JSON` / `JSONBlob`
 - `HTTPError` 的状态码、错误码、标题、详情、公开错误项
 - `WriteError(...)` 的 error 收敛和 problem JSON 写回
 - 非法状态码、无响应体状态、`nil writer`、`nil request`
-- pretty 行为和 raw bytes 透传行为
+- raw bytes 透传行为
 - 内部 cause 不泄漏到公开响应
 - context canceled / timeout 的公共错误语义
 - 错误响应降级路径和响应已开始写出路径
@@ -220,7 +223,7 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
   - 非法状态码报错
   - `nil writer` / bodyless status / `nil request`
 
-- `reqx.BindBody(...)`
+- `bind.BindBody(...)`
   - 正常 body 绑定成功
   - 非 JSON `Content-Type` 报错
   - 空 body 保持原值或 no-op
@@ -325,6 +328,7 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 - 失败信息是否可定位
 - 是否同时验证了不应发生的行为
 - 是否能真正防止该类 bug 回归
+- 是否存在只为走到代码路径、却没有验证可观察行为的覆盖率测试
 
 ### 6.3 稳定性
 
@@ -361,6 +365,7 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 - 每个 `*_test.go` 文件头部都维护行为清单；辅助、基准和测试支撑文件也不例外
 - 新增公开能力时，先补清单，再补测试
 - 修 bug 时，先补回归测试，再修实现
+- 明确拒绝“只刷覆盖率、不验证行为”的假测试；覆盖率只能作为辅助手段，不能替代行为验收
 - 合并前至少执行 `make ci` 与 `go test ./... -race`
 - 触及核心边界包或错误收敛逻辑时，再对受影响包执行 `go test ./<pkg> -count=100`
 - 触及解析/归一化/编码逻辑时，评估并补充 fuzz，并把“需要”或“不需要”的结论记录在 PR 描述、评审备注或对应测试文件头清单中

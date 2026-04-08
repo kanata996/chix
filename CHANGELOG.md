@@ -41,11 +41,11 @@
 - `BindAndValidate*` 当前固定按 `Bind -> Normalize() -> ValidateRequest() -> validator/v10` 的顺序执行；其中请求级规则不再回流到 binding 层定义。
 - 顶层 `null`、数组、数字、字符串、布尔值现在统一按 body 形状错误处理，返回 `400 invalid_json`。
 - `reqx` 的 path 参数读取不再依赖 `chi.RouteContext`；`param:"..."` 现在只基于 `http.Request.PathValue(...)` / `http.Request.Pattern` 的命名 wildcard 语义工作，例如 `/{id}`、`/{path...}`；`chi` 专有的 `*` catch-all 不属于公开 path 契约。
-- `reqx/chix` 的公开 binding 入口现在采用 Echo 风格的核心签名：`Bind(...)`、`BindBody(...)`、`BindQueryParams(...)`、`BindPathValues(...)`、`BindHeaders(...)` 全部改为 `target any`，根包同时公开 `Binder`、`DefaultBinder`、`BindUnmarshaler`。
+- `reqx/chix` 的公开 binding 入口现在统一采用核心签名：`Bind(...)`、`BindBody(...)`、`BindQueryParams(...)`、`BindPathValues(...)`、`BindHeaders(...)` 全部改为 `target any`，根包同时公开 `Binder`、`DefaultBinder`、`BindUnmarshaler`。
 
 ### Docs
 
 - 更新 [README.md](./README.md) 和包注释，补充当前错误响应契约、字段语义和示例，并收窄根包与 `reqx` / `resp` 的职责描述。
 - README 中的公开包清单与包结构说明已同步到当前导出面：补充 `middleware` 包，并明确 `resp` 只负责响应写回与错误响应输出；公共错误模型由 `errx` 提供。
 - README 已收缩为面向使用者的公开 API 指南，优先展示包职责、常用入口和示例用法，不再展开实现边界与内部技术细节。
-- 新增 [docs/request-binding.md](./docs/request-binding.md)，明确综合绑定顺序、默认 Echo 风格空 body 语义，以及 binding / request-rules / validate 的分层边界。
+- 新增 [docs/request-binding.md](./docs/request-binding.md)，明确综合绑定顺序、默认空 body 语义，以及 binding / request-rules / validate 的分层边界。

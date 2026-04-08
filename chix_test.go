@@ -15,7 +15,7 @@ import (
 )
 
 // 测试清单：
-// [✓] 根包 facade 会把 reqx 的绑定、请求规则与校验能力稳定透传出来
+// [✓] 根包 facade 会把 bind / reqx / resp 的核心能力稳定透传出来
 // [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
 // [✓] 根包绑定 facade 维持新的公开导出面，不额外暴露旧 path helper / bind option
 // [✓] README 中承诺的 create account handler 主路径有根包级端到端测试支撑
@@ -47,8 +47,8 @@ func TestBindAndValidateBody_DelegatesToReqx(t *testing.T) {
 	}
 }
 
-// Bind 会通过根包 facade 复用默认的 path/query/body 绑定顺序。
-func TestBind_DelegatesToReqx(t *testing.T) {
+// Bind 会通过根包 facade 复用 bind 包的默认绑定顺序。
+func TestBind_DelegatesToBind(t *testing.T) {
 	type request struct {
 		ID   string `param:"id" query:"id" json:"id"`
 		Name string `json:"name"`
@@ -66,7 +66,7 @@ func TestBind_DelegatesToReqx(t *testing.T) {
 }
 
 // BindBody 只从 JSON body 绑定数据。
-func TestBindBody_DelegatesToReqx(t *testing.T) {
+func TestBindBody_DelegatesToBind(t *testing.T) {
 	req := newJSONRequest(http.MethodPost, "/accounts", `{"name":"kanata"}`)
 
 	var dst struct {
@@ -82,7 +82,7 @@ func TestBindBody_DelegatesToReqx(t *testing.T) {
 }
 
 // BindQueryParams 只从 query 参数绑定数据。
-func TestBindQueryParams_DelegatesToReqx(t *testing.T) {
+func TestBindQueryParams_DelegatesToBind(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts?name=kanata", nil)
 
 	var dst struct {
@@ -98,7 +98,7 @@ func TestBindQueryParams_DelegatesToReqx(t *testing.T) {
 }
 
 // BindPathValues 只从 path 参数绑定数据。
-func TestBindPathValues_DelegatesToReqx(t *testing.T) {
+func TestBindPathValues_DelegatesToBind(t *testing.T) {
 	req := newRouteRequest(http.MethodGet, "/accounts/u_1", "id", "u_1")
 
 	var dst struct {
@@ -113,8 +113,8 @@ func TestBindPathValues_DelegatesToReqx(t *testing.T) {
 	}
 }
 
-// BindHeaders 会通过根包 facade 把 header 绑定委托给 reqx。
-func TestBindHeaders_DelegatesToReqx(t *testing.T) {
+// BindHeaders 会通过根包 facade 把 header 绑定委托给 bind。
+func TestBindHeaders_DelegatesToBind(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	req.Header.Set("X-Request-Id", "req-123")
 
@@ -417,8 +417,8 @@ func TestReadmeCreateAccountFlow(t *testing.T) {
 		if got := violation["field"]; got != "name" {
 			t.Fatalf("field = %#v, want name", got)
 		}
-		if got := violation["in"]; got != "body" {
-			t.Fatalf("in = %#v, want body", got)
+		if got := violation["in"]; got != "request" {
+			t.Fatalf("in = %#v, want request", got)
 		}
 		if got := violation["code"]; got != "required" {
 			t.Fatalf("code = %#v, want required", got)

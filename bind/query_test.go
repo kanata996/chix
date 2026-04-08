@@ -1,4 +1,4 @@
-package reqx
+package bind
 
 import (
 	"fmt"
@@ -83,15 +83,4 @@ func TestBindQueryParams_BindingErrorsAreBadRequest(t *testing.T) {
 
 	var dst request
 	_ = assertHTTPError(t, BindQueryParams(req, &dst), http.StatusBadRequest, "bad_request", "Bad Request")
-}
-
-func TestBindAndValidateQuery_ReturnsBindingErrorBeforeValidation(t *testing.T) {
-	type request struct {
-		Page int `query:"page" validate:"required"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?page=oops", nil)
-
-	var dst request
-	_ = assertHTTPError(t, BindAndValidateQuery(req, &dst), http.StatusBadRequest, "bad_request", "Bad Request")
 }

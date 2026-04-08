@@ -1,4 +1,4 @@
-package reqx
+package bind
 
 import (
 	"net/http"
@@ -73,17 +73,4 @@ func TestBindPathValues_BindingErrorsAreBadRequest(t *testing.T) {
 
 	var dst request
 	_ = assertHTTPError(t, BindPathValues(req, &dst), http.StatusBadRequest, "bad_request", "Bad Request")
-}
-
-func TestBindAndValidatePath_ReturnsBindingErrorBeforeValidation(t *testing.T) {
-	type request struct {
-		ID int `param:"id" validate:"required"`
-	}
-
-	req := requestWithPathParams(map[string][]string{
-		"id": {"oops"},
-	})
-
-	var dst request
-	_ = assertHTTPError(t, BindAndValidatePath(req, &dst), http.StatusBadRequest, "bad_request", "Bad Request")
 }

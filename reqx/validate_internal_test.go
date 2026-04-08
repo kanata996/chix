@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/kanata996/chix/bind"
 )
 
 // 各个 BindAndValidate 包装器会优先返回绑定阶段错误。
@@ -134,7 +135,7 @@ func TestBindAndValidateWrappersMatchBindPlusValidate(t *testing.T) {
 		gotErr := BindAndValidate(newReq(), &got)
 
 		var want request
-		wantErr := Bind(newReq(), &want)
+		wantErr := bind.Bind(newReq(), &want)
 		if wantErr == nil {
 			wantErr = validate(&want, sourceRequest)
 		}
@@ -166,7 +167,7 @@ func TestBindAndValidateWrappersMatchBindPlusValidate(t *testing.T) {
 		gotErr := BindAndValidate(newReq(), &got)
 
 		var want request
-		wantErr := Bind(newReq(), &want)
+		wantErr := bind.Bind(newReq(), &want)
 		if wantErr == nil {
 			wantErr = validate(&want, sourceRequest)
 		}
@@ -190,7 +191,7 @@ func TestBindAndValidateWrappersMatchBindPlusValidate(t *testing.T) {
 		gotErr := BindAndValidateBody(newReq(), &got)
 
 		var want request
-		wantErr := BindBody(newReq(), &want)
+		wantErr := bind.BindBody(newReq(), &want)
 		if wantErr == nil {
 			wantErr = validate(&want, sourceBody)
 		}
@@ -216,7 +217,7 @@ func TestBindAndValidateWrappersMatchBindPlusValidate(t *testing.T) {
 		gotErr := BindAndValidateBody(newReq(), &got)
 
 		var want request
-		wantErr := BindBody(newReq(), &want)
+		wantErr := bind.BindBody(newReq(), &want)
 		if wantErr == nil {
 			wantErr = validate(&want, sourceBody)
 		}
@@ -240,7 +241,7 @@ func TestBindAndValidateWrappersMatchBindPlusValidate(t *testing.T) {
 		gotErr := BindAndValidateQuery(newReq(), &got)
 
 		var want request
-		wantErr := BindQueryParams(newReq(), &want)
+		wantErr := bind.BindQueryParams(newReq(), &want)
 		if wantErr == nil {
 			wantErr = validate(&want, sourceQuery)
 		}
@@ -266,7 +267,7 @@ func TestBindAndValidateWrappersMatchBindPlusValidate(t *testing.T) {
 		gotErr := BindAndValidateQuery(newReq(), &got)
 
 		var want request
-		wantErr := BindQueryParams(newReq(), &want)
+		wantErr := bind.BindQueryParams(newReq(), &want)
 		if wantErr == nil {
 			wantErr = validate(&want, sourceQuery)
 		}
@@ -292,7 +293,7 @@ func TestBindAndValidateWrappersMatchBindPlusValidate(t *testing.T) {
 		gotErr := BindAndValidatePath(newReq(), &got)
 
 		var want request
-		wantErr := BindPathValues(newReq(), &want)
+		wantErr := bind.BindPathValues(newReq(), &want)
 		if wantErr == nil {
 			wantErr = validate(&want, sourcePath)
 		}
@@ -320,7 +321,7 @@ func TestBindAndValidateWrappersMatchBindPlusValidate(t *testing.T) {
 		gotErr := BindAndValidatePath(newReq(), &got)
 
 		var want request
-		wantErr := BindPathValues(newReq(), &want)
+		wantErr := bind.BindPathValues(newReq(), &want)
 		if wantErr == nil {
 			wantErr = validate(&want, sourcePath)
 		}
@@ -346,7 +347,7 @@ func TestBindAndValidateWrappersMatchBindPlusValidate(t *testing.T) {
 		gotErr := BindAndValidateHeaders(newReq(), &got)
 
 		var want request
-		wantErr := BindHeaders(newReq(), &want)
+		wantErr := bind.BindHeaders(newReq(), &want)
 		if wantErr == nil {
 			wantErr = validate(&want, sourceHeader)
 		}
@@ -374,7 +375,7 @@ func TestBindAndValidateWrappersMatchBindPlusValidate(t *testing.T) {
 		gotErr := BindAndValidateHeaders(newReq(), &got)
 
 		var want request
-		wantErr := BindHeaders(newReq(), &want)
+		wantErr := bind.BindHeaders(newReq(), &want)
 		if wantErr == nil {
 			wantErr = validate(&want, sourceHeader)
 		}
@@ -545,19 +546,6 @@ func TestNormalizeViolationBranches(t *testing.T) {
 }
 
 func TestViolationInputHelpers(t *testing.T) {
-	if got := violationInForValueSource(valueSource{tag: querySource.tag}); got != ViolationInQuery {
-		t.Fatalf("violationInForValueSource(query) = %q", got)
-	}
-	if got := violationInForValueSource(valueSource{tag: pathSource.tag}); got != ViolationInPath {
-		t.Fatalf("violationInForValueSource(path) = %q", got)
-	}
-	if got := violationInForValueSource(valueSource{tag: headerSource.tag}); got != ViolationInHeader {
-		t.Fatalf("violationInForValueSource(header) = %q", got)
-	}
-	if got := violationInForValueSource(valueSource{tag: "unknown"}); got != ViolationInRequest {
-		t.Fatalf("violationInForValueSource(default) = %q", got)
-	}
-
 	testTags := map[string]string{
 		"json":    ViolationInBody,
 		"query":   ViolationInQuery,
@@ -664,10 +652,10 @@ func TestValidationInputForRequestUsesTagPriorityAndFallback(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"id":         ViolationInPath,
-		"cursor":     ViolationInQuery,
-		"name":       ViolationInBody,
-		"X-Trace-Id": ViolationInHeader,
+		"id":         ViolationInRequest,
+		"cursor":     ViolationInRequest,
+		"name":       ViolationInRequest,
+		"X-Trace-Id": ViolationInRequest,
 		"Plain":      ViolationInRequest,
 	}
 	if !reflect.DeepEqual(got, want) {

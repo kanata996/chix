@@ -5,7 +5,7 @@ import (
 	"net/http"
 )
 
-// JSON 按 Echo Response 的核心能力写出 JSON 响应。
+// JSON 写出 JSON 响应。
 func JSON(w http.ResponseWriter, _ *http.Request, status int, data any) error {
 	return writeJSON(w, status, data)
 }

@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/kanata996/chix/bind"
 )
 
 type Normalizer interface {
@@ -33,35 +34,65 @@ var (
 )
 
 func BindAndValidate(r *http.Request, target any) error {
-	if err := Bind(r, target); err != nil {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+	if err := bind.Bind(r, target); err != nil {
 		return err
 	}
 	return postBindValidate(r, target, sourceRequest)
 }
 
 func BindAndValidateBody(r *http.Request, target any) error {
-	if err := BindBody(r, target); err != nil {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+	if err := bind.BindBody(r, target); err != nil {
 		return err
 	}
 	return postBindValidate(r, target, sourceBody)
 }
 
 func BindAndValidateQuery(r *http.Request, target any) error {
-	if err := BindQueryParams(r, target); err != nil {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+	if err := bind.BindQueryParams(r, target); err != nil {
 		return err
 	}
 	return postBindValidate(r, target, sourceQuery)
 }
 
 func BindAndValidatePath(r *http.Request, target any) error {
-	if err := BindPathValues(r, target); err != nil {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+	if err := bind.BindPathValues(r, target); err != nil {
 		return err
 	}
 	return postBindValidate(r, target, sourcePath)
 }
 
 func BindAndValidateHeaders(r *http.Request, target any) error {
-	if err := BindHeaders(r, target); err != nil {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+	if err := bind.BindHeaders(r, target); err != nil {
 		return err
 	}
 	return postBindValidate(r, target, sourceHeader)
@@ -255,18 +286,8 @@ func validationInput(source sourceKind, target any, err validator.FieldError) st
 	if source != sourceRequest {
 		return violationInForSource(source)
 	}
-
-	fields, ok := resolveValidationFieldPath(target, err.StructNamespace())
-	if !ok {
+	if _, ok := resolveValidationFieldPath(target, err.StructNamespace()); !ok {
 		return ViolationInRequest
-	}
-
-	for i := len(fields) - 1; i >= 0; i-- {
-		for _, tagName := range sourceTagPriority(sourceRequest) {
-			if name := tagValue(fields[i], tagName); name != "" {
-				return violationInForTag(tagName)
-			}
-		}
 	}
 	return ViolationInRequest
 }

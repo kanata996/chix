@@ -1,4 +1,4 @@
-package reqx
+package bind
 
 import (
 	"bytes"
@@ -196,23 +196,4 @@ func TestBindBody_RequestTooLarge(t *testing.T) {
 
 	var dst request
 	_ = assertHTTPError(t, BindBody(req, &dst), http.StatusRequestEntityTooLarge, CodeRequestTooLarge, "request body is too large")
-}
-
-func TestBindAndValidateBody_Layering(t *testing.T) {
-	type request struct {
-		Name string `json:"name" validate:"required"`
-	}
-
-	t.Run("empty body noops then validate runs", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
-		req.Header.Set("Content-Type", mimeApplicationJSON)
-		req.ContentLength = 0
-
-		var dst request
-		err := BindAndValidateBody(req, &dst)
-		httpErr := assertHTTPError(t, err, http.StatusUnprocessableEntity, CodeInvalidRequest, "request contains invalid fields")
-		if got := len(httpErr.Errors()); got != 1 {
-			t.Fatalf("errors len = %d, want 1", got)
-		}
-	})
 }

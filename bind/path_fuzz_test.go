@@ -1,4 +1,4 @@
-package reqx
+package bind
 
 import (
 	"net/http"
@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func FuzzReqxPublicContracts(f *testing.F) {
+func FuzzBindPublicContracts(f *testing.F) {
 	f.Add(http.MethodGet, "/items?page=1", "", "application/json")
 	f.Add(http.MethodPost, "/items", `{"name":"kanata"}`, mimeApplicationJSON)
 	f.Add(http.MethodPost, "/items", "", "text/plain")
@@ -35,7 +35,7 @@ func FuzzReqxPublicContracts(f *testing.F) {
 
 		httpErr := assertHTTPErrorLike(t, err)
 		switch httpErr.Status() {
-		case http.StatusBadRequest, http.StatusUnsupportedMediaType, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity:
+		case http.StatusBadRequest, http.StatusUnsupportedMediaType, http.StatusRequestEntityTooLarge:
 		default:
 			t.Fatalf("unexpected status %d", httpErr.Status())
 		}

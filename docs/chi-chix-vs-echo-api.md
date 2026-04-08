@@ -42,8 +42,8 @@
 
 - [README](../README.md)
 - [`chix.go`](../chix.go)
-- [`reqx/bind.go`](../reqx/bind.go)
-- [`reqx/options.go`](../reqx/options.go)
+- [`bind/bind.go`](../bind/bind.go)
+- [`bind/value_binder.go`](../bind/value_binder.go)
 - [`reqx/validate.go`](../reqx/validate.go)
 - [`resp/json.go`](../resp/json.go)
 - [`resp/write_error.go`](../resp/write_error.go)
@@ -62,7 +62,7 @@
 - 默认绑定顺序：`path -> query(GET/DELETE/HEAD) -> body`
 - body 绑定覆盖 `JSON`、`XML`、`form`、`multipart`
 - 额外提供 `BindHeaders(...)`
-- 响应 helper 覆盖 `HTML`、`String`、`JSON`、`JSONPretty`、`JSONBlob`、`JSONP`、`XML`、`Blob`、`Stream`、`File`、`Attachment`、`Inline`、`NoContent`、`Redirect`、`Render`
+- 响应 helper 覆盖 `HTML`、`String`、`JSON`、`JSONBlob`、`JSONP`、`XML`、`Blob`、`Stream`、`File`、`Attachment`、`Inline`、`NoContent`、`Redirect`、`Render`
 - 官方中间件目录仍然比较完整，包括 logger、recover、CORS、JWT、rate limiter、timeout、gzip、request ID、Prometheus、Jaeger 等
 
 这意味着 Echo v5 仍然是一个“完整框架”，而不只是几组 API helper。
@@ -181,7 +181,6 @@ if err := chix.BindAndValidate(r, &req); err != nil {
 当前 `chix` 在根包公开的成功响应 helper 主要是：
 
 - `JSON`
-- `JSONPretty`
 - `JSONBlob`
 - `OK`
 - `Created`
@@ -286,8 +285,8 @@ Echo v5 在官方文档和中间件目录上的一体化程度仍然明显更高
 
 - [chix README](../README.md)
 - [chix CHANGELOG](../CHANGELOG.md)
-- [`reqx/bind.go`](../reqx/bind.go)
-- [`reqx/options.go`](../reqx/options.go)
+- [`bind/bind.go`](../bind/bind.go)
+- [`bind/generic.go`](../bind/generic.go)
 - [`resp/write_error.go`](../resp/write_error.go)
 - [`resp/error_log.go`](../resp/error_log.go)
 - [`middleware/httplog_attrs.go`](../middleware/httplog_attrs.go)

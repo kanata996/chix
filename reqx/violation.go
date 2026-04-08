@@ -38,10 +38,6 @@ type Violation struct {
 	Detail string `json:"detail"`
 }
 
-func invalidFieldError(violation Violation) error {
-	return invalidFieldsError([]Violation{violation})
-}
-
 func invalidFieldsError(violations []Violation) error {
 	details := make([]any, 0, len(violations))
 	for _, violation := range violations {
