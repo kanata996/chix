@@ -5,9 +5,11 @@ package reqx
 // - [✓] 测试辅助文件：提供 JSON 请求构造与 HTTP/violation 断言辅助，不声明独立业务覆盖。
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -20,11 +22,43 @@ func newJSONRequest(method, target, body string) *http.Request {
 	return req
 }
 
+func requestWithPathParams(params map[string][]string) *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	for name, values := range params {
+		value := ""
+		if len(values) > 0 {
+			value = values[0]
+		}
+		req.SetPathValue(name, value)
+	}
+	req.Pattern = syntheticPatternFromPathParams(params)
+	return req
+}
+
+func syntheticPatternFromPathParams(params map[string][]string) string {
+	if len(params) == 0 {
+		return "/"
+	}
+
+	names := make([]string, 0, len(params))
+	for name := range params {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	parts := make([]string, 0, len(names)+1)
+	parts = append(parts, "")
+	for _, name := range names {
+		parts = append(parts, "{"+name+"}")
+	}
+	return strings.Join(parts, "/")
+}
+
 func assertHTTPError(t *testing.T, err error, wantStatus int, wantCode, wantDetail string) *errx.HTTPError {
 	t.Helper()
 
-	httpErr, ok := err.(*errx.HTTPError)
-	if !ok {
+	httpErr := assertHTTPErrorLike(t, err)
+	if httpErr == nil {
 		t.Fatalf("error type = %T, want *errx.HTTPError", err)
 	}
 	if got := httpErr.Status(); got != wantStatus {
@@ -35,6 +69,16 @@ func assertHTTPError(t *testing.T, err error, wantStatus int, wantCode, wantDeta
 	}
 	if got := httpErr.Detail(); got != wantDetail {
 		t.Fatalf("detail = %q, want %q", got, wantDetail)
+	}
+	return httpErr
+}
+
+func assertHTTPErrorLike(t *testing.T, err error) *errx.HTTPError {
+	t.Helper()
+
+	var httpErr *errx.HTTPError
+	if !errors.As(err, &httpErr) || httpErr == nil {
+		t.Fatalf("error type = %T, want *errx.HTTPError", err)
 	}
 	return httpErr
 }
@@ -75,14 +119,8 @@ func assertSingleViolation(t *testing.T, err error) Violation {
 func assertSameHTTPError(t *testing.T, gotErr, wantErr error) *errx.HTTPError {
 	t.Helper()
 
-	got, ok := gotErr.(*errx.HTTPError)
-	if !ok {
-		t.Fatalf("got error type = %T, want *errx.HTTPError", gotErr)
-	}
-	want, ok := wantErr.(*errx.HTTPError)
-	if !ok {
-		t.Fatalf("want error type = %T, want *errx.HTTPError", wantErr)
-	}
+	got := assertHTTPErrorLike(t, gotErr)
+	want := assertHTTPErrorLike(t, wantErr)
 
 	if got.Status() != want.Status() || got.Code() != want.Code() || got.Detail() != want.Detail() {
 		t.Fatalf(

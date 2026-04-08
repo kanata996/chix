@@ -6,20 +6,19 @@
 //   - 将常见请求违规统一收敛为稳定的 HTTP 错误
 //
 // 典型用法：
-//   - 使用 BindAndValidate 处理 path/query/body 综合绑定
-//   - 使用 BindBody 或 BindAndValidateBody 处理必须提供的 JSON 请求体
-//   - 使用 BindAndValidateQuery 处理 query DTO
+//   - 使用 Bind 处理 path/query/body 综合绑定
+//   - 使用 BindBody 处理 body-only JSON 请求体
+//   - 使用 BindQueryParams 处理 query DTO
 //   - 使用 BindPathValues / BindHeaders 处理单一来源绑定
-//   - 使用 ParamString / ParamInt / ParamUUID 读取简单 path 参数
+//   - 使用 BindAndValidate* 作为 binding + request-rules + validate 的便利组合层
 //
 // 公开 API：
 //   - 绑定入口：Bind、BindBody、BindQueryParams、BindPathValues、BindHeaders
 //   - 绑定并校验入口：BindAndValidate、BindAndValidateBody、
 //     BindAndValidateQuery、BindAndValidatePath、BindAndValidateHeaders
-//   - path helper：ParamString、ParamInt、ParamUUID
-//   - 绑定 option：BindOption、BindBodyOption、BindQueryParamsOption、
-//     BindHeadersOption、WithMaxBodyBytes、DefaultMaxBodyBytes
-//   - DTO 扩展点：Normalizer
+//   - binder 相关类型：Binder、DefaultBinder、BindUnmarshaler
+//   - DTO 扩展点：RequestValidator、Normalizer
+//   - 请求级规则 helper：RequireBody、InvalidRequest
 //   - 公开错误码常量：CodeInvalidJSON、CodeUnsupportedMediaType、
 //     CodeRequestTooLarge、CodeInvalidRequest
 //   - 公开违规模型：Violation（字段为 Field、In、Code、Detail）
@@ -31,9 +30,9 @@
 // 新增、移除、重命名以上导出符号，或改变其公开语义时，应同步更新本注释与 CHANGELOG。
 //
 // body 绑定的公开契约：
-//   - BindBody / BindAndValidateBody 要求请求体非空；空 body 或纯空白 body 返回 400。
-//   - Bind(...) 在综合绑定时会把空 body 视为 no-op，不会因为该阶段缺失 body 而失败。
-//   - 非空 body 只接受 application/json 或 application/*+json。
+//   - 默认情况下，BindBody / BindAndValidateBody / Bind(...) 在 Content-Length == 0 时都会把 body 视为 no-op。
+//   - 非空 body 当前只支持 application/json。
+//   - 综合绑定入口对空 body 采用 no-op 语义；是否必填由 RequestValidator 或更上层策略决定。
 //
 // path 输入只依赖 net/http 暴露的 PathValue / Pattern 命名 wildcard 语义，
 // 不依赖 chi.RouteContext，也不承诺 chi 专有 `*` catch-all 的兼容行为。

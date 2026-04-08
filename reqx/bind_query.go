@@ -49,9 +49,14 @@ var (
 	}
 )
 
-func BindQueryParams[T any](r *http.Request, dst *T, opts ...BindQueryParamsOption) error {
-	cfg := applyBindOptions(opts...)
-	return bindTaggedValues(r, dst, querySource, cfg.query)
+func BindQueryParams(r *http.Request, target any) error {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+	return bindQueryParamsDefault(r, target)
 }
 
 func bindTaggedValues[T any](r *http.Request, dst *T, source valueSource, cfg bindValuesConfig) error {

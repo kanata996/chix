@@ -43,19 +43,11 @@ func describeJSONType(t reflect.Type) string {
 	}
 }
 
-func invalidJSONError(message string) error {
-	return errx.NewHTTPError(http.StatusBadRequest, CodeInvalidJSON, message)
-}
-
-func emptyBodyError() error {
-	return invalidJSONError("request body must not be empty")
-}
-
 func unsupportedMediaTypeError() error {
 	return errx.NewHTTPError(
 		http.StatusUnsupportedMediaType,
 		CodeUnsupportedMediaType,
-		"Content-Type must be application/json or application/*+json",
+		"Content-Type must be application/json",
 	)
 }
 

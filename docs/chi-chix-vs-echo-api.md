@@ -23,7 +23,7 @@
 
 如果目标是“获得 Echo v5 那种完整框架的一体化开发体验”，当前 `chi + chix` 仍然明显不是等价替代。它覆盖的是 Echo v5 的一部分 API 主路径，不是 Echo v5 的完整能力面。
 
-还有一个需要明确写出来的细节：`chix.Bind(...)` 和 Echo v5 `DefaultBinder.Bind(...)` 的默认顺序相近，但并不完全相同。Echo v5 会在 `GET` / `DELETE` / `HEAD` 上绑定 query；`chix` 当前只在 `GET` / `DELETE` 上绑定 query。
+当前 `chix.Bind(...)` 在执行顺序上对齐 Echo v5：`path -> query(GET/DELETE/HEAD) -> body`。但 `chix` 在 MVP 阶段刻意把 body 收缩为只支持 `application/json`，因此它和 Echo v5 的默认 binder 仍然有明确能力差距。
 
 ## `chix` 当前覆盖范围
 
@@ -31,7 +31,7 @@
 
 当前公开能力主要包括：
 
-- path/query/header/JSON body 绑定
+- path/query/header/body 绑定（body 当前只覆盖 JSON）
 - `validator/v10` 校验
 - JSON 成功响应写回
 - 统一 problem 风格错误响应写回
@@ -149,43 +149,23 @@ if err := chix.BindAndValidate(r, &req); err != nil {
 
 这不是坏事，但框架一体化程度确实明显弱于 Echo v5。
 
-### 2. 默认绑定能力面比 Echo v5 窄
+### 2. 默认 binder 顺序对齐 Echo v5，但 body 能力面刻意更窄
 
-这是和旧版文档相比最需要写实的地方。
+这是当前版本最需要写实说明的地方。
 
-当前 `chix` 默认覆盖的是：
+当前 `chix` 默认已经覆盖：
 
-- path
-- query
-- header
-- JSON body
+- `path -> query(GET/DELETE/HEAD) -> body`
+- body 只支持 `application/json`
 
-Echo v5 默认还覆盖：
+也就是说，在“默认 binder 的执行顺序”这一层，`chix` 和 Echo v5 已经一致；但在 body media type 能力面上，`chix` 明确小于 Echo v5。
 
-- `HEAD` 请求的 query 绑定
-- `XML` body
-- `application/x-www-form-urlencoded`
-- `multipart/form-data`
-
-所以更准确的说法应该是：
-
-- `chix` 覆盖了纯 JSON API 的高频主路径
-- 但它并没有在“默认 binder 能力面”上接近 Echo v5 的完整覆盖
-
-### 3. 绑定顺序与 Echo v5 只“近似一致”，不是“完全对齐”
-
-当前差异至少有一处是明确存在的：
-
-- Echo v5：`path -> query(GET/DELETE/HEAD) -> body`
-- `chix`：`path -> query(GET/DELETE) -> body`
-
-如果团队很在意“完全对齐 Echo 默认绑定语义”，这一点不应该继续写成“明确对齐 Echo”。
-
-### 4. 公开扩展面仍然偏少
+### 3. 公开扩展面仍然偏少
 
 当前 `chix` 公开的 bind option 仍然非常少，实际公开出来的主配置项基本就是：
-
-- `WithMaxBodyBytes(...)`
+- `Binder`
+- `DefaultBinder`
+- `BindUnmarshaler`
 
 而 Echo v5 框架级公开扩展点至少包括：
 
@@ -251,10 +231,10 @@ Echo v5 在官方文档和中间件目录上的一体化程度仍然明显更高
 | --- | --- | --- |
 | 路由、分组、挂载 | 由 `chi` 提供，能力成熟 | 这块不弱，且 `net/http` 兼容性更自然 |
 | handler 模型 | 标准 `http.Handler` 风格 | 比 Echo `Context + error` 更底层，也更不一体化 |
-| 默认绑定顺序 | `path -> query(GET/DELETE) -> JSON body` | 只和 Echo v5 近似一致，未完全对齐 |
-| path/query/header/JSON body 绑定 | `chix` 已覆盖 | 纯 JSON API 主路径够用 |
+| 默认绑定顺序 | `path -> query(GET/DELETE/HEAD) -> body` | 顺序已对齐 Echo v5 |
+| path/query/header/body 绑定 | `chix` 已覆盖；body 当前只支持 JSON | 纯 JSON API 主路径够用，但能力面小于 Echo v5 |
 | XML/form/multipart body 绑定 | 未覆盖 | 明显少于 Echo v5 |
-| `HEAD` 请求 query 绑定 | 未覆盖 | 与 Echo v5 默认 binder 有差异 |
+| `HEAD` 请求 query 绑定 | 已覆盖 | 这部分已对齐 Echo v5 默认 binder |
 | DTO 校验 | `BindAndValidate(...)` + `validator/v10` | 默认体验仍然比 Echo v5 直接 |
 | 框架级统一错误流 | 没有，主要靠显式 `WriteError(...)` | 明显弱于 Echo v5 |
 | 默认错误响应契约 | problem 风格、API 导向更强 | 对纯 API 契约更友好 |
@@ -272,11 +252,9 @@ Echo v5 在官方文档和中间件目录上的一体化程度仍然明显更高
 
 - 提供完整的 handler error flow，把 `WriteError(...)` 从显式 helper 提升为统一约束
 - 提供公开的 binder / validator / error-writer 扩展点
-- 明确是否要对齐 Echo v5 的 `HEAD` query 绑定语义
 
 ### P2
 
-- 增加 `XML` / `form` / multipart 绑定能力
 - 增加更多 response helper，例如 `Stream` / `File`
 - 继续明确 header 绑定、body 绑定、query 绑定的契约边界
 
@@ -292,7 +270,7 @@ Echo v5 在官方文档和中间件目录上的一体化程度仍然明显更高
 
 - `chi + chix` 依然有价值，但价值主要在“纯 JSON API 的边界约束”
 - 它没有接近 Echo v5 的完整框架能力面
-- 它和 Echo v5 的默认 binder 语义也不是完全一致
+- 它的默认 binder 顺序已经对齐 Echo v5，但 body 能力面仍然更窄
 - 如果只做 JSON API，这个差距通常可接受
 - 如果要对标 Echo v5 的完整开发体验，这个差距仍然明显
 

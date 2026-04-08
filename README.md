@@ -123,7 +123,7 @@ Content-Type: application/problem+json
 - `header:"..."`：header
 - `validate:"..."`：`validator/v10` 校验规则
 
-请求侧 JSON body 接受 `application/json` 和 `application/*+json`。
+请求侧 body 绑定当前只支持 `application/json`。
 更完整的绑定契约说明见 [docs/request-binding.md](./docs/request-binding.md)。
 
 根包常用请求 API：
@@ -138,30 +138,32 @@ Content-Type: application/problem+json
 - `BindAndValidateQuery`
 - `BindAndValidatePath`
 - `BindAndValidateHeaders`
-- `ParamString`
-- `ParamInt`
-- `ParamUUID`
-- `WithMaxBodyBytes`
+- `Binder`
+- `DefaultBinder`
+- `BindUnmarshaler`
+- `Normalizer`
+- `RequestValidator`
+- `RequireBody`
 
 `Bind(...)` 的绑定顺序是：
 
 1. path
-2. query（仅 `GET` / `DELETE`）
-3. JSON body
+2. query（仅 `GET` / `DELETE` / `HEAD`）
+3. body
 
 如果你只处理单一输入来源，优先使用源专用 API：
 
-- 只处理必须提供的 JSON body：`BindBody(...)`、`BindAndValidateBody(...)`
+- 只处理 body：`BindBody(...)`、`BindAndValidateBody(...)`
 - 只处理 query：`BindQueryParams(...)`、`BindAndValidateQuery(...)`
 - 只处理 path：`BindPathValues(...)`、`BindAndValidatePath(...)`
 - 只处理 header：`BindHeaders(...)`、`BindAndValidateHeaders(...)`
 
 body 绑定契约：
 
-- `BindBody(...)` / `BindAndValidateBody(...)` 要求 body 非空；空 body 或纯空白 body 返回 `400 invalid_json`
-- `Bind(...)` 在综合绑定时会把空 body 视为 no-op，因此适合 body 可缺省的路由
-- 非空 body 必须声明 `application/json` 或 `application/*+json`
-- 顶层 body 必须是 JSON object；`null`、数组、数字、字符串、布尔值都会被拒绝
+- binding 层默认对齐 Echo：`Bind(...)` / `BindAndValidate(...)` / `BindBody(...)` / `BindAndValidateBody(...)` 在 `Content-Length == 0` 时都会把 body 视为 no-op
+- 非空 body 当前只支持 `application/json`
+- `application/json` 默认遵循标准 decoder 语义；默认 binder 只接受标准 `application/json`
+- `BindAndValidate*` 会在字段校验前先执行请求级规则；如果业务要求“即使字段全是可选也必须提交 body”，请在 DTO 上实现 `ValidateRequest(*http.Request) error`
 
 如果 DTO 需要在校验前做裁剪、大小写归一化或默认值补齐，实现 `Normalize()` 即可：
 
@@ -175,14 +177,16 @@ func (r *listAccountsRequest) Normalize() {
 }
 ```
 
-默认 body 读取上限是 `chix.DefaultMaxBodyBytes`（当前为 `1 MiB`）。
-如果需要限制 body 大小，可以传入 `WithMaxBodyBytes(...)`，例如把单个请求体收紧到 `256 KiB`：
+如果需要请求级契约，例如“这个接口必须显式提交 body”，实现 `ValidateRequest`：
 
 ```go
-var req createAccountRequest
-if err := chix.BindAndValidate(r, &req, chix.WithMaxBodyBytes(256<<10)); err != nil {
-	_ = chix.WriteError(w, r, err)
-	return
+type createAccountRequest struct {
+	OrgID string `param:"org_id" validate:"required"`
+	Name  string `json:"name"`
+}
+
+func (*createAccountRequest) ValidateRequest(r *http.Request) error {
+	return chix.RequireBody(r)
 }
 ```
 

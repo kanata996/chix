@@ -4,14 +4,17 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"reflect"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
-func BindPathValues[T any](r *http.Request, dst *T) error {
-	return bindTaggedValues(r, dst, pathSource, bindValuesConfig{allowUnknownFields: true})
+func BindPathValues(r *http.Request, target any) error {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+	return bindPathValuesDefault(r, target)
 }
 
 func pathValuesForPlan(r *http.Request, plan *valueDecodePlan) url.Values {
@@ -90,42 +93,6 @@ func pathWildcardNames(pattern string) []string {
 	}
 
 	return names
-}
-
-func ParamString(r *http.Request, name string) (string, error) {
-	rawValues, err := requiredPathParamValues(r, name)
-	if err != nil {
-		return "", err
-	}
-
-	return rawValues[0], nil
-}
-
-func ParamInt(r *http.Request, name string) (int, error) {
-	rawValues, err := requiredPathParamValues(r, name)
-	if err != nil {
-		return 0, err
-	}
-
-	var value int
-	violation, _ := decodeQueryField(reflect.ValueOf(&value).Elem(), rawValues, name, ViolationInPath)
-	if violation != nil {
-		return 0, invalidFieldError(*violation)
-	}
-	return value, nil
-}
-
-func ParamUUID(r *http.Request, name string) (string, error) {
-	raw, err := ParamString(r, name)
-	if err != nil {
-		return "", err
-	}
-
-	parsed, err := uuid.Parse(raw)
-	if err != nil {
-		return "", invalidFieldError(newViolation(name, ViolationInPath, ViolationCodeInvalid, violationDetailInvalid))
-	}
-	return parsed.String(), nil
 }
 
 func requiredPathParamValues(r *http.Request, name string) ([]string, error) {

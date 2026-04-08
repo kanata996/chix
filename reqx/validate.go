@@ -32,50 +32,72 @@ var (
 	validators    map[sourceKind]*validator.Validate
 )
 
-func BindAndValidate[T any](r *http.Request, dst *T, opts ...BindOption) error {
-	if err := Bind(r, dst, opts...); err != nil {
+func BindAndValidate(r *http.Request, target any) error {
+	if err := Bind(r, target); err != nil {
 		return err
 	}
-	return validate(dst, sourceRequest)
+	return postBindValidate(r, target, sourceRequest)
 }
 
-func BindAndValidateBody[T any](r *http.Request, dst *T, opts ...BindBodyOption) error {
-	if err := BindBody(r, dst, opts...); err != nil {
+func BindAndValidateBody(r *http.Request, target any) error {
+	if err := BindBody(r, target); err != nil {
 		return err
 	}
-	return validate(dst, sourceBody)
+	return postBindValidate(r, target, sourceBody)
 }
 
-func BindAndValidateQuery[T any](r *http.Request, dst *T, opts ...BindQueryParamsOption) error {
-	if err := BindQueryParams(r, dst, opts...); err != nil {
+func BindAndValidateQuery(r *http.Request, target any) error {
+	if err := BindQueryParams(r, target); err != nil {
 		return err
 	}
-	return validate(dst, sourceQuery)
+	return postBindValidate(r, target, sourceQuery)
 }
 
-func BindAndValidatePath[T any](r *http.Request, dst *T) error {
-	if err := BindPathValues(r, dst); err != nil {
+func BindAndValidatePath(r *http.Request, target any) error {
+	if err := BindPathValues(r, target); err != nil {
 		return err
 	}
-	return validate(dst, sourcePath)
+	return postBindValidate(r, target, sourcePath)
 }
 
-func BindAndValidateHeaders[T any](r *http.Request, dst *T, opts ...BindHeadersOption) error {
-	if err := BindHeaders(r, dst, opts...); err != nil {
+func BindAndValidateHeaders(r *http.Request, target any) error {
+	if err := BindHeaders(r, target); err != nil {
 		return err
 	}
-	return validate(dst, sourceHeader)
+	return postBindValidate(r, target, sourceHeader)
 }
 
-func validate[T any](target *T, source sourceKind) error {
+func postBindValidate(r *http.Request, target any, source sourceKind) error {
 	if err := validateTarget(target); err != nil {
 		return err
 	}
 
-	if normalizer, ok := any(target).(Normalizer); ok {
-		normalizer.Normalize()
+	normalizeTarget(target)
+
+	if err := applyRequestValidation(r, target); err != nil {
+		return err
 	}
 
+	return validateFields(target, source)
+}
+
+func validate(target any, source sourceKind) error {
+	if err := validateTarget(target); err != nil {
+		return err
+	}
+
+	normalizeTarget(target)
+
+	return validateFields(target, source)
+}
+
+func normalizeTarget(target any) {
+	if normalizer, ok := target.(Normalizer); ok {
+		normalizer.Normalize()
+	}
+}
+
+func validateFields(target any, source sourceKind) error {
 	violations, err := validateStruct(target, source)
 	if err != nil {
 		return err

@@ -105,11 +105,11 @@ func TestValidateRequest_UsesRequestFieldAliases(t *testing.T) {
 
 // validate(sourceRequest) 会透传统一的空目标参数错误。
 func TestValidateRequest_NilDestinationReturnsError(t *testing.T) {
-	err := validate[struct{}](nil, sourceRequest)
+	err := validate(nil, sourceRequest)
 	if err == nil {
 		t.Fatal("validate() error = nil")
 	}
-	if got := err.Error(); got != "reqx: target must be a non-nil pointer to struct" {
-		t.Fatalf("error = %q, want reqx: target must be a non-nil pointer to struct", got)
+	if got := err.Error(); got != "reqx: target must not be nil" {
+		t.Fatalf("error = %q, want reqx: target must not be nil", got)
 	}
 }

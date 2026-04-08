@@ -138,17 +138,8 @@ func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) 
 	})
 
 	r.Get("/orgs/{org_id}/accounts/{account_id}", func(w http.ResponseWriter, r *http.Request) {
-		orgID, err := chix.ParamString(r, "org_id")
-		if err != nil {
-			_ = chix.WriteError(w, r, err)
-			return
-		}
-
-		accountID, err := chix.ParamString(r, "account_id")
-		if err != nil {
-			_ = chix.WriteError(w, r, err)
-			return
-		}
+		orgID := r.PathValue("org_id")
+		accountID := r.PathValue("account_id")
 
 		acct, ok := store.Get(orgID, accountID)
 		if !ok {

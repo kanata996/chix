@@ -2,15 +2,13 @@ package reqx
 
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] 内部 body 辅助会处理空 body、读取失败、Content-Type 校验、未知字段与 JSON 解码错误映射。
+// - [✓] 内部 body 辅助会处理空 body、读取失败和大小限制。
 // - [✓] 内部 path/query/header 值绑定辅助会处理标签解析、解码计划缓存、未知字段、重复值与不支持字段类型。
 // - [✓] 内部目标处理与校验辅助会维持深拷贝隔离，并对非法目标、非法注册和不支持来源给出稳定错误或 panic。
 // - [✓] 本文件只覆盖关键内部辅助契约，不把这些断言记成独立公开能力验收。
 
 import (
-	"encoding/json"
 	"errors"
-	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -98,16 +96,16 @@ func TestBindAndBindBodyRejectNilDestination(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
 	var dst struct{}
-	if err := Bind[struct{}](nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
+	if err := Bind(nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
 		t.Fatalf("Bind(nil) error = %v, want request must not be nil", err)
 	}
 
-	if err := Bind[struct{}](req, nil); err == nil || err.Error() != "reqx: destination must not be nil" {
+	if err := Bind(req, nil); err == nil || err.Error() != "reqx: destination must not be nil" {
 		t.Fatalf("Bind() error = %v, want destination must not be nil", err)
 	}
 
 	req = newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
-	if err := BindBody[struct{}](req, nil); err == nil || err.Error() != "reqx: destination must not be nil" {
+	if err := BindBody(req, nil); err == nil || err.Error() != "reqx: destination must not be nil" {
 		t.Fatalf("BindBody() error = %v, want destination must not be nil", err)
 	}
 }
@@ -237,142 +235,6 @@ func TestDeepCloneValueBranches(t *testing.T) {
 	})
 }
 
-// 空 body 且不允许为空时返回空 body 错误。
-func TestBindJSONWithConfigRejectsEmptyBodyWhenNotAllowed(t *testing.T) {
-	req := newJSONRequest(http.MethodPost, "/", "")
-
-	var dst struct {
-		Name string `json:"name"`
-	}
-	err := bindJSONWithConfig(req, &dst, bindBodyConfig{}, bodyBindMode{})
-	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
-}
-
-// 空 body 场景下也可以按配置校验 Content-Type。
-func TestBindJSONWithConfigRejectsInvalidContentTypeOnEmptyBody(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
-	req.Header.Set("Content-Type", "text/plain")
-
-	var dst struct {
-		Name string `json:"name"`
-	}
-	err := bindJSONWithConfig(req, &dst, bindBodyConfig{allowEmptyBody: true}, bodyBindMode{
-		validateContentTypeOnEmpty: true,
-	})
-	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json or application/*+json")
-}
-
-// body 读取失败时直接透传底层错误。
-func TestBindJSONWithConfigPropagatesReadError(t *testing.T) {
-	wantErr := errors.New("read failed")
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = failingReadCloser{err: wantErr}
-
-	var dst struct {
-		Name string `json:"name"`
-	}
-	err := bindJSONWithConfig(req, &dst, bindBodyConfig{}, bodyBindMode{})
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("bindJSONWithConfig() error = %v, want %v", err, wantErr)
-	}
-}
-
-// 禁止未知字段时会返回未知字段 violation。
-func TestBindJSONWithConfigRejectsUnknownFieldWhenDisabled(t *testing.T) {
-	req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata","extra":1}`)
-
-	var dst struct {
-		Name string `json:"name"`
-	}
-	err := bindJSONWithConfig(req, &dst, bindBodyConfig{allowUnknownFields: false}, bodyBindMode{})
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "extra" || violation.Code != ViolationCodeUnknown || violation.Detail != "unknown field" {
-		t.Fatalf("violation = %#v", violation)
-	}
-}
-
-// validateJSONContentType 会接受空值、标准 JSON 和 +json 后缀，并正确裁剪首尾空白。
-func TestValidateJSONContentType_AllowsSupportedMediaTypes(t *testing.T) {
-	testCases := []struct {
-		name        string
-		contentType string
-	}{
-		{name: "empty", contentType: ""},
-		{name: "application json", contentType: "application/json"},
-		{name: "parameterized application json", contentType: "application/json; charset=utf-8"},
-		{name: "json suffix", contentType: "application/merge-patch+json"},
-		{name: "trimmed json suffix", contentType: " application/problem+json ; charset=utf-8 "},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			if err := validateJSONContentType(tc.contentType); err != nil {
-				t.Fatalf("validateJSONContentType() error = %v", err)
-			}
-		})
-	}
-}
-
-// mapDecodeError 会覆盖语法、类型、EOF、未知字段等分支。
-func TestMapDecodeErrorBranches(t *testing.T) {
-	t.Run("syntax", func(t *testing.T) {
-		err := mapDecodeError(&json.SyntaxError{})
-		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
-	})
-
-	t.Run("type", func(t *testing.T) {
-		err := mapDecodeError(&json.UnmarshalTypeError{
-			Field: "age",
-			Type:  reflect.TypeOf(0),
-		})
-		violation := assertSingleViolation(t, err)
-		if violation.Field != "age" || violation.Code != ViolationCodeType || violation.Detail != "must be number" {
-			t.Fatalf("violation = %#v", violation)
-		}
-	})
-
-	t.Run("invalid unmarshal", func(t *testing.T) {
-		wantErr := &json.InvalidUnmarshalError{Type: reflect.TypeOf(0)}
-		if got := mapDecodeError(wantErr); got != wantErr {
-			t.Fatalf("mapDecodeError() = %v, want same error", got)
-		}
-	})
-
-	t.Run("eof", func(t *testing.T) {
-		err := mapDecodeError(io.EOF)
-		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
-	})
-
-	t.Run("unknown field", func(t *testing.T) {
-		err := mapDecodeError(errors.New(`json: unknown field "extra"`))
-		violation := assertSingleViolation(t, err)
-		if violation.Field != "extra" || violation.Code != ViolationCodeUnknown || violation.Detail != "unknown field" {
-			t.Fatalf("violation = %#v", violation)
-		}
-	})
-
-	t.Run("malformed unknown field message", func(t *testing.T) {
-		err := mapDecodeError(errors.New(`json: unknown field "extra`))
-		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
-	})
-
-	t.Run("default", func(t *testing.T) {
-		err := mapDecodeError(errors.New("boom"))
-		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
-	})
-}
-
-// parseUnknownField 只解析标准未知字段错误消息。
-func TestParseUnknownField(t *testing.T) {
-	if field, ok := parseUnknownField(errors.New(`json: unknown field "extra"`)); !ok || field != "extra" {
-		t.Fatalf("parseUnknownField() = (%q, %v), want (extra, true)", field, ok)
-	}
-	if field, ok := parseUnknownField(errors.New("boom")); ok || field != "" {
-		t.Fatalf("parseUnknownField() = (%q, %v), want empty false", field, ok)
-	}
-}
-
 // describeJSONType 会把 Go 类型映射为对外错误描述。
 func TestDescribeJSONType(t *testing.T) {
 	testCases := []struct {
@@ -401,12 +263,6 @@ func TestDescribeJSONType(t *testing.T) {
 			}
 		})
 	}
-}
-
-// emptyBodyError 会生成标准空 body HTTP 错误。
-func TestEmptyBodyError(t *testing.T) {
-	err := emptyBodyError()
-	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
 }
 
 // pathValuesForPlan 在空请求、空计划或无匹配 pattern 时返回空结果。

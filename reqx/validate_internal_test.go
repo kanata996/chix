@@ -22,19 +22,19 @@ import (
 func TestBindAndValidateWrappersReturnBindErrors(t *testing.T) {
 	var dst struct{}
 
-	if err := BindAndValidate[struct{}](nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
+	if err := BindAndValidate(nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
 		t.Fatalf("BindAndValidate() error = %v", err)
 	}
-	if err := BindAndValidateBody[struct{}](nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
+	if err := BindAndValidateBody(nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
 		t.Fatalf("BindAndValidateBody() error = %v", err)
 	}
-	if err := BindAndValidateQuery[struct{}](nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
+	if err := BindAndValidateQuery(nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
 		t.Fatalf("BindAndValidateQuery() error = %v", err)
 	}
-	if err := BindAndValidatePath[struct{}](nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
+	if err := BindAndValidatePath(nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
 		t.Fatalf("BindAndValidatePath() error = %v", err)
 	}
-	if err := BindAndValidateHeaders[struct{}](nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
+	if err := BindAndValidateHeaders(nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
 		t.Fatalf("BindAndValidateHeaders() error = %v", err)
 	}
 }
@@ -90,7 +90,30 @@ func TestBindAndValidateWrappersSuccessPaths(t *testing.T) {
 	}
 }
 
-// 各个 BindAndValidate 包装器的结果应与“先绑定，再按对应来源校验”的组合一致。
+// 当 DTO 未实现 RequestValidator 时，综合绑定下的空 body 会继续沿用 binding no-op，再由字段校验处理。
+func TestBindAndValidate_EmptyMixedSourceBodyDefersToValidation(t *testing.T) {
+	type request struct {
+		OrgID string `param:"org_id" validate:"required"`
+		Name  string `json:"name" validate:"required"`
+	}
+
+	req := requestWithPathParams(map[string][]string{"org_id": {"org_1"}})
+	req.Method = http.MethodPost
+	req.Header.Set("Content-Type", "application/json")
+	req.ContentLength = 0
+
+	var dst request
+	err := BindAndValidate(req, &dst)
+	httpErr := assertHTTPError(t, err, http.StatusUnprocessableEntity, CodeInvalidRequest, "request contains invalid fields")
+	if got := len(httpErr.Errors()); got != 1 {
+		t.Fatalf("errors len = %d, want 1", got)
+	}
+	if !reflect.DeepEqual(dst, request{OrgID: "org_1"}) {
+		t.Fatalf("dst = %#v, want path value preserved before validation failure", dst)
+	}
+}
+
+// 对未实现 RequestValidator 的 DTO，各个 BindAndValidate 包装器的结果应与“先绑定，再按对应来源校验”的组合一致。
 func TestBindAndValidateWrappersMatchBindPlusValidate(t *testing.T) {
 	t.Run("request success", func(t *testing.T) {
 		type request struct {

@@ -3,6 +3,7 @@ package chix
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,15 +11,24 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/kanata996/chix/errx"
+	"github.com/kanata996/chix/reqx"
 )
 
 // 测试清单：
-// [✓] 根包 facade 会把 reqx 的绑定、校验与 path 参数 helper 稳定透传出来
+// [✓] 根包 facade 会把 reqx 的绑定、请求规则与校验能力稳定透传出来
 // [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
-// [✓] 根包公开 option 会继续委托到底层 reqx option，而不改变默认契约
+// [✓] 根包绑定 facade 维持新的公开导出面，不额外暴露旧 path helper / bind option
 // [✓] README 中承诺的 create account handler 主路径有根包级端到端测试支撑
 
 type rootPayloadMap map[string]any
+
+type rootRequestValidatorBodyRequiredRequest struct {
+	Name *string `json:"name"`
+}
+
+func (*rootRequestValidatorBodyRequiredRequest) ValidateRequest(r *http.Request) error {
+	return RequireBody(r)
+}
 
 // BindAndValidateBody 会通过根包 facade 把 body 绑定和校验委托给 reqx。
 func TestBindAndValidateBody_DelegatesToReqx(t *testing.T) {
@@ -37,7 +47,7 @@ func TestBindAndValidateBody_DelegatesToReqx(t *testing.T) {
 	}
 }
 
-// Bind 会通过根包 facade 复用 Echo 风格的 path/query/body 绑定顺序。
+// Bind 会通过根包 facade 复用默认的 path/query/body 绑定顺序。
 func TestBind_DelegatesToReqx(t *testing.T) {
 	type request struct {
 		ID   string `param:"id" query:"id" json:"id"`
@@ -141,6 +151,33 @@ func TestBindAndValidate_DelegatesToReqx(t *testing.T) {
 	}
 }
 
+// BindAndValidateBody 会通过根包 facade 执行请求级规则。
+func TestBindAndValidateBody_DelegatesRequestValidator(t *testing.T) {
+	req := newJSONRequest(http.MethodPost, "/accounts", "")
+	req.ContentLength = 0
+
+	var dst rootRequestValidatorBodyRequiredRequest
+	err := BindAndValidateBody(req, &dst)
+
+	var httpErr *errx.HTTPError
+	if !errors.As(err, &httpErr) || httpErr == nil {
+		t.Fatalf("error type = %T, want *errx.HTTPError", err)
+	}
+	if httpErr.Status() != http.StatusUnprocessableEntity || httpErr.Code() != "invalid_request" || httpErr.Detail() != "request contains invalid fields" {
+		t.Fatalf("http error = (%d, %q, %q)", httpErr.Status(), httpErr.Code(), httpErr.Detail())
+	}
+	if len(httpErr.Errors()) != 1 {
+		t.Fatalf("errors len = %d, want 1", len(httpErr.Errors()))
+	}
+	violation, ok := httpErr.Errors()[0].(reqx.Violation)
+	if !ok {
+		t.Fatalf("detail type = %T, want reqx.Violation", httpErr.Errors()[0])
+	}
+	if violation.Field != "body" || violation.In != reqx.ViolationInBody || violation.Code != reqx.ViolationCodeRequired || violation.Detail != "is required" {
+		t.Fatalf("violation = %#v", violation)
+	}
+}
+
 // BindAndValidateQuery 会从 query 参数绑定后再执行校验。
 func TestBindAndValidateQuery_DelegatesToReqx(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts?name=kanata", nil)
@@ -187,45 +224,6 @@ func TestBindAndValidateHeaders_DelegatesToReqx(t *testing.T) {
 	}
 	if dst.RequestID != "req-123" {
 		t.Fatalf("request_id = %q, want req-123", dst.RequestID)
-	}
-}
-
-// ParamString 会通过根包 facade 读取并裁剪必填 path 字符串参数。
-func TestParamString_DelegatesToReqx(t *testing.T) {
-	req := newRouteRequest(http.MethodGet, "/accounts", "id", "  acct_123  ")
-
-	got, err := ParamString(req, "id")
-	if err != nil {
-		t.Fatalf("ParamString() error = %v", err)
-	}
-	if got != "acct_123" {
-		t.Fatalf("id = %q, want acct_123", got)
-	}
-}
-
-// ParamInt 会通过根包 facade 把 path 参数解析为整数。
-func TestParamInt_DelegatesToReqx(t *testing.T) {
-	req := newRouteRequest(http.MethodGet, "/accounts", "page", "42")
-
-	got, err := ParamInt(req, "page")
-	if err != nil {
-		t.Fatalf("ParamInt() error = %v", err)
-	}
-	if got != 42 {
-		t.Fatalf("page = %d, want 42", got)
-	}
-}
-
-// ParamUUID 会通过根包 facade 复用 UUID 规范化逻辑。
-func TestParamUUID_DelegatesToReqx(t *testing.T) {
-	req := newRouteRequest(http.MethodGet, "/accounts", "uuid", "550E8400-E29B-41D4-A716-446655440000")
-
-	got, err := ParamUUID(req, "uuid")
-	if err != nil {
-		t.Fatalf("ParamUUID() error = %v", err)
-	}
-	if got != "550e8400-e29b-41d4-a716-446655440000" {
-		t.Fatalf("uuid = %q", got)
 	}
 }
 
@@ -347,18 +345,6 @@ func TestNoContent_DelegatesToResp(t *testing.T) {
 	}
 }
 
-// WithMaxBodyBytes 会通过根包 facade 把 body 大小限制透传给 reqx。
-func TestWithMaxBodyBytes_DelegatesToReqx(t *testing.T) {
-	req := newJSONRequest(http.MethodPost, "/accounts", `{"name":"kanata"}`)
-
-	var dst struct {
-		Name string `json:"name"`
-	}
-
-	err := Bind(req, &dst, WithMaxBodyBytes(4))
-	_ = assertRootHTTPError(t, err, http.StatusRequestEntityTooLarge, "request_too_large", "request body is too large")
-}
-
 // README 中的 create account 示例应由根包 facade 直接支撑成功与失败两条主路径。
 func TestReadmeCreateAccountFlow(t *testing.T) {
 	type createAccountRequest struct {
@@ -454,6 +440,28 @@ func TestReadmeCreateAccountFlow(t *testing.T) {
 			t.Fatalf("detail = %#v, want is required", got)
 		}
 	})
+
+	t.Run("empty body validation failure", func(t *testing.T) {
+		req := newJSONRequest(http.MethodPost, "/orgs/org_123/accounts", "")
+		rr := httptest.NewRecorder()
+
+		router.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusUnprocessableEntity)
+		}
+		if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
+			t.Fatalf("Content-Type = %q, want application/problem+json", got)
+		}
+
+		body := decodeRootPayload(t, rr.Body.Bytes())
+		if got := body["detail"]; got != "request contains invalid fields" {
+			t.Fatalf("detail = %#v, want request contains invalid fields", got)
+		}
+		if got := body["code"]; got != "invalid_request" {
+			t.Fatalf("code = %#v, want invalid_request", got)
+		}
+	})
 }
 
 func newJSONRequest(method, target, body string) *http.Request {
@@ -486,23 +494,4 @@ func decodeRootPayload(t *testing.T, body []byte) rootPayloadMap {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 	return payload
-}
-
-func assertRootHTTPError(t *testing.T, err error, wantStatus int, wantCode, wantDetail string) *errx.HTTPError {
-	t.Helper()
-
-	httpErr, ok := err.(*errx.HTTPError)
-	if !ok {
-		t.Fatalf("error type = %T, want *errx.HTTPError", err)
-	}
-	if got := httpErr.Status(); got != wantStatus {
-		t.Fatalf("Status() = %d, want %d", got, wantStatus)
-	}
-	if got := httpErr.Code(); got != wantCode {
-		t.Fatalf("Code() = %q, want %q", got, wantCode)
-	}
-	if got := httpErr.Detail(); got != wantDetail {
-		t.Fatalf("Detail() = %q, want %q", got, wantDetail)
-	}
-	return httpErr
 }
