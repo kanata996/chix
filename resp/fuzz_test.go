@@ -2,7 +2,7 @@ package resp
 
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] `JSON` / `JSONPretty` / `OK` / `Created` 在任意字符串 payload、缩进和 pretty 输入下维持稳定写回契约。
+// - [✓] `JSON` / `OK` / `Created` 在任意字符串 payload 和 pretty 输入下维持稳定写回契约。
 // - [✓] `JSONBlob` 在任意原始字节与状态码输入下维持 raw bytes 透传与拒绝契约。
 // - [✓] `WriteError` 在任意公开 detail、状态码和常见 error 变体下维持稳定的公共错误契约且不泄漏内部 cause。
 // - [✓] 本文件提供单一 `FuzzRespPublicContracts` 入口，可直接配合仓库规范中的 `-fuzz=Fuzz` 执行。
@@ -54,7 +54,7 @@ func FuzzRespPublicContracts(f *testing.F) {
 	})
 }
 
-func fuzzSuccessWriterContracts(t *testing.T, variant uint8, status int, value, indent string) {
+func fuzzSuccessWriterContracts(t *testing.T, variant uint8, status int, value, _ string) {
 	t.Helper()
 
 	payload := map[string]string{"value": value}
@@ -70,15 +70,11 @@ func fuzzSuccessWriterContracts(t *testing.T, variant uint8, status int, value, 
 		err := JSON(rr, req, status, payload)
 		assertJSONWriterResult(t, rr, err, status, payload, defaultJSONIndent)
 	case 2:
-		err := JSONPretty(rr, nil, status, payload, indent)
-		assertJSONWriterResult(t, rr, err, status, payload, indent)
+		req := httptest.NewRequest(http.MethodGet, "/?pretty", nil)
+		err := OK(rr, req, payload)
+		assertRecorderJSONSuccess(t, rr, err, http.StatusOK, payload, defaultJSONIndent)
 	default:
 		req := httptest.NewRequest(http.MethodGet, "/?pretty", nil)
-		if variant&4 == 0 {
-			err := OK(rr, req, payload)
-			assertRecorderJSONSuccess(t, rr, err, http.StatusOK, payload, defaultJSONIndent)
-			return
-		}
 		err := Created(rr, req, payload)
 		assertRecorderJSONSuccess(t, rr, err, http.StatusCreated, payload, defaultJSONIndent)
 	}

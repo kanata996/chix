@@ -11,11 +11,6 @@ func JSON(w http.ResponseWriter, r *http.Request, status int, data any) error {
 	return writeJSON(w, status, data, jsonIndent(r))
 }
 
-// JSONPretty 使用指定缩进写出 pretty JSON。
-func JSONPretty(w http.ResponseWriter, _ *http.Request, status int, data any, indent string) error {
-	return writeJSON(w, status, data, indent)
-}
-
 // JSONBlob 直接写出原始 JSON 字节。
 // 调用方需要自行保证 body 是合法 JSON。
 func JSONBlob(w http.ResponseWriter, _ *http.Request, status int, body []byte) error {

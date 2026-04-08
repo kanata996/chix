@@ -282,19 +282,6 @@ func TestJSON_DelegatesToResp(t *testing.T) {
 	}
 }
 
-// JSONPretty 会通过根包 facade 按指定缩进写回 pretty JSON。
-func TestJSONPretty_DelegatesToResp(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
-	rr := httptest.NewRecorder()
-
-	if err := JSONPretty(rr, req, http.StatusOK, map[string]any{"id": "u_1"}, "    "); err != nil {
-		t.Fatalf("JSONPretty() error = %v", err)
-	}
-	if body := rr.Body.String(); body != "{\n    \"id\": \"u_1\"\n}\n" {
-		t.Fatalf("body = %q, want indented JSON", body)
-	}
-}
-
 // JSONBlob 会通过根包 facade 直接写回原始 JSON 字节。
 func TestJSONBlob_DelegatesToResp(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)

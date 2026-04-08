@@ -26,6 +26,7 @@
 - `reqx` 收回了手写校验/错误构造辅助的导出面；当前公开入口聚焦在 `Bind*`、`BindAndValidate*`、`Param*`、`Normalizer`、`Violation`、绑定 option，以及已文档化的错误码 / violation 常量。
 - `reqx.Violation` 不再保留 `Message` 兼容字段，字段级公开错误统一使用 `detail` / `Detail`。
 - `resp` 不再公开错误模型与快捷错误构造；统一改为从 `errx` 使用 `HTTPError`、`NewHTTPError(...)` 及各状态快捷构造。
+- `resp.JSONPretty(...)` 和根包 `chix.JSONPretty(...)` 已移除；pretty JSON 仅保留 `JSON(...)` / `OK(...)` / `Created(...)` 在请求携带 `?pretty` 时的格式化语义。
 - `errx.NewError(...)` 和 `resp.NewError(...)` 已移除；统一使用 `NewHTTPError(...)`。
 - `reqx/chix` 的旧 binding option 与 path helper 已移除：`BindOption*`、`WithMaxBodyBytes(...)`、`DefaultMaxBodyBytes`、`ParamString(...)`、`ParamInt(...)`、`ParamUUID(...)` 不再属于公开 API。
 

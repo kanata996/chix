@@ -9,9 +9,9 @@ import (
 )
 
 // 测试清单：
-// [✓] Created / JSON / JSONPretty / JSONBlob 按约定写出 JSON、状态码和 Content-Type
-// [✓] Created / JSON / OK 支持 pretty 查询参数，JSONPretty 支持显式缩进；所有 success writer 在 nil request 下也安全
-// [✓] JSON / JSONPretty 拒绝 nil writer、非法状态码、无响应体状态和不可编码值；OK 拒绝 nil writer、nil data 和不可编码值
+// [✓] Created / JSON / JSONBlob 按约定写出 JSON、状态码和 Content-Type
+// [✓] Created / JSON / OK 支持 pretty 查询参数；所有 success writer 在 nil request 下也安全
+// [✓] JSON 拒绝 nil writer、非法状态码、无响应体状态和不可编码值；OK 拒绝 nil writer、nil data 和不可编码值
 // [✓] Created 拒绝 nil data、不可编码值和 nil writer
 // [✓] JSONBlob 直接原样透传 JSON 字节，不做合法性校验，并拒绝 nil writer、非法状态和无响应体状态
 // [✓] NoContent 只写 204 状态，不写 body，也不设置 Content-Type；nil writer 会返回错误
@@ -133,39 +133,6 @@ func TestJSONAllowsNilRequest(t *testing.T) {
 	}
 }
 
-// JSONPretty 会按给定缩进格式输出 JSON。
-func TestJSONPrettyWritesIndentedJSON(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	err := JSONPretty(rr, req, http.StatusOK, map[string]any{"id": "u_1"}, "    ")
-	if err != nil {
-		t.Fatalf("JSONPretty() error = %v", err)
-	}
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-	if got := rr.Header().Get("Content-Type"); got != "application/json" {
-		t.Fatalf("Content-Type = %q, want application/json", got)
-	}
-
-	if body := rr.Body.String(); body != "{\n    \"id\": \"u_1\"\n}\n" {
-		t.Fatalf("body = %q, want indented JSON", body)
-	}
-}
-
-// JSONPretty 在 request 为 nil 时仍使用显式传入的缩进格式。
-func TestJSONPrettyAllowsNilRequest(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	if err := JSONPretty(rr, nil, http.StatusOK, map[string]any{"id": "u_1"}, "    "); err != nil {
-		t.Fatalf("JSONPretty() error = %v", err)
-	}
-	if body := rr.Body.String(); body != "{\n    \"id\": \"u_1\"\n}\n" {
-		t.Fatalf("body = %q, want indented JSON", body)
-	}
-}
-
 // Created 会拒绝空的 ResponseWriter。
 func TestCreatedRejectsNilWriter(t *testing.T) {
 	err := Created(nil, httptest.NewRequest(http.MethodPost, "/v1/accounts", nil), map[string]any{"id": "u_1"})
@@ -179,14 +146,6 @@ func TestJSONRejectsNilWriter(t *testing.T) {
 	err := JSON(nil, nil, http.StatusOK, map[string]any{"id": "u_1"})
 	if err == nil || err.Error() != "resp: response writer is nil" {
 		t.Fatalf("JSON() error = %v, want response writer is nil", err)
-	}
-}
-
-// JSONPretty 也会拒绝空的 ResponseWriter。
-func TestJSONPrettyRejectsNilWriter(t *testing.T) {
-	err := JSONPretty(nil, nil, http.StatusOK, map[string]any{"id": "u_1"}, "  ")
-	if err == nil || err.Error() != "resp: response writer is nil" {
-		t.Fatalf("JSONPretty() error = %v, want response writer is nil", err)
 	}
 }
 
@@ -334,18 +293,6 @@ func TestCreatedRejectsUnsupportedValue(t *testing.T) {
 	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 
-// JSONPretty 在编码不支持的值时也会直接返回错误。
-func TestJSONPrettyRejectsUnsupportedValue(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	err := JSONPretty(rr, req, http.StatusOK, make(chan int), "  ")
-	if err == nil || err.Error() != "json: unsupported type: chan int" {
-		t.Fatalf("JSONPretty() error = %v, want unsupported type error", err)
-	}
-	assertRecorderHasNoBodyOrContentType(t, rr)
-}
-
 // JSON 会拒绝非法的 HTTP 状态码。
 func TestJSONRejectsInvalidStatus(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -357,17 +304,6 @@ func TestJSONRejectsInvalidStatus(t *testing.T) {
 	}
 }
 
-// JSONPretty 也会拒绝非法的 HTTP 状态码。
-func TestJSONPrettyRejectsInvalidStatus(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	err := JSONPretty(rr, req, 1000, map[string]any{"id": "u_1"}, "  ")
-	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
-		t.Fatalf("JSONPretty() error = %v, want invalid HTTP status", err)
-	}
-}
-
 // JSON 不能把 payload 写到 205/204/304 这类不允许响应体的状态上。
 func TestJSONRejectsBodylessStatus(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -376,23 +312,6 @@ func TestJSONRejectsBodylessStatus(t *testing.T) {
 	err := JSON(rr, req, http.StatusResetContent, map[string]any{"id": "u_1"})
 	if err == nil || err.Error() != "resp: JSON body writers cannot use bodyless status 205" {
 		t.Fatalf("JSON() error = %v, want bodyless status error", err)
-	}
-	if rr.Body.Len() != 0 {
-		t.Fatalf("body = %q, want empty", rr.Body.String())
-	}
-	if got := rr.Header().Get("Content-Type"); got != "" {
-		t.Fatalf("Content-Type = %q, want empty", got)
-	}
-}
-
-// JSONPretty 也不能把 payload 写到 205/204/304 这类不允许响应体的状态上。
-func TestJSONPrettyRejectsBodylessStatus(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	err := JSONPretty(rr, req, http.StatusResetContent, map[string]any{"id": "u_1"}, "  ")
-	if err == nil || err.Error() != "resp: JSON body writers cannot use bodyless status 205" {
-		t.Fatalf("JSONPretty() error = %v, want bodyless status error", err)
 	}
 	if rr.Body.Len() != 0 {
 		t.Fatalf("body = %q, want empty", rr.Body.String())
