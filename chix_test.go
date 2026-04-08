@@ -266,9 +266,9 @@ func TestOK_DelegatesToResp(t *testing.T) {
 	}
 }
 
-// JSON 会通过根包 facade 复用 pretty query 的响应格式。
+// JSON 会通过根包 facade 直接写回紧凑 JSON。
 func TestJSON_DelegatesToResp(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/accounts?pretty", nil)
+	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	rr := httptest.NewRecorder()
 
 	if err := JSON(rr, req, http.StatusAccepted, map[string]any{"id": "u_1"}); err != nil {
@@ -277,8 +277,8 @@ func TestJSON_DelegatesToResp(t *testing.T) {
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202", rr.Code)
 	}
-	if body := rr.Body.String(); body != "{\n  \"id\": \"u_1\"\n}\n" {
-		t.Fatalf("body = %q, want pretty JSON", body)
+	if body := rr.Body.String(); body != "{\"id\":\"u_1\"}\n" {
+		t.Fatalf("body = %q, want compact JSON", body)
 	}
 }
 
