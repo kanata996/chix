@@ -675,6 +675,18 @@ func TestWriteErrorEnrichesRequestLog(t *testing.T) {
 	if got := logEntry["error.code"]; got != "internal_error" {
 		t.Fatalf("error.code = %#v, want internal_error", got)
 	}
+	if _, exists := logEntry["request.id"]; exists {
+		t.Fatalf("request.id unexpectedly present without RequestLogAttrs middleware: %#v", logEntry["request.id"])
+	}
+	if _, exists := logEntry["traceId"]; exists {
+		t.Fatalf("traceId unexpectedly present without RequestLogAttrs middleware: %#v", logEntry["traceId"])
+	}
+	if _, exists := logEntry["error.timeout"]; exists {
+		t.Fatalf("error.timeout unexpectedly present for non-timeout 5xx: %#v", logEntry["error.timeout"])
+	}
+	if _, exists := logEntry["error.canceled"]; exists {
+		t.Fatalf("error.canceled unexpectedly present for non-canceled 5xx: %#v", logEntry["error.canceled"])
+	}
 	if _, exists := logEntry["error.message"]; exists {
 		t.Fatalf("error.message unexpectedly present: %#v", logEntry["error.message"])
 	}
