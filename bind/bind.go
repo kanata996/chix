@@ -1,7 +1,10 @@
 package bind
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -104,6 +107,12 @@ func bindJSONBody(c *echo.Context, target any) error {
 		return unsupportedMediaTypeError()
 	}
 
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return invalidJSONError(err)
+	}
+	req.Body = io.NopCloser(bytes.NewReader(body))
+
 	if err := c.Echo().JSONSerializer.Deserialize(c, target); err != nil {
 		var httpErr *echo.HTTPError
 		if errors.As(err, &httpErr) && httpErr != nil && httpErr.Code == http.StatusBadRequest {
@@ -112,6 +121,9 @@ func bindJSONBody(c *echo.Context, target any) error {
 			}
 		}
 		return invalidJSONError(err)
+	}
+	if !json.Valid(body) {
+		return invalidJSONError(errors.New("request body must contain exactly one JSON value"))
 	}
 
 	return nil

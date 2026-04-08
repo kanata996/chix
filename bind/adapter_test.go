@@ -18,7 +18,9 @@ import (
 // - [✓] `mapEchoError` 能处理 nil、Echo `BindingError`、Echo `HTTPError(415)` 和普通 passthrough 错误。
 // - [✓] `errorsf` 统一为内部错误文本加上 `bind:` 前缀。
 func TestSharedEchoReturnsSingleton(t *testing.T) {
-	if sharedEcho() != sharedEcho() {
+	first := sharedEcho()
+	second := sharedEcho()
+	if first != second {
 		t.Fatal("sharedEcho() returned different instances")
 	}
 }
