@@ -124,6 +124,7 @@ Content-Type: application/problem+json
 - `validate:"..."`：`validator/v10` 校验规则
 
 请求侧 JSON body 接受 `application/json` 和 `application/*+json`。
+更完整的绑定契约说明见 [docs/request-binding.md](./docs/request-binding.md)。
 
 根包常用请求 API：
 
@@ -150,10 +151,17 @@ Content-Type: application/problem+json
 
 如果你只处理单一输入来源，优先使用源专用 API：
 
-- 只处理 JSON body：`BindBody(...)`、`BindAndValidateBody(...)`
+- 只处理必须提供的 JSON body：`BindBody(...)`、`BindAndValidateBody(...)`
 - 只处理 query：`BindQueryParams(...)`、`BindAndValidateQuery(...)`
 - 只处理 path：`BindPathValues(...)`、`BindAndValidatePath(...)`
 - 只处理 header：`BindHeaders(...)`、`BindAndValidateHeaders(...)`
+
+body 绑定契约：
+
+- `BindBody(...)` / `BindAndValidateBody(...)` 要求 body 非空；空 body 或纯空白 body 返回 `400 invalid_json`
+- `Bind(...)` 在综合绑定时会把空 body 视为 no-op，因此适合 body 可缺省的路由
+- 非空 body 必须声明 `application/json` 或 `application/*+json`
+- 顶层 body 必须是 JSON object；`null`、数组、数字、字符串、布尔值都会被拒绝
 
 如果 DTO 需要在校验前做裁剪、大小写归一化或默认值补齐，实现 `Normalize()` 即可：
 

@@ -35,7 +35,7 @@ func defaultBindConfig() bindConfig {
 		body: bindBodyConfig{
 			maxBodyBytes:       DefaultMaxBodyBytes,
 			allowUnknownFields: true,
-			allowEmptyBody:     true,
+			allowEmptyBody:     false,
 		},
 		query: bindValuesConfig{
 			allowUnknownFields: true,

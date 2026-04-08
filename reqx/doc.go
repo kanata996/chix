@@ -7,7 +7,7 @@
 //
 // 典型用法：
 //   - 使用 BindAndValidate 处理 path/query/body 综合绑定
-//   - 使用 BindBody 或 BindAndValidateBody 处理 JSON 请求体
+//   - 使用 BindBody 或 BindAndValidateBody 处理必须提供的 JSON 请求体
 //   - 使用 BindAndValidateQuery 处理 query DTO
 //   - 使用 BindPathValues / BindHeaders 处理单一来源绑定
 //   - 使用 ParamString / ParamInt / ParamUUID 读取简单 path 参数
@@ -29,6 +29,11 @@
 //     ViolationInPath、ViolationInHeader、ViolationInRequest
 //
 // 新增、移除、重命名以上导出符号，或改变其公开语义时，应同步更新本注释与 CHANGELOG。
+//
+// body 绑定的公开契约：
+//   - BindBody / BindAndValidateBody 要求请求体非空；空 body 或纯空白 body 返回 400。
+//   - Bind(...) 在综合绑定时会把空 body 视为 no-op，不会因为该阶段缺失 body 而失败。
+//   - 非空 body 只接受 application/json 或 application/*+json。
 //
 // path 输入只依赖 net/http 暴露的 PathValue / Pattern 命名 wildcard 语义，
 // 不依赖 chi.RouteContext，也不承诺 chi 专有 `*` catch-all 的兼容行为。

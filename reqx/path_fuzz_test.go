@@ -34,6 +34,7 @@ func FuzzReqxPublicContracts(f *testing.F) {
 	f.Add(uint8(2), uint8(2), "kanata", "17", "")
 	f.Add(uint8(2), uint8(3), "kanata", "17", "text/plain")
 	f.Add(uint8(2), uint8(4), "kanata", "17", "application/problem+json")
+	f.Add(uint8(2), uint8(7), "", "", "application/json")
 	f.Add(uint8(3), uint8(0), " x-request-id ", "req-1", "2")
 	f.Add(uint8(3), uint8(1), "x-request-id", "req-1", "2")
 	f.Add(uint8(3), uint8(0), "x-request-id", "req-1", "oops")
@@ -209,18 +210,16 @@ func fuzzBodyContracts(t *testing.T, variant uint8, name, ageText, contentType s
 	err := BindBody(req, &dst)
 
 	if strings.TrimSpace(payload) == "" {
-		if !emptyBodyAllowsContentType(contentType) {
+		if !emptyBodyPassesContentTypeCheck(contentType) {
 			_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json or application/*+json")
 			if dst.Name != "existing" || dst.Age != 7 {
 				t.Fatalf("dst = %#v, want preserved destination on empty-body content-type failure", dst)
 			}
 			return
 		}
-		if err != nil {
-			t.Fatalf("BindBody() error = %v", err)
-		}
+		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
 		if dst.Name != "existing" || dst.Age != 7 {
-			t.Fatalf("dst = %#v, want preserved destination on empty body", dst)
+			t.Fatalf("dst = %#v, want preserved destination on empty-body failure", dst)
 		}
 		return
 	}
@@ -233,7 +232,7 @@ func fuzzBodyContracts(t *testing.T, variant uint8, name, ageText, contentType s
 		return
 	}
 
-	switch variant % 7 {
+	switch variant % 8 {
 	case 1:
 		violation := assertSingleViolation(t, err)
 		if violation.Field != "age" || violation.In != ViolationInBody || violation.Code != ViolationCodeType {
@@ -251,6 +250,14 @@ func fuzzBodyContracts(t *testing.T, variant uint8, name, ageText, contentType s
 		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must contain a single JSON value")
 		if dst.Name != "existing" || dst.Age != 7 {
 			t.Fatalf("dst = %#v, want preserved destination on multiple JSON values", dst)
+		}
+	case 7:
+		violation := assertSingleViolation(t, err)
+		if violation.In != ViolationInBody || violation.Code != ViolationCodeType || violation.Detail != "must be object" {
+			t.Fatalf("violation = %#v, want top-level null body violation", violation)
+		}
+		if dst.Name != "existing" || dst.Age != 7 {
+			t.Fatalf("dst = %#v, want preserved destination on top-level null", dst)
 		}
 	default:
 		if err != nil {
@@ -339,7 +346,7 @@ func fuzzBodyPayload(variant uint8, name, ageText string) (payload, wantName str
 	normalizedName := decodeFuzzJSONString(quotedName)
 	validAge := len(ageText)
 
-	switch variant % 7 {
+	switch variant % 8 {
 	case 0:
 		return "", "existing", 7, true
 	case 1:
@@ -352,8 +359,10 @@ func fuzzBodyPayload(variant uint8, name, ageText string) (payload, wantName str
 		return fmt.Sprintf(`{"name":%s,"age":%d}`, quotedName, validAge), normalizedName, validAge, false
 	case 5:
 		return fmt.Sprintf("{\"name\":%s} \n\t ", quotedName), normalizedName, 7, true
-	default:
+	case 6:
 		return fmt.Sprintf(`{"name":%s,"extra":1}`, quotedName), normalizedName, 7, true
+	default:
+		return `null`, "existing", 7, true
 	}
 }
 
@@ -373,7 +382,7 @@ func decodeFuzzJSONString(value string) string {
 	return decoded
 }
 
-func emptyBodyAllowsContentType(contentType string) bool {
+func emptyBodyPassesContentTypeCheck(contentType string) bool {
 	return validateJSONContentType(contentType) == nil
 }
 

@@ -16,8 +16,8 @@ func TestApplyBindOptions_PreservesDefaultsAndAppliesMaxBodyBytes(t *testing.T) 
 	if !cfg.body.allowUnknownFields {
 		t.Fatal("body.allowUnknownFields = false, want true")
 	}
-	if !cfg.body.allowEmptyBody {
-		t.Fatal("body.allowEmptyBody = false, want true")
+	if cfg.body.allowEmptyBody {
+		t.Fatal("body.allowEmptyBody = true, want false")
 	}
 	if !cfg.query.allowUnknownFields {
 		t.Fatal("query.allowUnknownFields = false, want true")

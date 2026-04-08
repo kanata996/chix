@@ -38,7 +38,8 @@ func bindJSONWithConfig[T any](r *http.Request, dst *T, cfg bindBodyConfig, mode
 		}
 		return err
 	}
-	if len(bytes.TrimSpace(body)) == 0 {
+	trimmedBody := bytes.TrimSpace(body)
+	if len(trimmedBody) == 0 {
 		if mode.validateContentTypeOnEmpty {
 			if err := validateJSONContentType(r.Header.Get("Content-Type")); err != nil {
 				return err
@@ -56,6 +57,9 @@ func bindJSONWithConfig[T any](r *http.Request, dst *T, cfg bindBodyConfig, mode
 	}
 	if err := validateJSONContentType(contentType); err != nil {
 		return err
+	}
+	if bytes.Equal(trimmedBody, []byte("null")) {
+		return invalidFieldError(newViolation("", ViolationInBody, ViolationCodeType, "must be object"))
 	}
 
 	dec := json.NewDecoder(bytes.NewReader(body))

@@ -32,6 +32,7 @@
 - `errx.HTTPError.Error()` 现在仅在底层 `cause` 文本可用且非空白时返回该文本；当 `cause` 不可用、为空白或其 `Error()` 实现不安全时，会稳定回退到公开 `Detail()`。
 - `reqx` 产生的绑定与校验错误会尽可能映射到请求侧 tag 名和来源位置，例如 `json:"name"` 会返回 `field: "name", in: "body"`。
 - 请求侧 JSON body 明确接受 `application/json` 和 `application/*+json`；错误响应的 `Content-Type` 明确为 `application/problem+json`，以对齐 Huma 的 problem 响应约定。
+- `reqx.BindBody(...)` / `BindAndValidateBody(...)` 现在要求请求体非空；空 body 或纯空白 body 返回 `400 invalid_json`。`Bind(...)` / `BindAndValidate(...)` 在综合绑定时仍把空 body 视为 no-op。
 - `reqx` 的 path 参数读取不再依赖 `chi.RouteContext`；`param:"..."` 现在只基于 `http.Request.PathValue(...)` / `http.Request.Pattern` 的命名 wildcard 语义工作，例如 `/{id}`、`/{path...}`；`chi` 专有的 `*` catch-all 不属于公开 path 契约。
 
 ### Docs
@@ -39,3 +40,4 @@
 - 更新 [README.md](./README.md) 和包注释，补充当前错误响应契约、字段语义和示例，并收窄根包与 `reqx` / `resp` 的职责描述。
 - README 中的公开包清单与包结构说明已同步到当前导出面：补充 `middleware` 包，并明确 `resp` 只负责响应写回与错误响应输出；公共错误模型由 `errx` 提供。
 - README 已收缩为面向使用者的公开 API 指南，优先展示包职责、常用入口和示例用法，不再展开实现边界与内部技术细节。
+- 新增 [docs/request-binding.md](./docs/request-binding.md)，明确综合绑定顺序、严格 body 契约以及 `Bind(...)` 与 `BindBody(...)` 的差异。

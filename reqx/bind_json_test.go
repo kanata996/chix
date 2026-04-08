@@ -90,8 +90,8 @@ func TestBindBody_ContentTypeContract(t *testing.T) {
 	}
 }
 
-// 空 body 且未声明 Content-Type 时仍会按 no-op 处理。
-func TestBindBody_IgnoresEmptyBodyWithoutContentType(t *testing.T) {
+// 空 body 且未声明 Content-Type 时返回空 body 错误。
+func TestBindBody_RejectsEmptyBodyWithoutContentType(t *testing.T) {
 	type request struct {
 		Name string `json:"name"`
 	}
@@ -99,9 +99,8 @@ func TestBindBody_IgnoresEmptyBodyWithoutContentType(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
 	dst := request{Name: "kanata"}
 
-	if err := BindBody(req, &dst); err != nil {
-		t.Fatalf("BindBody() error = %v", err)
-	}
+	err := BindBody(req, &dst)
+	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
 	if dst.Name != "kanata" {
 		t.Fatalf("name = %q, want kanata", dst.Name)
 	}
@@ -119,6 +118,22 @@ func TestBindBody_RejectsExplicitInvalidContentTypeOnEmptyBody(t *testing.T) {
 
 	err := BindBody(req, &dst)
 	_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json or application/*+json")
+	if dst.Name != "kanata" {
+		t.Fatalf("name = %q, want kanata", dst.Name)
+	}
+}
+
+// 空白 body 也会被当成空 body 拒绝。
+func TestBindBody_RejectsWhitespaceOnlyBody(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(" \n\t "))
+	dst := request{Name: "kanata"}
+
+	err := BindBody(req, &dst)
+	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
 	if dst.Name != "kanata" {
 		t.Fatalf("name = %q, want kanata", dst.Name)
 	}
@@ -202,6 +217,25 @@ func TestBindBody_RejectsMultipleJSONValues(t *testing.T) {
 	var dst request
 	err := BindBody(req, &dst)
 	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must contain a single JSON value")
+}
+
+// 顶层 JSON null 不应被当成成功的 DTO 绑定。
+func TestBindBody_RejectsTopLevelJSONNull(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	req := newJSONRequest(http.MethodPost, "/", `null`)
+
+	dst := request{Name: "existing-name"}
+	err := BindBody(req, &dst)
+	violation := assertSingleViolation(t, err)
+	if violation.In != ViolationInBody || violation.Code != ViolationCodeType || violation.Detail != "must be object" {
+		t.Fatalf("violation = %#v", violation)
+	}
+	if dst.Name != "existing-name" {
+		t.Fatalf("name = %q, want existing-name", dst.Name)
+	}
 }
 
 // 单个 JSON 值后附带空白仍应被视为合法。
@@ -376,6 +410,22 @@ func TestBindAndValidateBody_RejectsExplicitInvalidContentTypeOnEmptyBody(t *tes
 	}
 }
 
+// 空 body 必须在绑定阶段就被拒绝，不能进入校验阶段。
+func TestBindAndValidateBody_RejectsEmptyBodyBeforeValidation(t *testing.T) {
+	type request struct {
+		Name string `json:"name" validate:"omitempty,nospace"`
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
+	dst := request{Name: "existing-name"}
+
+	err := BindAndValidateBody(req, &dst)
+	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
+	if dst.Name != "existing-name" {
+		t.Fatalf("name = %q, want existing-name", dst.Name)
+	}
+}
+
 // body 包装器在绑定失败时不会进入校验阶段，也不会污染目标对象。
 func TestBindAndValidateBody_ReturnsBindingErrorBeforeValidation(t *testing.T) {
 	type request struct {
@@ -396,5 +446,24 @@ func TestBindAndValidateBody_ReturnsBindingErrorBeforeValidation(t *testing.T) {
 	}
 	if dst.Name != "existing name" || dst.Age != 3 {
 		t.Fatalf("dst = %#v, want destination preserved when bind fails", dst)
+	}
+}
+
+// null body 必须在绑定阶段就被拒绝，不能绕过可选字段 DTO 的校验。
+func TestBindAndValidateBody_RejectsTopLevelJSONNullBeforeValidation(t *testing.T) {
+	type request struct {
+		Name string `json:"name" validate:"omitempty,nospace"`
+	}
+
+	req := newJSONRequest(http.MethodPost, "/", `null`)
+	dst := request{Name: "existing-name"}
+
+	err := BindAndValidateBody(req, &dst)
+	violation := assertSingleViolation(t, err)
+	if violation.In != ViolationInBody || violation.Code != ViolationCodeType || violation.Detail != "must be object" {
+		t.Fatalf("violation = %#v", violation)
+	}
+	if dst.Name != "existing-name" {
+		t.Fatalf("name = %q, want existing-name", dst.Name)
 	}
 }

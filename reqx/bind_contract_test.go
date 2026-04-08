@@ -2,7 +2,7 @@ package reqx
 
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] 缺失的 body/query/path/header 输入不会清空目标对象已有值。
+// - [✓] 缺失的 query/path/header 输入不会清空目标对象已有值；`BindBody` 的空 body 失败也不会污染目标对象。
 // - [✓] `Bind` 在 path/query/body 任一阶段失败时不会留下部分更新。
 // - [✓] `BindBody` 失败时不会污染引用类型字段。
 // - [✓] `BindAndValidate` 绑定失败时不会修改目标对象，也不会继续执行校验。
@@ -13,8 +13,8 @@ import (
 	"testing"
 )
 
-// 空 body 的 no-op 语义应保留已有字段值，而不是把目标对象重置为零值。
-func TestBindBody_EmptyBodyPreservesExistingValues(t *testing.T) {
+// 空 body 会被拒绝，同时保留已有字段值。
+func TestBindBody_EmptyBodyReturnsErrorAndPreservesExistingValues(t *testing.T) {
 	type request struct {
 		Name string `json:"name"`
 		Age  int    `json:"age"`
@@ -26,16 +26,15 @@ func TestBindBody_EmptyBodyPreservesExistingValues(t *testing.T) {
 		Age:  17,
 	}
 
-	if err := BindBody(req, &dst); err != nil {
-		t.Fatalf("BindBody() error = %v", err)
-	}
+	err := BindBody(req, &dst)
+	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
 	if dst.Name != "kanata" || dst.Age != 17 {
 		t.Fatalf("dst = %#v, want existing values preserved", dst)
 	}
 }
 
-// 纯空白 body 也应视为 no-op，并保留已有字段值。
-func TestBindBody_WhitespaceOnlyBodyPreservesExistingValues(t *testing.T) {
+// 纯空白 body 也会被视为空 body 并保留已有字段值。
+func TestBindBody_WhitespaceOnlyBodyReturnsErrorAndPreservesExistingValues(t *testing.T) {
 	type request struct {
 		Name string `json:"name"`
 		Age  int    `json:"age"`
@@ -47,9 +46,8 @@ func TestBindBody_WhitespaceOnlyBodyPreservesExistingValues(t *testing.T) {
 		Age:  17,
 	}
 
-	if err := BindBody(req, &dst); err != nil {
-		t.Fatalf("BindBody() error = %v", err)
-	}
+	err := BindBody(req, &dst)
+	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must not be empty")
 	if dst.Name != "kanata" || dst.Age != 17 {
 		t.Fatalf("dst = %#v, want existing values preserved", dst)
 	}
