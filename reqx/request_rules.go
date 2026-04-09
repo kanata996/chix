@@ -2,6 +2,13 @@ package reqx
 
 import "net/http"
 
+// 本文件负责请求级规则扩展点和通用 helper。
+//
+// 这里承载的能力包括：
+//   - RequestValidator 扩展点及其执行适配
+//   - InvalidRequest helper，用于生成统一的 invalid_request 错误
+//   - RequireBody helper，用于在组合流程中声明 body-required 契约
+
 // RequestValidator 允许 DTO 在 binding 之后、字段校验之前声明请求级规则。
 type RequestValidator interface {
 	ValidateRequest(r *http.Request) error

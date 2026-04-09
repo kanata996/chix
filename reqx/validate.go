@@ -14,6 +14,16 @@ import (
 	"github.com/kanata996/chix/bind"
 )
 
+// 本文件负责 reqx 包的组合校验主流程、validator 初始化，以及字段级 violation 生成辅助。
+//
+// 这里承载的能力包括：
+//   - 对外公开的组合入口：BindAndValidate、BindAndValidateBody、
+//     BindAndValidateQuery、BindAndValidatePath、BindAndValidateHeaders
+//   - 绑定后的固定阶段顺序：Normalize -> ValidateRequest -> validator/v10
+//   - 各输入来源的 validator 实例、字段别名和 tag 优先级策略
+//   - validator.ValidationErrors 到 Violation 的稳定转换
+//   - 组合层目标类型与参数的公共前置校验
+
 type Normalizer interface {
 	Normalize()
 }
