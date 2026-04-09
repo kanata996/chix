@@ -5,12 +5,11 @@ package bind
 // - [✓] BindPathValues、BindQueryParams、BindHeaders 的公开成功、失败和保留语义。
 // - [✓] 单源公开 API 支持约定的 map 目标语义。
 // - [✓] path/query/header 相关错误统一收敛为 400 bad_request。
-// - [✓] 字符串源绑定的关键内部辅助契约，包括反射写入、自定义解码、multipart 和 path helper。
+// - [✓] 字符串源绑定的关键内部辅助契约，包括反射写入、自定义解码和 path helper。
 
 import (
 	"errors"
 	"fmt"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -398,16 +397,16 @@ func TestBindValues_HelperBranches(t *testing.T) {
 }
 
 func TestBindDataDefaultBranches(t *testing.T) {
-	if err := bindDataDefault(nil, nil, "query", nil); err != nil {
+	if err := bindDataDefault(nil, nil, "query"); err != nil {
 		t.Fatalf("bindDataDefault(nil empty) error = %v", err)
 	}
-	if err := bindDataDefault(1, map[string][]string{"x": {"1"}}, "query", nil); err == nil || err.Error() != "binding element must be a pointer" {
+	if err := bindDataDefault(1, map[string][]string{"x": {"1"}}, "query"); err == nil || err.Error() != "binding element must be a pointer" {
 		t.Fatalf("bindDataDefault(non-pointer) error = %v", err)
 	}
 
 	t.Run("map targets", func(t *testing.T) {
 		stringMap := map[string]string(nil)
-		if err := bindDataDefault(&stringMap, map[string][]string{"name": {"kanata"}, "skip": {}}, "query", nil); err != nil {
+		if err := bindDataDefault(&stringMap, map[string][]string{"name": {"kanata"}, "skip": {}}, "query"); err != nil {
 			t.Fatalf("bindDataDefault(map[string]string) error = %v", err)
 		}
 		if got := stringMap["name"]; got != "kanata" {
@@ -418,7 +417,7 @@ func TestBindDataDefaultBranches(t *testing.T) {
 		}
 
 		sliceMap := map[string][]string(nil)
-		if err := bindDataDefault(&sliceMap, map[string][]string{"tag": {"a", "b"}}, "query", nil); err != nil {
+		if err := bindDataDefault(&sliceMap, map[string][]string{"tag": {"a", "b"}}, "query"); err != nil {
 			t.Fatalf("bindDataDefault(map[string][]string) error = %v", err)
 		}
 		if got := strings.Join(sliceMap["tag"], ","); got != "a,b" {
@@ -426,7 +425,7 @@ func TestBindDataDefaultBranches(t *testing.T) {
 		}
 
 		anyMap := map[string]any(nil)
-		if err := bindDataDefault(&anyMap, map[string][]string{"name": {"kanata"}}, "query", nil); err != nil {
+		if err := bindDataDefault(&anyMap, map[string][]string{"name": {"kanata"}}, "query"); err != nil {
 			t.Fatalf("bindDataDefault(map[string]any) error = %v", err)
 		}
 		if got := anyMap["name"]; got != "kanata" {
@@ -434,7 +433,7 @@ func TestBindDataDefaultBranches(t *testing.T) {
 		}
 
 		intMap := map[string]int(nil)
-		if err := bindDataDefault(&intMap, map[string][]string{"n": {"1"}}, "query", nil); err != nil {
+		if err := bindDataDefault(&intMap, map[string][]string{"n": {"1"}}, "query"); err != nil {
 			t.Fatalf("bindDataDefault(map[string]int) error = %v", err)
 		}
 		if intMap != nil {
@@ -444,10 +443,10 @@ func TestBindDataDefaultBranches(t *testing.T) {
 
 	t.Run("scalar destination rules", func(t *testing.T) {
 		value := 1
-		if err := bindDataDefault(&value, map[string][]string{"n": {"1"}}, "json", nil); err == nil || err.Error() != "binding element must be a struct" {
+		if err := bindDataDefault(&value, map[string][]string{"n": {"1"}}, "json"); err == nil || err.Error() != "binding element must be a struct" {
 			t.Fatalf("bindDataDefault(json scalar) error = %v", err)
 		}
-		if err := bindDataDefault(&value, map[string][]string{"n": {"1"}}, "query", nil); err != nil {
+		if err := bindDataDefault(&value, map[string][]string{"n": {"1"}}, "query"); err != nil {
 			t.Fatalf("bindDataDefault(query scalar) error = %v", err)
 		}
 	})
@@ -477,7 +476,7 @@ func TestBindDataDefaultBranches(t *testing.T) {
 			"multi":      {"a", "b"},
 			"state":      {"open"},
 			"X-Trace-Id": {"req-1"},
-		}, "query", nil)
+		}, "query")
 		if err != nil {
 			t.Fatalf("bindDataDefault(struct) error = %v", err)
 		}
@@ -506,7 +505,7 @@ func TestBindDataDefaultBranches(t *testing.T) {
 		headerDst := struct {
 			Trace string `header:"x-trace-id"`
 		}{}
-		if err := bindDataDefault(&headerDst, map[string][]string{"X-Trace-Id": {"req-1"}}, "header", nil); err != nil {
+		if err := bindDataDefault(&headerDst, map[string][]string{"X-Trace-Id": {"req-1"}}, "header"); err != nil {
 			t.Fatalf("bindDataDefault(case-insensitive header) error = %v", err)
 		}
 		if headerDst.Trace != "req-1" {
@@ -523,8 +522,8 @@ func TestBindDataDefaultBranches(t *testing.T) {
 		}
 
 		var dst request
-		err := bindDataDefault(&dst, map[string][]string{"name": {"kanata"}}, "query", nil)
-		if err == nil || err.Error() != "query/param/form tags are not allowed with anonymous struct field" {
+		err := bindDataDefault(&dst, map[string][]string{"name": {"kanata"}}, "query")
+		if err == nil || err.Error() != "query/param/header tags are not allowed with anonymous struct field" {
 			t.Fatalf("bindDataDefault(anonymous tagged) error = %v", err)
 		}
 	})
@@ -539,7 +538,7 @@ func TestBindDataDefaultBranches(t *testing.T) {
 		}
 
 		dst := request{}
-		if err := bindDataDefault(&dst, map[string][]string{"name": {"kanata"}}, "query", nil); err != nil {
+		if err := bindDataDefault(&dst, map[string][]string{"name": {"kanata"}}, "query"); err != nil {
 			t.Fatalf("bindDataDefault(skip nil embedded/unexported) error = %v", err)
 		}
 		if dst.embedded != nil {
@@ -559,7 +558,7 @@ func TestBindDataDefaultBranches(t *testing.T) {
 		}
 
 		dst := request{Embedded: &Embedded{}}
-		if err := bindDataDefault(&dst, map[string][]string{"name": {"kanata"}}, "query", nil); err != nil {
+		if err := bindDataDefault(&dst, map[string][]string{"name": {"kanata"}}, "query"); err != nil {
 			t.Fatalf("bindDataDefault(non-nil embedded pointer) error = %v", err)
 		}
 		if dst.Embedded == nil || dst.Name != "kanata" {
@@ -576,7 +575,7 @@ func TestBindDataDefaultBranches(t *testing.T) {
 		}
 
 		var recursive request
-		err := bindDataDefault(&recursive, map[string][]string{"age": {"oops"}}, "query", nil)
+		err := bindDataDefault(&recursive, map[string][]string{"age": {"oops"}}, "query")
 		if err == nil {
 			t.Fatal("bindDataDefault(recursive error) = nil")
 		}
@@ -586,7 +585,7 @@ func TestBindDataDefaultBranches(t *testing.T) {
 		}
 		var multi withMulti
 		multi.Multi.err = errors.New("multi failed")
-		err = bindDataDefault(&multi, map[string][]string{"multi": {"x"}}, "query", nil)
+		err = bindDataDefault(&multi, map[string][]string{"multi": {"x"}}, "query")
 		if err == nil || err.Error() != "multi failed" {
 			t.Fatalf("bindDataDefault(multi error) = %v", err)
 		}
@@ -596,7 +595,7 @@ func TestBindDataDefaultBranches(t *testing.T) {
 		}
 		var custom withCustom
 		custom.Custom.err = errors.New("custom failed")
-		err = bindDataDefault(&custom, map[string][]string{"custom": {"x"}}, "query", nil)
+		err = bindDataDefault(&custom, map[string][]string{"custom": {"x"}}, "query")
 		if err == nil || err.Error() != "custom failed" {
 			t.Fatalf("bindDataDefault(custom error) = %v", err)
 		}
@@ -605,7 +604,7 @@ func TestBindDataDefaultBranches(t *testing.T) {
 			When time.Time `query:"when" format:"2006-01-02"`
 		}
 		var timed withTime
-		err = bindDataDefault(&timed, map[string][]string{"when": {"bad"}}, "query", nil)
+		err = bindDataDefault(&timed, map[string][]string{"when": {"bad"}}, "query")
 		if err == nil {
 			t.Fatal("bindDataDefault(time parse error) = nil")
 		}
@@ -614,7 +613,7 @@ func TestBindDataDefaultBranches(t *testing.T) {
 			IDs []int `query:"id"`
 		}
 		var ids withIDs
-		err = bindDataDefault(&ids, map[string][]string{"id": {"1", "oops"}}, "query", nil)
+		err = bindDataDefault(&ids, map[string][]string{"id": {"1", "oops"}}, "query")
 		if err == nil {
 			t.Fatal("bindDataDefault(slice parse error) = nil")
 		}
@@ -725,68 +724,7 @@ func TestUnmarshalHelpersAndSetters(t *testing.T) {
 	}
 }
 
-func TestMultipartAndPathHelpers(t *testing.T) {
-	if ok, err := isFieldMultipartFile(multipartFileHeaderPointerType); !ok || err != nil {
-		t.Fatalf("isFieldMultipartFile(pointer) = (%v, %v), want (true, nil)", ok, err)
-	}
-	if ok, err := isFieldMultipartFile(multipartFileHeaderSliceType); !ok || err != nil {
-		t.Fatalf("isFieldMultipartFile(slice) = (%v, %v), want (true, nil)", ok, err)
-	}
-	if ok, err := isFieldMultipartFile(multipartFileHeaderPointerSliceType); !ok || err != nil {
-		t.Fatalf("isFieldMultipartFile(pointer slice) = (%v, %v), want (true, nil)", ok, err)
-	}
-	if ok, err := isFieldMultipartFile(multipartFileHeaderType); !ok || err == nil {
-		t.Fatalf("isFieldMultipartFile(struct) = (%v, %v), want (true, error)", ok, err)
-	}
-	if ok, err := isFieldMultipartFile(reflect.TypeOf("")); ok || err != nil {
-		t.Fatalf("isFieldMultipartFile(string) = (%v, %v), want (false, nil)", ok, err)
-	}
-
-	file := &multipart.FileHeader{Filename: "a.txt"}
-	files := map[string][]*multipart.FileHeader{"file": {file}}
-
-	var single *multipart.FileHeader
-	if ok := setMultipartFileHeaderTypes(reflect.ValueOf(&single).Elem(), "file", files); !ok || single == nil || single.Filename != "a.txt" {
-		t.Fatalf("setMultipartFileHeaderTypes(single) = (%v, %#v)", ok, single)
-	}
-
-	var slice []multipart.FileHeader
-	if ok := setMultipartFileHeaderTypes(reflect.ValueOf(&slice).Elem(), "file", files); !ok || len(slice) != 1 || slice[0].Filename != "a.txt" {
-		t.Fatalf("setMultipartFileHeaderTypes(slice) = (%v, %#v)", ok, slice)
-	}
-
-	var ptrSlice []*multipart.FileHeader
-	if ok := setMultipartFileHeaderTypes(reflect.ValueOf(&ptrSlice).Elem(), "file", files); !ok || len(ptrSlice) != 1 || ptrSlice[0].Filename != "a.txt" {
-		t.Fatalf("setMultipartFileHeaderTypes(ptrSlice) = (%v, %#v)", ok, ptrSlice)
-	}
-
-	var wrong string
-	if ok := setMultipartFileHeaderTypes(reflect.ValueOf(&wrong).Elem(), "file", files); ok {
-		t.Fatal("setMultipartFileHeaderTypes(string) = true, want false")
-	}
-	if ok := setMultipartFileHeaderTypes(reflect.ValueOf(&single).Elem(), "missing", files); ok {
-		t.Fatal("setMultipartFileHeaderTypes(missing) = true, want false")
-	}
-
-	type upload struct {
-		File *multipart.FileHeader `query:"file"`
-	}
-	var up upload
-	if err := bindDataDefault(&up, nil, "query", files); err != nil {
-		t.Fatalf("bindDataDefault(file pointer) error = %v", err)
-	}
-	if up.File == nil || up.File.Filename != "a.txt" {
-		t.Fatalf("bindDataDefault(file pointer) = %#v", up.File)
-	}
-
-	type badUpload struct {
-		File multipart.FileHeader `query:"file"`
-	}
-	var bad badUpload
-	if err := bindDataDefault(&bad, nil, "query", files); err == nil || !strings.Contains(err.Error(), "binding to multipart.FileHeader struct is not supported") {
-		t.Fatalf("bindDataDefault(file struct) error = %v", err)
-	}
-
+func TestPathHelpers(t *testing.T) {
 	if got := pathWildcardNames("   "); got != nil {
 		t.Fatalf("pathWildcardNames(blank) = %#v, want nil", got)
 	}

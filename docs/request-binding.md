@@ -11,7 +11,7 @@
 - 只做 binding：`bind.Bind(...)`、`bind.BindBody(...)`、`bind.BindQueryParams(...)`、`bind.BindPathValues(...)`、`bind.BindHeaders(...)`
 - 根包薄封装：`chix.Bind(...)`、`chix.BindBody(...)` 等
 - binding + request-rules + validate：`chix.BindAndValidate(...)` / `reqx.BindAndValidate(...)`
-- 高级 binding 能力：`bind.ValueBinder`、`bind.QueryParam(...)`、`bind.FormValue(...)` 等
+- 高级 binding 能力：`bind.ValueBinder`、`bind.QueryParam(...)` 等
 
 binding 层默认直接对齐 Echo 的 empty-body no-op 语义；是否“必须提交 body”不再由 binding API 定义，而是交给 `RequestValidator` 或业务层规则。
 

@@ -240,6 +240,28 @@ func TestBindBody_JSONContract(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects trailing garbage after valid json", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}xxx`)
+
+		var dst request
+		_ = assertHTTPError(t, BindBody(req, &dst), http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+	})
+
+	t.Run("rejects multiple top level json values", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}{"name":"other"}`)
+
+		var dst request
+		_ = assertHTTPError(t, BindBody(req, &dst), http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+	})
+
 	t.Run("object binds to map target", func(t *testing.T) {
 		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata","age":17}`)
 

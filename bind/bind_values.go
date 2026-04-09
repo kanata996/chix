@@ -3,7 +3,6 @@ package bind
 import (
 	"encoding"
 	"errors"
-	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"reflect"
@@ -36,7 +35,7 @@ func bindPathValuesDefault(r *http.Request, target any) error {
 			params[name] = []string{r.PathValue(name)}
 		}
 	}
-	if err := bindDataDefault(target, params, "param", nil); err != nil {
+	if err := bindDataDefault(target, params, "param"); err != nil {
 		return badRequestWrap(err)
 	}
 	return nil
@@ -48,7 +47,7 @@ func bindQueryParamsDefault(r *http.Request, target any) error {
 	if r != nil && r.URL != nil {
 		params = r.URL.Query()
 	}
-	if err := bindDataDefault(target, params, "query", nil); err != nil {
+	if err := bindDataDefault(target, params, "query"); err != nil {
 		return badRequestWrap(err)
 	}
 	return nil
@@ -66,7 +65,7 @@ func bindHeadersDefault(r *http.Request, target any) error {
 			params[textproto.CanonicalMIMEHeaderKey(trimmed)] = values
 		}
 	}
-	if err := bindDataDefault(target, params, "header", nil); err != nil {
+	if err := bindDataDefault(target, params, "header"); err != nil {
 		return badRequestWrap(err)
 	}
 	return nil
@@ -87,8 +86,8 @@ func badRequestWrap(err error) error {
 }
 
 // bindDataDefault 按 tag 和字段类型把字符串输入写入目标对象。
-func bindDataDefault(destination any, data map[string][]string, tag string, dataFiles map[string][]*multipart.FileHeader) error {
-	if destination == nil || (len(data) == 0 && len(dataFiles) == 0) {
+func bindDataDefault(destination any, data map[string][]string, tag string) error {
+	if destination == nil || len(data) == 0 {
 		return nil
 	}
 
@@ -100,7 +99,6 @@ func bindDataDefault(destination any, data map[string][]string, tag string, data
 
 	typ = typ.Elem()
 	val = val.Elem()
-	hasFiles := len(dataFiles) > 0
 
 	if typ.Kind() == reflect.Map && typ.Key().Kind() == reflect.String {
 		elemKind := typ.Elem().Kind()
@@ -150,26 +148,16 @@ func bindDataDefault(destination any, data map[string][]string, tag string, data
 		structFieldKind := structField.Kind()
 		inputFieldName := typeField.Tag.Get(tag)
 		if typeField.Anonymous && structFieldKind == reflect.Struct && inputFieldName != "" {
-			return errors.New("query/param/form tags are not allowed with anonymous struct field")
+			return errors.New("query/param/header tags are not allowed with anonymous struct field")
 		}
 
 		if inputFieldName == "" {
 			if _, ok := structField.Addr().Interface().(BindUnmarshaler); !ok && structFieldKind == reflect.Struct {
-				if err := bindDataDefault(structField.Addr().Interface(), data, tag, dataFiles); err != nil {
+				if err := bindDataDefault(structField.Addr().Interface(), data, tag); err != nil {
 					return err
 				}
 			}
 			continue
-		}
-
-		if hasFiles {
-			if ok, err := isFieldMultipartFile(structField.Type()); err != nil {
-				return err
-			} else if ok {
-				if ok := setMultipartFileHeaderTypes(structField, inputFieldName, dataFiles); ok {
-					continue
-				}
-			}
 		}
 
 		inputValue, exists := data[inputFieldName]
@@ -360,51 +348,6 @@ func setFloatFieldDefault(value string, bitSize int, field reflect.Value) error 
 		field.SetFloat(floatVal)
 	}
 	return err
-}
-
-var (
-	multipartFileHeaderType             = reflect.TypeFor[multipart.FileHeader]()
-	multipartFileHeaderPointerType      = reflect.TypeFor[*multipart.FileHeader]()
-	multipartFileHeaderSliceType        = reflect.TypeFor[[]multipart.FileHeader]()
-	multipartFileHeaderPointerSliceType = reflect.TypeFor[[]*multipart.FileHeader]()
-)
-
-// isFieldMultipartFile 判断字段是否声明为支持的 multipart file header 类型。
-func isFieldMultipartFile(field reflect.Type) (bool, error) {
-	switch field {
-	case multipartFileHeaderPointerType, multipartFileHeaderSliceType, multipartFileHeaderPointerSliceType:
-		return true, nil
-	case multipartFileHeaderType:
-		return true, errors.New("binding to multipart.FileHeader struct is not supported, use pointer to struct")
-	default:
-		return false, nil
-	}
-}
-
-// setMultipartFileHeaderTypes 把 multipart 文件头写入匹配的字段类型。
-func setMultipartFileHeaderTypes(structField reflect.Value, inputFieldName string, files map[string][]*multipart.FileHeader) bool {
-	fileHeaders := files[inputFieldName]
-	if len(fileHeaders) == 0 {
-		return false
-	}
-
-	result := true
-	switch structField.Type() {
-	case multipartFileHeaderPointerSliceType:
-		structField.Set(reflect.ValueOf(fileHeaders))
-	case multipartFileHeaderSliceType:
-		headers := make([]multipart.FileHeader, len(fileHeaders))
-		for i, fileHeader := range fileHeaders {
-			headers[i] = *fileHeader
-		}
-		structField.Set(reflect.ValueOf(headers))
-	case multipartFileHeaderPointerType:
-		structField.Set(reflect.ValueOf(fileHeaders[0]))
-	default:
-		result = false
-	}
-
-	return result
 }
 
 // pathWildcardNames 从标准库路由 pattern 中提取 path 参数名。

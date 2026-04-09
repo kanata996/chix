@@ -10,8 +10,8 @@
 //   - header：请求头
 //   - json：请求 body
 //
-// json body 当前只支持 application/json，并使用 Go 标准库 encoding/json 解码。
-// 目前不支持 XML、form、multipart，也不接受 application/*+json。
+// json body 当前只支持 application/json，并使用 Go 标准库 encoding/json 解码；
+// 也不接受 application/*+json。
 //
 // 公开 API：
 //   - 绑定入口：Bind、BindBody、BindQueryParams、BindPathValues、BindHeaders

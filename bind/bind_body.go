@@ -67,7 +67,14 @@ func decodeJSONBody(body []byte, target any, allowUnknownFields bool) error {
 	if err := dec.Decode(target); err != nil {
 		return mapJSONBodyDecodeError(err)
 	}
-	return nil
+	var extra any
+	if err := dec.Decode(&extra); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return mapJSONBodyDecodeError(err)
+	}
+	return mapJSONBodyDecodeError(errors.New("request body must contain exactly one JSON value"))
 }
 
 // mapJSONBodyDecodeError 把标准库 JSON 解码错误收敛为公开的 HTTP 错误。
