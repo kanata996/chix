@@ -7,8 +7,8 @@
 //   - 将常见请求违规统一收敛为稳定的 HTTP 错误
 //
 // 典型用法：
-//   - 使用 bind.Bind* 或 chix.Bind* 先完成请求绑定
-//   - 使用 BindAndValidate* 作为 binding + request-rules + validate 的便利组合层
+//   - 只做请求绑定时，使用 bind.Bind* 或 chix.Bind*
+//   - 需要 binding + request-rules + validate 时，使用 BindAndValidate*
 //
 // 公开 API：
 //   - 绑定并校验入口：BindAndValidate、BindAndValidateBody、
@@ -21,6 +21,10 @@
 //     ViolationCodeUnknown、ViolationCodeType、ViolationCodeMultiple
 //   - 公开 violation in 常量：ViolationInBody、ViolationInQuery、
 //     ViolationInPath、ViolationInHeader、ViolationInRequest
+//
+// BindAndValidate* 的目标约束：
+//   - 组合入口最终会执行结构校验，因此目标必须是非 nil 的 *struct
+//   - 这与 bind.BindBody(...) 可绑定到 slice、map 等 JSON 目标的能力不同
 //
 // 新增、移除、重命名以上导出符号，或改变其公开语义时，应同步更新本注释与 CHANGELOG。
 //
