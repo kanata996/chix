@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	chimw "github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/traceid"
 	"github.com/kanata996/chix/errx"
 )
 
@@ -249,13 +247,14 @@ func TestLogServerError(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 	defer slog.SetDefault(previousDefault)
 
-	logServerError(nil, nil, nil)
-	logServerError(nil, errx.BadRequest("bad_request", "bad request"), errors.New("client error"))
+	var responder *ErrorResponder
+	responder.logServerError(nil, nil, nil)
+	responder.logServerError(nil, errx.BadRequest("bad_request", "bad request"), errors.New("client error"))
 	if buf.Len() != 0 {
 		t.Fatalf("logServerError() unexpectedly wrote output: %s", buf.Bytes())
 	}
 
-	logServerError(nil, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), errors.New("db timeout"))
+	responder.logServerError(nil, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), errors.New("db timeout"))
 	if buf.Len() == 0 {
 		t.Fatal("logServerError() did not write 5xx output")
 	}
@@ -281,15 +280,16 @@ func TestLogServerErrorAttrs(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 	defer slog.SetDefault(previousDefault)
 
-	logServerErrorAttrs(nil, nil, nil)
-	logServerErrorAttrs(nil, errx.BadRequest("bad_request", "bad request"), []slog.Attr{
+	var responder *ErrorResponder
+	responder.logServerErrorAttrs(nil, nil, nil)
+	responder.logServerErrorAttrs(nil, errx.BadRequest("bad_request", "bad request"), []slog.Attr{
 		slog.String("error.code", "bad_request"),
 	})
 	if buf.Len() != 0 {
 		t.Fatalf("logServerErrorAttrs() unexpectedly wrote output: %s", buf.Bytes())
 	}
 
-	logServerErrorAttrs(nil, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), []slog.Attr{
+	responder.logServerErrorAttrs(nil, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), []slog.Attr{
 		slog.String("error.code", "internal_error"),
 	})
 	if buf.Len() == 0 {
@@ -323,24 +323,67 @@ func TestErrorForDiagnostics(t *testing.T) {
 	}
 }
 
-func TestRequestContextAttrs(t *testing.T) {
-	if got := requestContextAttrs(nilContext()); got != nil {
-		t.Fatalf("requestContextAttrs(nil) = %#v, want nil", got)
+func TestErrorResponderContextAttrs(t *testing.T) {
+	var responder *ErrorResponder
+	if got := responder.contextAttrs(nilContext()); got != nil {
+		t.Fatalf("contextAttrs(nil responder) = %#v, want nil", got)
 	}
 
-	if got := requestContextAttrs(context.Background()); len(got) != 0 {
-		t.Fatalf("requestContextAttrs(background) len = %d, want 0", len(got))
+	responder = &ErrorResponder{
+		ContextAttrs: func(context.Context) []slog.Attr {
+			return []slog.Attr{
+				slog.String("traceId", "trace-123"),
+			}
+		},
 	}
 
-	ctx := traceid.NewContext(context.Background())
-	ctx = context.WithValue(ctx, chimw.RequestIDKey, "req-123")
-
-	attrs := attrsToMap(requestContextAttrs(ctx))
-	if _, exists := attrs["request.id"]; exists {
-		t.Fatalf("request.id unexpectedly present: %#v", attrs["request.id"])
+	attrs := attrsToMap(responder.contextAttrs(context.Background()))
+	if got := attrs["traceId"]; got != "trace-123" {
+		t.Fatalf("traceId = %#v, want trace-123", got)
 	}
-	if got, ok := attrs["traceId"].(string); !ok || got == "" {
-		t.Fatalf("traceId = %#v, want non-empty string", attrs["traceId"])
+}
+
+func TestNewErrorResponderAndOverrides(t *testing.T) {
+	responder := NewErrorResponder()
+	if responder == nil {
+		t.Fatal("NewErrorResponder() = nil")
+	}
+
+	defaultLogger := slog.Default()
+	if got := responder.logger(); got != defaultLogger {
+		t.Fatalf("logger() = %p, want default %p", got, defaultLogger)
+	}
+
+	customLogger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	responder.Logger = customLogger
+	if got := responder.logger(); got != customLogger {
+		t.Fatalf("logger() = %p, want custom %p", got, customLogger)
+	}
+
+	cause := errors.New("boom")
+	customHTTPError := errx.BadRequest("bad_request", "bad request")
+	responder.ToHTTPError = func(err error) *errx.HTTPError {
+		if !errors.Is(err, cause) {
+			t.Fatalf("ToHTTPError() err = %v, want %v", err, cause)
+		}
+		return customHTTPError
+	}
+	if got := responder.toHTTPError(cause); got != customHTTPError {
+		t.Fatalf("toHTTPError() = %p, want %p", got, customHTTPError)
+	}
+
+	customAttrs := []slog.Attr{slog.String("service", "resp")}
+	responder.RequestLogAttrs = func(err error, httpErr *errx.HTTPError) []slog.Attr {
+		if !errors.Is(err, cause) {
+			t.Fatalf("RequestLogAttrs err = %v, want %v", err, cause)
+		}
+		if httpErr != customHTTPError {
+			t.Fatalf("RequestLogAttrs httpErr = %p, want %p", httpErr, customHTTPError)
+		}
+		return customAttrs
+	}
+	if got := responder.requestLogAttrs(cause, customHTTPError); len(got) != 1 || got[0].Key != "service" {
+		t.Fatalf("requestLogAttrs() = %#v, want custom attrs", got)
 	}
 }
 

@@ -78,7 +78,7 @@ func RequireBody(r *http.Request) error {
 
 // WriteError 按统一错误对象写回响应。
 func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
-	return resp.WriteError(w, r, err)
+	return defaultErrorResponder.Respond(w, r, err)
 }
 
 // JSON 写回 JSON 响应。

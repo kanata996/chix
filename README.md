@@ -18,9 +18,9 @@
 - `github.com/kanata996/chix`：大多数 handler 直接使用的根包入口
 - `github.com/kanata996/chix/bind`：独立的请求绑定层
 - `github.com/kanata996/chix/reqx`：请求侧校验、Normalize、RequestValidator 与 invalid_request 违规模型
-- `github.com/kanata996/chix/resp`：响应写回与错误响应输出
+- `github.com/kanata996/chix/resp`：纯 `net/http` 的响应写回、错误响应输出与 `ErrorResponder`
 - `github.com/kanata996/chix/errx`：共享公共 HTTP 错误模型
-- `github.com/kanata996/chix/middleware`：可选的 request log 辅助中间件
+- `github.com/kanata996/chix/middleware`：可选的 chi request log 辅助中间件
 
 ## 状态
 
@@ -204,6 +204,8 @@ func (*createAccountRequest) ValidateRequest(r *http.Request) error {
 - `JSON`
 - `JSONBlob`
 - `WriteError`
+- `ErrorResponder`
+- `NewErrorResponder`
 
 `WriteError(...)` 会把错误写成统一的 problem 风格 JSON：
 
@@ -225,6 +227,10 @@ func (*createAccountRequest) ValidateRequest(r *http.Request) error {
 ```
 
 成功响应使用 `application/json`，错误响应使用 `application/problem+json`。
+
+根包 `WriteError(...)` 使用的是面向 `chi + httplog + traceid` 的预配置
+`ErrorResponder`。如果你只想用纯 `net/http` 的响应错误收敛与写回能力，
+直接导入 `resp` 包即可。
 
 ## 共享错误模型
 
@@ -260,6 +266,9 @@ if err := repo.DeleteAccount(ctx, accountID); err != nil {
 `middleware.RequestLogAttrs()` 用于把请求上下文中的关联字段补到当前 request log。
 `WriteError(...)` 只会在 5xx access log 上补 `error.*` 诊断字段，不再隐式注入
 `traceId` / `request.id`。
+
+如果你需要自定义根包默认行为，可以通过 `chix.NewErrorResponder()` 基于 chi
+预设构造一个 responder，再在应用自己的 HTTP 边界层统一调用。
 
 建议挂载顺序：
 

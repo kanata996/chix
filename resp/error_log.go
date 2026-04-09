@@ -3,9 +3,9 @@ package resp
 // 本文件负责“错误请求日志注解”，而不是“统一错误日志输出”。
 //
 // 定位：
-//   - 这里服务于 WriteError(...) 的内部流程。
-//   - 它只负责把已收敛好的 HTTP 错误语义补充到当前 request log。
-//   - 真正输出请求日志的仍然是外层 httplog，中间件层不重复实现 error -> HTTP 语义映射。
+//   - 这里服务于 ErrorResponder 的内部流程。
+//   - 它只负责生成低噪音 request-log attrs 和独立 error log 的诊断 attrs。
+//   - 具体 request log 集成由 ErrorResponder.AnnotateRequestLog hook 决定。
 //
 // 职责：
 //   - 从 error / HTTPError 提取更适合排障的结构化字段。
@@ -27,8 +27,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/go-chi/httplog/v3"
-	"github.com/go-chi/traceid"
 	"github.com/kanata996/chix/errx"
 )
 
@@ -44,16 +42,8 @@ type errorChainInfo struct {
 	rootType    string
 }
 
-func annotateRequestErrorLogAttrs(r *http.Request, attrs []slog.Attr) {
-	if r == nil || len(attrs) == 0 {
-		return
-	}
-	httplog.SetAttrs(r.Context(), attrs...)
-}
-
 // requestErrorLogAttrs 生成请求级错误日志字段。
 // 4xx 仅保留外层请求日志；5xx 只补充低噪音、可聚合的诊断字段。
-// request correlation attrs 应由服务自己的 httplog 集成负责。
 func requestErrorLogAttrs(err error, httpErr *errx.HTTPError) []slog.Attr {
 	if err == nil || httpErr == nil {
 		return nil
@@ -121,21 +111,21 @@ func errorForDiagnostics(err error, httpErr *errx.HTTPError) error {
 
 // logErrorResponseWriteFailure 只记录“错误响应自身写出失败”的异常。
 // 这是基础设施级问题，不属于普通业务失败，因此需要单独打一条 error 日志。
-func logErrorResponseWriteFailure(r *http.Request, httpErr *errx.HTTPError, err error) {
+func (r *ErrorResponder) logErrorResponseWriteFailure(req *http.Request, httpErr *errx.HTTPError, err error) {
 	if err == nil || httpErr == nil {
 		return
 	}
 
 	ctx := context.Background()
-	if r != nil {
-		ctx = r.Context()
+	if req != nil {
+		ctx = req.Context()
 	}
 
 	attrs := []slog.Attr{
 		slog.Int("http.response.status_code", httpErr.Status()),
 	}
 	attrs = append(attrs, diagnosticErrorLogAttrs(err, httpErr)...)
-	attrs = append(attrs, requestContextAttrs(ctx)...)
+	attrs = append(attrs, r.contextAttrs(ctx)...)
 
 	var degraded *ErrorWriteDegraded
 	if errors.As(err, &degraded) && degraded != nil {
@@ -145,35 +135,35 @@ func logErrorResponseWriteFailure(r *http.Request, httpErr *errx.HTTPError, err 
 		)
 	}
 
-	slog.Default().LogAttrs(ctx, slog.LevelError, "resp: failed to write error response", attrs...)
+	r.logger().LogAttrs(ctx, slog.LevelError, "resp: failed to write error response", attrs...)
 }
 
 // logServerError 记录一次独立的 5xx 错误日志，便于在 access log 之外排查问题。
-func logServerError(r *http.Request, httpErr *errx.HTTPError, err error) {
+func (r *ErrorResponder) logServerError(req *http.Request, httpErr *errx.HTTPError, err error) {
 	if err == nil || httpErr == nil || httpErr.Status() < http.StatusInternalServerError {
 		return
 	}
 
-	logServerErrorAttrs(r, httpErr, diagnosticErrorLogAttrs(err, httpErr))
+	r.logServerErrorAttrs(req, httpErr, diagnosticErrorLogAttrs(err, httpErr))
 }
 
-func logServerErrorAttrs(r *http.Request, httpErr *errx.HTTPError, diagnosticAttrs []slog.Attr) {
+func (r *ErrorResponder) logServerErrorAttrs(req *http.Request, httpErr *errx.HTTPError, diagnosticAttrs []slog.Attr) {
 	if httpErr == nil || httpErr.Status() < http.StatusInternalServerError {
 		return
 	}
 
 	ctx := context.Background()
-	if r != nil {
-		ctx = r.Context()
+	if req != nil {
+		ctx = req.Context()
 	}
 
 	attrs := []slog.Attr{
 		slog.Int("http.response.status_code", httpErr.Status()),
 	}
 	attrs = append(attrs, diagnosticAttrs...)
-	attrs = append(attrs, requestContextAttrs(ctx)...)
+	attrs = append(attrs, r.contextAttrs(ctx)...)
 
-	slog.Default().LogAttrs(ctx, slog.LevelError, "resp: request failed with server error", attrs...)
+	r.logger().LogAttrs(ctx, slog.LevelError, "resp: request failed with server error", attrs...)
 }
 
 // buildErrorChainInfo 把错误链整理成适合日志输出的摘要结构。
@@ -330,22 +320,4 @@ func limitErrorLogString(value string) string {
 		return trimmed
 	}
 	return trimmed[:maxLoggedErrorStringBytes] + "...(truncated)"
-}
-
-func requestContextAttrs(ctx context.Context) []slog.Attr {
-	attrs := requestCorrelationAttrs(ctx)
-	return attrs
-}
-
-func requestCorrelationAttrs(ctx context.Context) []slog.Attr {
-	if ctx == nil {
-		return nil
-	}
-
-	attrs := make([]slog.Attr, 0, 1)
-	if traceID := traceid.FromContext(ctx); traceID != "" {
-		attrs = append(attrs, slog.String(traceid.LogKey, traceID))
-	}
-
-	return attrs
 }

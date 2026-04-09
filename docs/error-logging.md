@@ -1,13 +1,18 @@
 # 错误日志当前行为
 
-本文只说明 `resp.WriteError(...)` 相关日志记录的当前行为。
+本文说明两层行为：
+
+- `resp.WriteError(...)` / `resp.ErrorResponder` 零值：纯 `net/http` 核心行为
+- `chix.WriteError(...)`：基于 `chi + httplog + traceid` 预设好的行为
 
 相关源码：
 
+- `chix/error_responder.go`
 - `resp/write_error.go`
+- `resp/error_responder.go`
 - `resp/error_log.go`
 
-## `WriteError(...)` 的日志分支
+## `ErrorResponder.Respond(...)` 的日志分支
 
 ### `err == nil`
 
@@ -25,15 +30,15 @@
 
 - 不再改写响应
 - 不再补 request log 字段
-- 若错误最终收敛为 `5xx`，仍会通过 `slog.Default()` 输出一条独立错误日志
+- 若错误最终收敛为 `5xx`，仍会通过 responder 的 `Logger` 输出一条独立错误日志
 - 返回原错误
 
 ### 常规错误响应路径
 
 未命中提前返回时，执行顺序为：
 
-1. `asHTTPError(err)`
-2. `annotateRequestErrorLog(r, err, httpErr)`
+1. `ToHTTPError(err)` 或默认 `asHTTPError(err)`
+2. `AnnotateRequestLog(r, RequestLogAttrs(err, httpErr))`
 3. `logServerError(r, httpErr, err)`
 4. `writeHTTPError(w, r, httpErr)`
 5. `logErrorResponseWriteFailure(r, httpErr, writeErr)`
@@ -41,16 +46,19 @@
 
 其中：
 
-- 第 2 步只影响当前 request log
+- 第 2 步由 responder 的 hook 决定；`resp` 零值 responder 会自然退化为 no-op
 - 第 3 步只在 `httpErr.Status() >= 500` 时输出独立错误日志
 - 第 5 步只在 `writeErr != nil` 时输出独立错误日志
 
 ## Request Log 行为
 
-`annotateRequestErrorLog(...)` 只通过 `httplog.SetAttrs(...)` 给当前 request log
-补字段，本身不直接输出日志。
+`resp.WriteError(...)` 默认不会集成任何 request log。
 
-如果请求没有经过 `httplog.RequestLogger(...)`，这一步会自然退化为 no-op。
+如果你使用自定义 `ErrorResponder`，或直接使用 `chix.WriteError(...)`，则
+request log 行为由 `AnnotateRequestLog` hook 决定。
+
+在 `chix.WriteError(...)` 的默认预设下，`error.*` attrs 会写入当前 `httplog`
+request log；如果请求没有经过 `httplog.RequestLogger(...)`，这一步会自然退化为 no-op。
 
 ### 4xx
 
@@ -77,11 +85,12 @@
 `chi + httplog` 链路里显式挂 `middleware.RequestLogAttrs()`，或自行在
 `httplog` 集成里通过 `httplog.SetAttrs(...)` 补这些字段。
 
-`WriteError(...)` 自己不再隐式注入 request correlation attrs，这样：
+`WriteError(...)` 自己只负责 5xx 时补 `error.*` 诊断字段，不负责统一兜底
+request correlation attrs，这样：
 
 - access log 的字段来源只在中间件层
 - 2xx / 4xx / 5xx 的关联字段行为保持一致
-- `resp` 不需要替服务兜底 `httplog` 关联字段策略
+- `resp` 保持纯 `net/http`，`chix` 只负责 chi 预设集成
 
 ### 不再写入 Request Log 的字段
 
@@ -105,8 +114,8 @@
 
 ### 普通 5xx
 
-当 `WriteError(...)` 最终收敛为 `5xx` 时，会通过 `slog.Default()` 输出一条独立
-`error` 日志：
+当 `WriteError(...)` 最终收敛为 `5xx` 时，会通过 responder 的 `Logger`（默认
+为 `slog.Default()`）输出一条独立 `error` 日志：
 
 - 消息：`resp: request failed with server error`
 
@@ -120,6 +129,11 @@
 - `error.root_type`
 - `error.timeout`
 - `error.canceled`
+
+`resp.WriteError(...)` 默认不会补 `traceId` 之类的上下文字段。
+
+`chix.WriteError(...)` 的默认预设会额外补：
+
 - `traceId`
 
 ### 错误响应写出失败
@@ -137,6 +151,11 @@
 - `error.type`
 - `error.root_message`
 - `error.root_type`
+
+`resp.WriteError(...)` 默认不会补 `traceId`。
+
+`chix.WriteError(...)` 的默认预设会额外补：
+
 - `traceId`
 
 如果错误可解出 `ErrorWriteDegraded`，还会追加：

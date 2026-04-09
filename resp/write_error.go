@@ -57,28 +57,7 @@ type ErrorWriteDegraded struct {
 //   - 若能明确判断响应已经开始写出，则不再尝试二次改写响应；
 //   - 普通 4xx / 5xx 不在这里额外输出一条重复业务错误日志。
 func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
-	if err == nil {
-		return nil
-	}
-
-	httpErr := asHTTPError(err)
-
-	var responseStartedErr *responseWriteError
-	if errors.As(err, &responseStartedErr) && responseStartedErr != nil && responseStartedErr.responseStarted {
-		logServerError(r, httpErr, err)
-		return err
-	}
-	if responseAlreadyStarted(w) {
-		logServerError(r, httpErr, err)
-		return err
-	}
-
-	requestLogAttrs := requestErrorLogAttrs(err, httpErr)
-	annotateRequestErrorLogAttrs(r, requestLogAttrs)
-	logServerError(r, httpErr, err)
-	writeErr := writeHTTPError(w, r, httpErr)
-	logErrorResponseWriteFailure(r, httpErr, writeErr)
-	return writeErr
+	return defaultErrorResponder.Respond(w, r, err)
 }
 
 // responseAlreadyStarted 仅在 writer 显式暴露响应状态时判断是否已经开始写出。
