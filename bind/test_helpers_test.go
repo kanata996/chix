@@ -2,6 +2,7 @@ package bind
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -15,6 +16,12 @@ func newJSONRequest(method, target, body string) *http.Request {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	return req
+}
+
+func setRequestBody(req *http.Request, contentType, body string) {
+	req.Header.Set("Content-Type", contentType)
+	req.Body = io.NopCloser(strings.NewReader(body))
+	req.ContentLength = int64(len(body))
 }
 
 func requestWithPathParams(params map[string][]string) *http.Request {

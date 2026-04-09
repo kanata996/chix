@@ -2,11 +2,27 @@ package bind
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+type failingReadCloser struct {
+	err error
+}
+
+func (r failingReadCloser) Read(_ []byte) (int, error) {
+	return 0, r.err
+}
+
+func (r failingReadCloser) Close() error {
+	return nil
+}
 
 func TestBindBody_ContentTypeContract(t *testing.T) {
 	type request struct {
@@ -141,6 +157,25 @@ func TestBindBody_EmptyBodyContract(t *testing.T) {
 	})
 }
 
+func TestBindBody_EmptyBodyPreservesExistingValues(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
+	req.Header.Set("Content-Type", mimeApplicationJSON)
+	req.ContentLength = 0
+
+	dst := request{Name: "kanata", Age: 17}
+	if err := BindBody(req, &dst); err != nil {
+		t.Fatalf("BindBody() error = %v", err)
+	}
+	if dst.Name != "kanata" || dst.Age != 17 {
+		t.Fatalf("dst = %#v, want existing values preserved", dst)
+	}
+}
+
 func TestBindBody_JSONContract(t *testing.T) {
 	t.Run("top level null follows default decoder semantics", func(t *testing.T) {
 		type request struct {
@@ -196,4 +231,60 @@ func TestBindBody_RequestTooLarge(t *testing.T) {
 
 	var dst request
 	_ = assertHTTPError(t, BindBody(req, &dst), http.StatusRequestEntityTooLarge, CodeRequestTooLarge, "request body is too large")
+}
+
+func TestBindBody_HelperBranches(t *testing.T) {
+	if got := bodyMediaType(nil); got != "" {
+		t.Fatalf("bodyMediaType(nil) = %q, want empty", got)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
+	req.Header.Set("Content-Type", " application/json ; charset=utf-8 ")
+	if got := bodyMediaType(req); got != mimeApplicationJSON {
+		t.Fatalf("bodyMediaType() = %q, want %q", got, mimeApplicationJSON)
+	}
+
+	type payload struct {
+		Name string `json:"name"`
+	}
+
+	if err := decodeJSONBody([]byte(`{"name":"kanata"}`), &payload{}, false); err != nil {
+		t.Fatalf("decodeJSONBody() error = %v", err)
+	}
+
+	err := decodeJSONBody([]byte(`{"extra":1}`), &payload{}, false)
+	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+
+	invalidUnmarshalErr := &json.InvalidUnmarshalError{Type: reflect.TypeOf(payload{})}
+	if got := mapJSONBodyDecodeError(invalidUnmarshalErr); got != invalidUnmarshalErr {
+		t.Fatalf("mapJSONBodyDecodeError() = %v, want same error", got)
+	}
+
+	data, err := readBody(io.NopCloser(strings.NewReader("ok")), 0)
+	if err != nil || string(data) != "ok" {
+		t.Fatalf("readBody(default max) = (%q, %v), want (ok, nil)", data, err)
+	}
+	if data, err := readBody(nil, 10); err != nil || data != nil {
+		t.Fatalf("readBody(nil) = (%v, %v), want (nil, nil)", data, err)
+	}
+
+	wantErr := errors.New("read failed")
+	if _, err := readBody(failingReadCloser{err: wantErr}, 10); !errors.Is(err, wantErr) {
+		t.Fatalf("readBody(failing) error = %v, want %v", err, wantErr)
+	}
+
+	if err := bindBodyDefault(nil, &payload{}, defaultBindConfig().body); err == nil || err.Error() != "bind: request must not be nil" {
+		t.Fatalf("bindBodyDefault(nil) error = %v", err)
+	}
+	if err := bindBodyDefault(req, payload{}, defaultBindConfig().body); err == nil || err.Error() != "bind: destination must not be nil" {
+		t.Fatalf("bindBodyDefault(non-pointer) error = %v", err)
+	}
+
+	readErrReq := httptest.NewRequest(http.MethodPost, "/", nil)
+	readErrReq.ContentLength = 1
+	readErrReq.Header.Set("Content-Type", mimeApplicationJSON)
+	readErrReq.Body = failingReadCloser{err: wantErr}
+	if err := bindBodyDefault(readErrReq, &payload{}, defaultBindConfig().body); !errors.Is(err, wantErr) {
+		t.Fatalf("bindBodyDefault(read error) = %v, want %v", err, wantErr)
+	}
 }

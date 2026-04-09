@@ -1,11 +1,91 @@
 package bind
 
 import (
-	"io"
 	"net/http"
-	"strings"
+	"net/http/httptest"
 	"testing"
 )
+
+func TestBind_PublicEntryPointsRejectInvalidInputs(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	var dst struct{}
+
+	if err := Bind(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
+		t.Fatalf("Bind(nil) error = %v", err)
+	}
+	if err := Bind(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
+		t.Fatalf("Bind(nil target) error = %v", err)
+	}
+	if err := BindBody(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
+		t.Fatalf("BindBody(nil) error = %v", err)
+	}
+	if err := BindBody(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
+		t.Fatalf("BindBody(nil target) error = %v", err)
+	}
+	if err := BindQueryParams(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
+		t.Fatalf("BindQueryParams(nil) error = %v", err)
+	}
+	if err := BindQueryParams(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
+		t.Fatalf("BindQueryParams(nil target) error = %v", err)
+	}
+	if err := BindPathValues(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
+		t.Fatalf("BindPathValues(nil) error = %v", err)
+	}
+	if err := BindPathValues(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
+		t.Fatalf("BindPathValues(nil target) error = %v", err)
+	}
+	if err := BindHeaders(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
+		t.Fatalf("BindHeaders(nil) error = %v", err)
+	}
+	if err := BindHeaders(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
+		t.Fatalf("BindHeaders(nil target) error = %v", err)
+	}
+}
+
+func TestDefaultBindConfig(t *testing.T) {
+	cfg := defaultBindConfig()
+
+	if cfg.body.maxBodyBytes != defaultMaxBodyBytes {
+		t.Fatalf("maxBodyBytes = %d, want %d", cfg.body.maxBodyBytes, defaultMaxBodyBytes)
+	}
+	if !cfg.body.allowUnknownFields {
+		t.Fatal("body.allowUnknownFields = false, want true")
+	}
+}
+
+func TestBind_InternalBranches(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	var dst struct{}
+
+	var binder DefaultBinder
+	if err := binder.Bind(req, &dst); err != nil {
+		t.Fatalf("DefaultBinder.Bind() error = %v", err)
+	}
+
+	if err := validateBindingDestination(1); err == nil || err.Error() != "bind: destination must not be nil" {
+		t.Fatalf("validateBindingDestination(non-pointer) error = %v", err)
+	}
+	if err := validateBindingDestination(nil); err == nil || err.Error() != "bind: destination must not be nil" {
+		t.Fatalf("validateBindingDestination(nil) error = %v", err)
+	}
+	if err := errorsf("boom %d", 1); err == nil || err.Error() != "bind: boom 1" {
+		t.Fatalf("errorsf() = %v", err)
+	}
+
+	type request struct {
+		ID int `param:"id"`
+	}
+	pathReq := requestWithPathParams(map[string][]string{"id": {"oops"}})
+	if err := bindWithConfig(nil, &request{}, defaultBindConfig()); err == nil || err.Error() != "bind: request must not be nil" {
+		t.Fatalf("bindWithConfig(nil) error = %v", err)
+	}
+	if err := bindWithConfig(req, request{}, defaultBindConfig()); err == nil || err.Error() != "bind: destination must not be nil" {
+		t.Fatalf("bindWithConfig(non-pointer) error = %v", err)
+	}
+	if err := bindWithConfig(pathReq, &request{}, defaultBindConfig()); err == nil {
+		t.Fatal("bindWithConfig(path error) = nil, want error")
+	}
+}
 
 func TestBind_StageOrderAndMethodRules(t *testing.T) {
 	t.Run("get applies path query then body", func(t *testing.T) {
@@ -124,8 +204,7 @@ func TestBind_EmptyBodyNoopUsesContentLengthZero(t *testing.T) {
 	req.Method = http.MethodGet
 	req.URL.RawQuery = "page=2"
 	req.Header.Set("Content-Type", "text/plain")
-	req.Body = io.NopCloser(strings.NewReader(""))
-	req.ContentLength = 0
+	setRequestBody(req, "text/plain", "")
 
 	dst := request{Name: "existing-name"}
 	if err := Bind(req, &dst); err != nil {
@@ -178,10 +257,4 @@ func TestBind_PartialUpdatesPersistAcrossStageFailure(t *testing.T) {
 			t.Fatalf("dst = %#v, want path/query updates preserved before body failure", dst)
 		}
 	})
-}
-
-func setRequestBody(req *http.Request, contentType, body string) {
-	req.Header.Set("Content-Type", contentType)
-	req.Body = io.NopCloser(strings.NewReader(body))
-	req.ContentLength = int64(len(body))
 }

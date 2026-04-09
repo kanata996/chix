@@ -1,9 +1,8 @@
 package bind
 
 import (
-	"encoding/json"
 	"errors"
-	"io"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -14,18 +13,6 @@ import (
 
 	"github.com/kanata996/chix/errx"
 )
-
-type failingReadCloser struct {
-	err error
-}
-
-func (r failingReadCloser) Read(_ []byte) (int, error) {
-	return 0, r.err
-}
-
-func (r failingReadCloser) Close() error {
-	return nil
-}
 
 type customParamValue struct {
 	value string
@@ -63,98 +50,259 @@ func (v *customTextValue) UnmarshalText(text []byte) error {
 	return nil
 }
 
-func TestBindEntryPointsAndDefaultBinderBranches(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	var dst struct{}
+type queryState string
 
-	if err := Bind(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
-		t.Fatalf("Bind(nil) error = %v", err)
-	}
-	if err := Bind(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("Bind(nil target) error = %v", err)
-	}
-	if err := BindBody(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
-		t.Fatalf("BindBody(nil) error = %v", err)
-	}
-	if err := BindBody(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("BindBody(nil target) error = %v", err)
-	}
-	if err := BindQueryParams(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
-		t.Fatalf("BindQueryParams(nil) error = %v", err)
-	}
-	if err := BindQueryParams(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("BindQueryParams(nil target) error = %v", err)
-	}
-	if err := BindPathValues(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
-		t.Fatalf("BindPathValues(nil) error = %v", err)
-	}
-	if err := BindPathValues(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("BindPathValues(nil target) error = %v", err)
-	}
-	if err := BindHeaders(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
-		t.Fatalf("BindHeaders(nil) error = %v", err)
-	}
-	if err := BindHeaders(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("BindHeaders(nil target) error = %v", err)
-	}
-
-	var binder DefaultBinder
-	if err := binder.Bind(req, &dst); err != nil {
-		t.Fatalf("DefaultBinder.Bind() error = %v", err)
-	}
-
-	if err := validateBindingDestination(1); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("validateBindingDestination(non-pointer) error = %v", err)
-	}
-	if err := validateBindingDestination(nil); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("validateBindingDestination(nil) error = %v", err)
-	}
-	if err := errorsf("boom %d", 1); err == nil || err.Error() != "bind: boom 1" {
-		t.Fatalf("errorsf() = %v", err)
-	}
-
-	type request struct {
-		ID int `param:"id"`
-	}
-	pathReq := requestWithPathParams(map[string][]string{"id": {"oops"}})
-	if err := bindWithConfig(nil, &request{}, defaultBindConfig()); err == nil || err.Error() != "bind: request must not be nil" {
-		t.Fatalf("bindWithConfig(nil) error = %v", err)
-	}
-	if err := bindWithConfig(req, request{}, defaultBindConfig()); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("bindWithConfig(non-pointer) error = %v", err)
-	}
-	if err := bindWithConfig(pathReq, &request{}, defaultBindConfig()); err == nil {
-		t.Fatal("bindWithConfig(path error) = nil, want error")
+func (s *queryState) UnmarshalText(text []byte) error {
+	switch string(text) {
+	case "open", "closed":
+		*s = queryState(text)
+		return nil
+	default:
+		return fmt.Errorf("invalid state %q", string(text))
 	}
 }
 
-func TestBodyHelperBranches(t *testing.T) {
-	if got := bodyMediaType(nil); got != "" {
-		t.Fatalf("bodyMediaType(nil) = %q, want empty", got)
+func TestBindPathValues_BindsScalars(t *testing.T) {
+	type request struct {
+		ID   int    `param:"id"`
+		Name string `param:"name"`
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
-	req.Header.Set("Content-Type", " application/json ; charset=utf-8 ")
-	if got := bodyMediaType(req); got != mimeApplicationJSON {
-		t.Fatalf("bodyMediaType() = %q, want %q", got, mimeApplicationJSON)
+	req := requestWithPathParams(map[string][]string{
+		"id":   {"42"},
+		"name": {"kanata"},
+	})
+
+	var dst request
+	if err := BindPathValues(req, &dst); err != nil {
+		t.Fatalf("BindPathValues() error = %v", err)
+	}
+	if dst.ID != 42 || dst.Name != "kanata" {
+		t.Fatalf("dst = %#v, want bound path values", dst)
+	}
+}
+
+func TestBindPathValues_MissingParamsPreserveExistingValues(t *testing.T) {
+	type request struct {
+		ID   int    `param:"id"`
+		Name string `param:"name"`
 	}
 
-	type payload struct {
-		Name string `json:"name"`
+	req := requestWithPathParams(map[string][]string{
+		"other": {"1"},
+	})
+	dst := request{ID: 7, Name: "existing"}
+
+	if err := BindPathValues(req, &dst); err != nil {
+		t.Fatalf("BindPathValues() error = %v", err)
+	}
+	if dst.ID != 7 || dst.Name != "existing" {
+		t.Fatalf("dst = %#v, want existing values preserved", dst)
+	}
+}
+
+func TestBindPathValues_EmptyValueBindsZeroValue(t *testing.T) {
+	type request struct {
+		ID int `param:"id"`
 	}
 
-	if err := decodeJSONBody([]byte(`{"name":"kanata"}`), &payload{}, false); err != nil {
-		t.Fatalf("decodeJSONBody() error = %v", err)
+	req := requestWithPathParams(map[string][]string{
+		"id": {""},
+	})
+
+	var dst request
+	if err := BindPathValues(req, &dst); err != nil {
+		t.Fatalf("BindPathValues() error = %v", err)
+	}
+	if dst.ID != 0 {
+		t.Fatalf("id = %d, want 0", dst.ID)
+	}
+}
+
+func TestBindPathValues_BindingErrorsAreBadRequest(t *testing.T) {
+	type request struct {
+		ID int `param:"id"`
 	}
 
-	err := decodeJSONBody([]byte(`{"extra":1}`), &payload{}, false)
-	_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+	req := requestWithPathParams(map[string][]string{
+		"id": {"oops"},
+	})
 
-	invalidUnmarshalErr := &json.InvalidUnmarshalError{Type: reflect.TypeOf(payload{})}
-	if got := mapJSONBodyDecodeError(invalidUnmarshalErr); got != invalidUnmarshalErr {
-		t.Fatalf("mapJSONBodyDecodeError() = %v, want same error", got)
+	var dst request
+	_ = assertHTTPError(t, BindPathValues(req, &dst), http.StatusBadRequest, "bad_request", "Bad Request")
+}
+
+func TestBindQueryParams_BindsSupportedTypes(t *testing.T) {
+	type request struct {
+		Page   int        `query:"page"`
+		Search string     `query:"search"`
+		State  queryState `query:"state"`
+		IDs    []int      `query:"id"`
 	}
 
+	req := httptest.NewRequest(http.MethodGet, "/?page=2&search=kanata&state=open&id=1&id=2", nil)
+
+	var dst request
+	if err := BindQueryParams(req, &dst); err != nil {
+		t.Fatalf("BindQueryParams() error = %v", err)
+	}
+	if dst.Page != 2 || dst.Search != "kanata" || dst.State != "open" {
+		t.Fatalf("dst = %#v", dst)
+	}
+	if len(dst.IDs) != 2 || dst.IDs[0] != 1 || dst.IDs[1] != 2 {
+		t.Fatalf("ids = %#v, want [1 2]", dst.IDs)
+	}
+}
+
+func TestBindQueryParams_MissingParamsPreserveExistingValues(t *testing.T) {
+	type request struct {
+		Page   int    `query:"page"`
+		Search string `query:"search"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/?other=1", nil)
+	dst := request{Page: 3, Search: "existing"}
+
+	if err := BindQueryParams(req, &dst); err != nil {
+		t.Fatalf("BindQueryParams() error = %v", err)
+	}
+	if dst.Page != 3 || dst.Search != "existing" {
+		t.Fatalf("dst = %#v, want existing values preserved", dst)
+	}
+}
+
+func TestBindQueryParams_RepeatedScalarUsesFirstValue(t *testing.T) {
+	type request struct {
+		Page int `query:"page"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/?page=1&page=2", nil)
+
+	var dst request
+	if err := BindQueryParams(req, &dst); err != nil {
+		t.Fatalf("BindQueryParams() error = %v", err)
+	}
+	if dst.Page != 1 {
+		t.Fatalf("page = %d, want 1", dst.Page)
+	}
+}
+
+func TestBindQueryParams_BindingErrorsAreBadRequest(t *testing.T) {
+	type request struct {
+		Page int `query:"page"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/?page=oops", nil)
+
+	var dst request
+	_ = assertHTTPError(t, BindQueryParams(req, &dst), http.StatusBadRequest, "bad_request", "Bad Request")
+}
+
+func TestBindHeaders_BindsSupportedScalarTypes(t *testing.T) {
+	type request struct {
+		RequestID string `header:"x-request-id"`
+		Retry     int    `header:"x-retry"`
+		Enabled   bool   `header:"x-enabled"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Request-Id", "req-123")
+	req.Header.Set("X-Retry", "2")
+	req.Header.Set("X-Enabled", "true")
+
+	var dst request
+	if err := BindHeaders(req, &dst); err != nil {
+		t.Fatalf("BindHeaders() error = %v", err)
+	}
+	if dst.RequestID != "req-123" || dst.Retry != 2 || !dst.Enabled {
+		t.Fatalf("dst = %#v, want bound header values", dst)
+	}
+}
+
+func TestBindHeaders_HandlesTrimmedAndRepeatedKeys(t *testing.T) {
+	t.Run("trimmed non canonical keys still bind", func(t *testing.T) {
+		type request struct {
+			RequestID string `header:"x-request-id"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header = http.Header{
+			" x-request-id ": {"req-123"},
+		}
+
+		var dst request
+		if err := BindHeaders(req, &dst); err != nil {
+			t.Fatalf("BindHeaders() error = %v", err)
+		}
+		if dst.RequestID != "req-123" {
+			t.Fatalf("request_id = %q, want req-123", dst.RequestID)
+		}
+	})
+
+	t.Run("repeated scalar values pick the first value", func(t *testing.T) {
+		type request struct {
+			RequestID string `header:"x-request-id"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Add("X-Request-Id", "req-1")
+		req.Header.Add("X-Request-Id", "req-2")
+
+		var dst request
+		if err := BindHeaders(req, &dst); err != nil {
+			t.Fatalf("BindHeaders() error = %v", err)
+		}
+		if dst.RequestID != "req-1" {
+			t.Fatalf("request_id = %q, want req-1", dst.RequestID)
+		}
+	})
+}
+
+func TestBindHeaders_BindingErrorsAreBadRequest(t *testing.T) {
+	type request struct {
+		Retry int `header:"x-retry"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Retry", "oops")
+
+	var dst request
+	_ = assertHTTPError(t, BindHeaders(req, &dst), http.StatusBadRequest, "bad_request", "Bad Request")
+}
+
+func TestBindQueryParamsAndHeadersMissingInputsPreserveExistingValues(t *testing.T) {
+	t.Run("query", func(t *testing.T) {
+		type request struct {
+			Page int `query:"page"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?other=1", nil)
+		dst := request{Page: 3}
+		if err := BindQueryParams(req, &dst); err != nil {
+			t.Fatalf("BindQueryParams() error = %v", err)
+		}
+		if dst.Page != 3 {
+			t.Fatalf("page = %d, want 3", dst.Page)
+		}
+	})
+
+	t.Run("header", func(t *testing.T) {
+		type request struct {
+			TraceID string `header:"x-trace-id"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		dst := request{TraceID: "existing"}
+		if err := BindHeaders(req, &dst); err != nil {
+			t.Fatalf("BindHeaders() error = %v", err)
+		}
+		if dst.TraceID != "existing" {
+			t.Fatalf("trace_id = %q, want existing", dst.TraceID)
+		}
+	})
+}
+
+func TestBindValues_HelperBranches(t *testing.T) {
 	if got := badRequestWrap(nil); got != nil {
 		t.Fatalf("badRequestWrap(nil) = %v, want nil", got)
 	}
@@ -166,34 +314,6 @@ func TestBodyHelperBranches(t *testing.T) {
 
 	wrapped := badRequestWrap(errors.New("boom"))
 	_ = assertHTTPError(t, wrapped, http.StatusBadRequest, "bad_request", "Bad Request")
-
-	data, err := readBody(io.NopCloser(strings.NewReader("ok")), 0)
-	if err != nil || string(data) != "ok" {
-		t.Fatalf("readBody(default max) = (%q, %v), want (ok, nil)", data, err)
-	}
-	if data, err := readBody(nil, 10); err != nil || data != nil {
-		t.Fatalf("readBody(nil) = (%v, %v), want (nil, nil)", data, err)
-	}
-
-	wantErr := errors.New("read failed")
-	if _, err := readBody(failingReadCloser{err: wantErr}, 10); !errors.Is(err, wantErr) {
-		t.Fatalf("readBody(failing) error = %v, want %v", err, wantErr)
-	}
-
-	if err := bindBodyDefault(nil, &payload{}, defaultBindConfig().body); err == nil || err.Error() != "bind: request must not be nil" {
-		t.Fatalf("bindBodyDefault(nil) error = %v", err)
-	}
-	if err := bindBodyDefault(req, payload{}, defaultBindConfig().body); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("bindBodyDefault(non-pointer) error = %v", err)
-	}
-
-	readErrReq := httptest.NewRequest(http.MethodPost, "/", nil)
-	readErrReq.ContentLength = 1
-	readErrReq.Header.Set("Content-Type", mimeApplicationJSON)
-	readErrReq.Body = failingReadCloser{err: wantErr}
-	if err := bindBodyDefault(readErrReq, &payload{}, defaultBindConfig().body); !errors.Is(err, wantErr) {
-		t.Fatalf("bindBodyDefault(read error) = %v, want %v", err, wantErr)
-	}
 }
 
 func TestBindDataDefaultBranches(t *testing.T) {
