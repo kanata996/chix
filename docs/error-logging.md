@@ -37,7 +37,7 @@
 
 未命中提前返回时，执行顺序为：
 
-1. `ToHTTPError(err)` 或默认 `asHTTPError(err)`
+1. `AsHTTPError(err)` 或默认 `asHTTPError(err)`
 2. `AnnotateRequestLog(r, RequestLogAttrs(err, httpErr))`
 3. `logServerError(r, httpErr, err)`
 4. `writeHTTPError(w, r, httpErr)`

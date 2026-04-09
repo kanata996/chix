@@ -52,14 +52,14 @@ func TestNewErrorResponderAndOverrides(t *testing.T) {
 
 	cause := errors.New("boom")
 	customHTTPError := errx.BadRequest("bad_request", "bad request")
-	responder.ToHTTPError = func(err error) *errx.HTTPError {
+	responder.AsHTTPError = func(err error) *errx.HTTPError {
 		if !errors.Is(err, cause) {
-			t.Fatalf("ToHTTPError() err = %v, want %v", err, cause)
+			t.Fatalf("AsHTTPError() err = %v, want %v", err, cause)
 		}
 		return customHTTPError
 	}
-	if got := responder.toHTTPError(cause); got != customHTTPError {
-		t.Fatalf("toHTTPError() = %p, want %p", got, customHTTPError)
+	if got := responder.httpError(cause); got != customHTTPError {
+		t.Fatalf("httpError() = %p, want %p", got, customHTTPError)
 	}
 
 	customAttrs := []slog.Attr{slog.String("service", "resp")}

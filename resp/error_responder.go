@@ -14,12 +14,12 @@ import (
 //
 // The zero value is usable and keeps resp on a pure net/http baseline:
 //   - Logger falls back to slog.Default()
-//   - ToHTTPError falls back to resp's default normalization
+//   - AsHTTPError falls back to resp's default normalization
 //   - ContextAttrs / AnnotateRequestLog are no-ops
 //   - RequestLogAttrs falls back to resp's default low-noise 5xx attrs
 type ErrorResponder struct {
 	Logger             *slog.Logger
-	ToHTTPError        func(error) *errx.HTTPError
+	AsHTTPError        func(error) *errx.HTTPError
 	ContextAttrs       func(context.Context) []slog.Attr
 	AnnotateRequestLog func(*http.Request, []slog.Attr)
 	RequestLogAttrs    func(error, *errx.HTTPError) []slog.Attr
@@ -38,7 +38,7 @@ func (r *ErrorResponder) Respond(w http.ResponseWriter, req *http.Request, err e
 		return nil
 	}
 
-	httpErr := r.toHTTPError(err)
+	httpErr := r.httpError(err)
 
 	var responseStartedErr *responseWriteError
 	if errors.As(err, &responseStartedErr) && responseStartedErr != nil && responseStartedErr.responseStarted {
@@ -64,9 +64,9 @@ func (r *ErrorResponder) logger() *slog.Logger {
 	return slog.Default()
 }
 
-func (r *ErrorResponder) toHTTPError(err error) *errx.HTTPError {
-	if r != nil && r.ToHTTPError != nil {
-		return r.ToHTTPError(err)
+func (r *ErrorResponder) httpError(err error) *errx.HTTPError {
+	if r != nil && r.AsHTTPError != nil {
+		return r.AsHTTPError(err)
 	}
 	return asHTTPError(err)
 }
