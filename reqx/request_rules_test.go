@@ -112,3 +112,44 @@ func TestBindAndValidate_RequestValidatorCanRequireBodyForMixedSourceRoute(t *te
 		t.Fatalf("org_id = %q, want org_1", dst.OrgID)
 	}
 }
+
+type requestRuleSkippedOnBindFailureRequest struct {
+	ID     string    `param:"id" validate:"required"`
+	Cursor string    `query:"cursor" validate:"required"`
+	Name   string    `json:"name" validate:"required"`
+	events *[]string `json:"-"`
+}
+
+func (r *requestRuleSkippedOnBindFailureRequest) Normalize() {
+	*r.events = append(*r.events, "normalize")
+}
+
+func (r *requestRuleSkippedOnBindFailureRequest) ValidateRequest(*http.Request) error {
+	*r.events = append(*r.events, "request")
+	return nil
+}
+
+func TestBindAndValidate_BindFailureSkipsPostBindHooksButKeepsEarlierWrites(t *testing.T) {
+	var events []string
+	dst := requestRuleSkippedOnBindFailureRequest{events: &events}
+
+	req := requestWithPathParams(map[string][]string{
+		"id": {"route-id"},
+	})
+	req.Method = http.MethodGet
+	req.URL.RawQuery = "cursor=abc"
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = io.NopCloser(strings.NewReader(`{"name":`))
+	req.ContentLength = int64(len(`{"name":`))
+
+	err := BindAndValidate(req, &dst)
+	if err == nil {
+		t.Fatal("BindAndValidate(bind error) = nil")
+	}
+	if !reflect.DeepEqual(events, []string(nil)) {
+		t.Fatalf("events = %#v, want no post-bind hooks", events)
+	}
+	if dst.ID != "route-id" || dst.Cursor != "abc" || dst.Name != "" {
+		t.Fatalf("dst = %#v, want earlier bind writes preserved before body failure", dst)
+	}
+}
