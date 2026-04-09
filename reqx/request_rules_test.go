@@ -12,6 +12,7 @@ import (
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
 // - [✓] `RequireBody` 会沿用默认 binder 的 empty-body 判定并返回统一 invalid_request。
+// - [✓] `InvalidRequest` 与 `applyRequestValidation` 会维持请求级规则 helper 的稳定契约。
 // - [✓] `BindAndValidate*` 会在字段校验之前执行请求级规则，并允许规则读取 Normalize 后的 DTO。
 // - [✓] mixed-source DTO 可通过 `ValidateRequest` 为可选字段 body 显式声明 body-required 契约。
 
@@ -64,6 +65,25 @@ func TestRequireBody(t *testing.T) {
 	violation := assertSingleViolation(t, RequireBody(emptyReq))
 	if violation.Field != "body" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
+	}
+}
+
+func TestRequireBodyNilRequest(t *testing.T) {
+	if err := RequireBody(nil); err == nil || err.Error() != "reqx: request must not be nil" {
+		t.Fatalf("RequireBody(nil) error = %v", err)
+	}
+}
+
+func TestInvalidRequest_UsesViolationEnvelope(t *testing.T) {
+	violation := assertSingleViolation(t, InvalidRequest(Violation{Field: "name"}))
+	if violation.Field != "name" || violation.Code != ViolationCodeInvalid || violation.Detail != "is invalid" {
+		t.Fatalf("violation = %#v", violation)
+	}
+}
+
+func TestApplyRequestValidationNoValidator(t *testing.T) {
+	if err := applyRequestValidation(newJSONRequest(http.MethodGet, "/", ""), struct{}{}); err != nil {
+		t.Fatalf("applyRequestValidation(no validator) error = %v", err)
 	}
 }
 
