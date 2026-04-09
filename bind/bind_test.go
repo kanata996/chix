@@ -1,5 +1,12 @@
 package bind
 
+// 测试清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
+// - [✓] 公开 Bind* 入口在 nil request 或 nil destination 下返回稳定错误。
+// - [✓] DefaultBinder、默认配置和 Bind 编排辅助维持稳定内部契约。
+// - [✓] Bind 的默认顺序、方法规则和 header 排除语义。
+// - [✓] Bind 在 empty body no-op 和阶段失败时保留前序已写入值。
+
 import (
 	"net/http"
 	"net/http/httptest"

@@ -1,5 +1,12 @@
 package bind
 
+// 测试清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
+// - [✓] BindPathValues、BindQueryParams、BindHeaders 的公开成功、失败和保留语义。
+// - [✓] 单源公开 API 支持约定的 map 目标语义。
+// - [✓] path/query/header 相关错误统一收敛为 400 bad_request。
+// - [✓] 字符串源绑定的关键内部辅助契约，包括反射写入、自定义解码、multipart 和 path helper。
+
 import (
 	"errors"
 	"fmt"
@@ -152,6 +159,80 @@ func TestBindQueryParams_BindsSupportedTypes(t *testing.T) {
 	if len(dst.IDs) != 2 || dst.IDs[0] != 1 || dst.IDs[1] != 2 {
 		t.Fatalf("ids = %#v, want [1 2]", dst.IDs)
 	}
+}
+
+func TestBindSingleSourceAPIs_BindMapTargets(t *testing.T) {
+	t.Run("query binds supported map targets", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/?name=kanata&tag=a&tag=b", nil)
+
+		stringMap := map[string]string(nil)
+		if err := BindQueryParams(req, &stringMap); err != nil {
+			t.Fatalf("BindQueryParams(map[string]string) error = %v", err)
+		}
+		if got := stringMap["name"]; got != "kanata" {
+			t.Fatalf("stringMap[name] = %q, want kanata", got)
+		}
+		if got := stringMap["tag"]; got != "a" {
+			t.Fatalf("stringMap[tag] = %q, want first value a", got)
+		}
+
+		sliceMap := map[string][]string(nil)
+		if err := BindQueryParams(req, &sliceMap); err != nil {
+			t.Fatalf("BindQueryParams(map[string][]string) error = %v", err)
+		}
+		if !reflect.DeepEqual(sliceMap["tag"], []string{"a", "b"}) {
+			t.Fatalf("sliceMap[tag] = %#v, want [a b]", sliceMap["tag"])
+		}
+
+		anyMap := map[string]any(nil)
+		if err := BindQueryParams(req, &anyMap); err != nil {
+			t.Fatalf("BindQueryParams(map[string]any) error = %v", err)
+		}
+		if got := anyMap["name"]; got != "kanata" {
+			t.Fatalf("anyMap[name] = %#v, want kanata", got)
+		}
+	})
+
+	t.Run("path binds supported map targets", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{
+			"id":   {"42"},
+			"name": {"kanata"},
+		})
+
+		stringMap := map[string]string(nil)
+		if err := BindPathValues(req, &stringMap); err != nil {
+			t.Fatalf("BindPathValues(map[string]string) error = %v", err)
+		}
+		if got := stringMap["id"]; got != "42" {
+			t.Fatalf("stringMap[id] = %q, want 42", got)
+		}
+		if got := stringMap["name"]; got != "kanata" {
+			t.Fatalf("stringMap[name] = %q, want kanata", got)
+		}
+	})
+
+	t.Run("header binds supported map targets", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Add("X-Trace-Id", "req-1")
+		req.Header.Add("X-Trace-Id", "req-2")
+		req.Header.Set("X-Name", "kanata")
+
+		sliceMap := map[string][]string(nil)
+		if err := BindHeaders(req, &sliceMap); err != nil {
+			t.Fatalf("BindHeaders(map[string][]string) error = %v", err)
+		}
+		if !reflect.DeepEqual(sliceMap["X-Trace-Id"], []string{"req-1", "req-2"}) {
+			t.Fatalf("sliceMap[X-Trace-Id] = %#v, want [req-1 req-2]", sliceMap["X-Trace-Id"])
+		}
+
+		anyMap := map[string]any(nil)
+		if err := BindHeaders(req, &anyMap); err != nil {
+			t.Fatalf("BindHeaders(map[string]any) error = %v", err)
+		}
+		if got := anyMap["X-Name"]; got != "kanata" {
+			t.Fatalf("anyMap[X-Name] = %#v, want kanata", got)
+		}
+	})
 }
 
 func TestBindQueryParams_MissingParamsPreserveExistingValues(t *testing.T) {

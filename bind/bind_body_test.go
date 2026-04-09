@@ -1,5 +1,12 @@
 package bind
 
+// 测试清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
+// - [✓] BindBody 的 Content-Type、空 body、未知字段与非法 JSON 契约。
+// - [✓] BindBody 支持标准 decoder 目标，包括 struct、slice、map。
+// - [✓] BindBody 在 body 过大时返回稳定的 413 契约，并保留已有值。
+// - [✓] body 相关内部辅助维持稳定契约，包括 media type、读 body 和错误映射。
+
 import (
 	"bytes"
 	"encoding/json"
@@ -215,6 +222,37 @@ func TestBindBody_JSONContract(t *testing.T) {
 		req := newJSONRequest(http.MethodPost, "/", `{"age":"oops"}`)
 		dst := request{Age: 7}
 		_ = assertHTTPError(t, BindBody(req, &dst), http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+	})
+
+	t.Run("unknown fields are accepted by default", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata","extra":1}`)
+
+		var dst request
+		if err := BindBody(req, &dst); err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if dst.Name != "kanata" {
+			t.Fatalf("name = %q, want kanata", dst.Name)
+		}
+	})
+
+	t.Run("object binds to map target", func(t *testing.T) {
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata","age":17}`)
+
+		var dst map[string]any
+		if err := BindBody(req, &dst); err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if got := dst["name"]; got != "kanata" {
+			t.Fatalf("name = %#v, want kanata", got)
+		}
+		if got := dst["age"]; got != float64(17) {
+			t.Fatalf("age = %#v, want 17", got)
+		}
 	})
 }
 
