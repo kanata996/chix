@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/traceid"
 	"github.com/kanata996/chix"
 	chixmw "github.com/kanata996/chix/middleware"
+	hah "github.com/kanata996/hah"
 	"github.com/kanata996/hah/errx"
 )
 
@@ -118,12 +119,12 @@ func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) 
 			_ = chix.WriteError(w, r, errx.NewHTTPError(http.StatusServiceUnavailable, "", "server is shutting down"))
 			return
 		}
-		_ = chix.NoContent(w, r)
+		_ = hah.NoContent(w, r)
 	})
 
 	r.Post("/orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
 		var req createAccountRequest
-		if err := chix.BindAndValidate(r, &req); err != nil {
+		if err := hah.BindAndValidate(r, &req); err != nil {
 			_ = chix.WriteError(w, r, err)
 			return
 		}
@@ -134,7 +135,7 @@ func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) 
 			return
 		}
 
-		_ = chix.Created(w, r, acct)
+		_ = hah.Created(w, r, acct)
 	})
 
 	r.Get("/orgs/{org_id}/accounts/{account_id}", func(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +148,7 @@ func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) 
 			return
 		}
 
-		_ = chix.OK(w, r, acct)
+		_ = hah.OK(w, r, acct)
 	})
 
 	return r

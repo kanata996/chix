@@ -14,10 +14,10 @@
 
 ### Changed
 
-- `chix` 当前版本聚焦根包请求/响应入口和 `middleware` 中的 chi 日志封装。
-- `chix.WriteError(...)`、`chix.Bind*`、`chix.BindAndValidate*`、`chix.JSON*` 等根包 API 建立在 `hah` 提供的 `net/http` 核心能力之上。
+- `chix` 根包当前只保留 `chi` 侧错误响应预设：`WriteError`、`ErrorResponder`、`NewErrorResponder`。
+- 请求绑定、输入校验、成功响应和共享错误模型统一从 `hah` 暴露。
 - `middleware` 提供与 `chi + httplog + traceid` 配套的 error responder preset 和 request log attrs 能力。
-- 文档和示例中的共享错误模型入口统一为 `github.com/kanata996/hah/errx`。
+- 文档和示例已调整为 `hah` 处理 binding / response，`chix` 处理 chi 侧扩展。
 
 ### Docs
 

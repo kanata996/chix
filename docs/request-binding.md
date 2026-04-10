@@ -1,12 +1,12 @@
 # Request Binding
 
-本文档描述 `chix` 当前公开的请求绑定契约。
+本文档描述 `chix + hah` 组合下的请求绑定契约。
 
-`chix` 的请求绑定、请求级规则和字段校验能力建立在 [`hah`](https://github.com/kanata996/hah) 提供的 `net/http` 核心之上。
+请求绑定、请求级规则和字段校验由 [`hah`](https://github.com/kanata996/hah) 提供；`chix` 自身不再导出 `Bind*` / `BindAndValidate*`。
 
 ## 入口选择
 
-- 大多数 `chi` handler：直接使用根包 `chix`
+- 大多数 `chi` handler：使用 `hah` 处理 binding / validate，再用 `chix.WriteError(...)` 处理错误输出
 - 只做纯 `net/http` binding：使用 `hah` 或 `hah/bind`
 - 需要更细粒度地组织请求边界能力：使用 `hah` 对应子包
 
