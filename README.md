@@ -4,14 +4,14 @@
 [![CI](https://github.com/kanata996/chix/workflows/CI/badge.svg)](https://github.com/kanata996/chix/actions/workflows/ci.yml)
 [![Codecov](https://codecov.io/github/kanata996/chix/graph/badge.svg)](https://codecov.io/github/kanata996/chix)
 
-`chix` 是一个面向 `chi` 的 JSON API 扩展包。
+`chix` 是一个面向 `chi` 的 JSON API 配套包。
 
-当前版本聚焦两类能力：
+它只做两件事：
 
-- 根包 `github.com/kanata996/chix` 提供面向 `chi + httplog + traceid` 的错误响应预设
-- `github.com/kanata996/chix/middleware` 提供与 `chi + httplog + traceid` 配套的 request log / error log 封装
+- 根包 `github.com/kanata996/chix` 提供面向 `chi + httplog + traceid` 的错误响应预设，以及成功响应直通入口
+- `github.com/kanata996/chix/middleware` 提供与 `chi + httplog + traceid` 配套的 request log 关联字段中间件
 
-请求绑定、输入校验、成功响应写回和共享错误模型由 [`hah`](https://github.com/kanata996/hah) 提供。
+`chix` 不负责请求绑定、输入校验和共享错误模型；这些能力由 [`hah`](https://github.com/kanata996/hah) 提供。`chix` 根包里的成功响应入口只是对 `hah` 的直通封装，用来让 handler 统一使用 `chix.*` 风格写响应。
 
 ## 状态
 
@@ -59,7 +59,7 @@ func main() {
 			return
 		}
 
-		_ = hah.Created(w, r, map[string]any{
+		_ = chix.Created(w, r, map[string]any{
 			"id":     "acct_123",
 			"org_id": req.OrgID,
 			"name":   req.Name,
@@ -70,22 +70,39 @@ func main() {
 }
 ```
 
-## 根包 API
+上面是最小使用方式：
 
-根包当前只公开 `chi` 侧扩展：
+- `hah.BindAndValidate(...)` 负责请求绑定和输入校验
+- `chix.WriteError(...)` 负责统一错误响应
+- `chix.Created(...)` / `chix.OK(...)` 等负责成功响应
+
+如果你还需要 access log 里的 `traceId` / `request.id` 关联字段，推荐把 `chi` 链路配置成：
+
+1. `chi/middleware.RequestID`
+2. `traceid.Middleware`
+3. `httplog.RequestLogger(...)`
+4. `middleware.RequestLogAttrs()`
+5. handler 中使用 `chix.WriteError(...)`
+
+## 公开 API
+
+根包 `github.com/kanata996/chix` 当前公开两类能力：
 
 - `WriteError`
 - `ErrorResponder`
 - `NewErrorResponder`
+- `JSON` / `JSONBlob` / `OK` / `Created` / `NoContent`
 
-请求绑定、输入校验和成功响应请直接使用 `hah` 根包：
+子包 `github.com/kanata996/chix/middleware` 当前公开：
+
+- `RequestLogAttrs`
+
+请求绑定、输入校验和共享错误模型请直接使用 `hah`：
 
 - `hah.Bind*`
 - `hah.BindAndValidate*`
 - `hah.RequireBody`
-- `hah.JSON` / `hah.JSONBlob` / `hah.OK` / `hah.Created` / `hah.NoContent`
-
-更完整说明见 [docs/request-binding.md](./docs/request-binding.md)。
+- `hah/errx`
 
 ## 错误与日志
 
@@ -95,7 +112,9 @@ func main() {
 - 5xx 时输出独立 error log
 - 独立 error log 会补 `traceId`
 
-如果你需要 access log 同时带上 `traceId`、`request.id`，应显式挂载 `middleware.RequestLogAttrs()`。
+`middleware.RequestLogAttrs()` 只负责把关联字段补到当前 `httplog` request log；它不会替你创建 logger，也不负责独立 error log。
+
+如果你需要 access log 同时带上 `traceId`、`request.id`，应显式挂载 `middleware.RequestLogAttrs()`，并确保前面已经挂了 `RequestID`、`traceid.Middleware`、`httplog.RequestLogger(...)`。
 
 更完整说明见 [docs/error-logging.md](./docs/error-logging.md)。
 
@@ -122,7 +141,7 @@ import "github.com/kanata996/hah/errx"
 
 ## 什么时候用哪个包
 
-- `chix`：想要 `chi` 场景下的错误响应和日志预设
-- `hah`：处理请求绑定、输入校验、成功响应和纯 `net/http` 错误模型
-- `hah/errx`：想显式构造和传递公共 HTTP 错误
-- `middleware`：想给 request log 增加关联字段
+- `chix`：想要 `chi` 场景下的错误响应预设，或希望 handler 统一用 `chix.*` 写成功/错误响应
+- `middleware`：想把 `traceId`、`request.id` 这类关联字段补进当前 `httplog` request log
+- `hah`：处理请求绑定、输入校验、纯 `net/http` 错误模型，以及 `chix` 成功响应直通入口背后的底层实现
+- `hah/errx`：想显式构造并跨层传递公共 HTTP 错误
