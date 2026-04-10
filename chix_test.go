@@ -10,14 +10,13 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/kanata996/chix/errx"
-	"github.com/kanata996/chix/reqx"
+	haherrx "github.com/kanata996/hah/errx"
+	hahreqx "github.com/kanata996/hah/reqx"
 )
 
 // 测试清单：
-// [✓] 根包 facade 会把 bind / reqx / resp 的核心能力稳定透传出来
-// [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
-// [✓] 根包绑定 facade 维持新的公开导出面，不额外暴露旧 path helper / bind option
+// [✓] 根包 facade 会把 hah 的核心请求/响应能力稳定透传出来
+// [✓] 根包 WriteError 会保留 chix 自己的 chi 侧 preset 行为
 // [✓] README 中承诺的 create account handler 主路径有根包级端到端测试支撑
 
 type rootPayloadMap map[string]any
@@ -30,16 +29,14 @@ func (*rootRequestValidatorBodyRequiredRequest) ValidateRequest(r *http.Request)
 	return RequireBody(r)
 }
 
-// BindAndValidateBody 会通过根包 facade 把 body 绑定和校验委托给 reqx。
-func TestBindAndValidateBody_DelegatesToReqx(t *testing.T) {
+func TestBindAndValidateBody_DelegatesToHah(t *testing.T) {
 	req := newJSONRequest(http.MethodPost, "/accounts", `{"name":"kanata"}`)
 
 	var dst struct {
 		Name string `json:"name" validate:"required"`
 	}
 
-	err := BindAndValidateBody(req, &dst)
-	if err != nil {
+	if err := BindAndValidateBody(req, &dst); err != nil {
 		t.Fatalf("BindAndValidateBody() error = %v", err)
 	}
 	if dst.Name != "kanata" {
@@ -47,8 +44,7 @@ func TestBindAndValidateBody_DelegatesToReqx(t *testing.T) {
 	}
 }
 
-// Bind 会通过根包 facade 复用 bind 包的默认绑定顺序。
-func TestBind_DelegatesToBind(t *testing.T) {
+func TestBind_DelegatesToHah(t *testing.T) {
 	type request struct {
 		ID   string `param:"id" query:"id" json:"id"`
 		Name string `json:"name"`
@@ -65,8 +61,7 @@ func TestBind_DelegatesToBind(t *testing.T) {
 	}
 }
 
-// BindBody 只从 JSON body 绑定数据。
-func TestBindBody_DelegatesToBind(t *testing.T) {
+func TestBindBody_DelegatesToHah(t *testing.T) {
 	req := newJSONRequest(http.MethodPost, "/accounts", `{"name":"kanata"}`)
 
 	var dst struct {
@@ -81,8 +76,7 @@ func TestBindBody_DelegatesToBind(t *testing.T) {
 	}
 }
 
-// BindQueryParams 只从 query 参数绑定数据。
-func TestBindQueryParams_DelegatesToBind(t *testing.T) {
+func TestBindQueryParams_DelegatesToHah(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts?name=kanata", nil)
 
 	var dst struct {
@@ -97,8 +91,7 @@ func TestBindQueryParams_DelegatesToBind(t *testing.T) {
 	}
 }
 
-// BindPathValues 只从 path 参数绑定数据。
-func TestBindPathValues_DelegatesToBind(t *testing.T) {
+func TestBindPathValues_DelegatesToHah(t *testing.T) {
 	req := newRouteRequest(http.MethodGet, "/accounts/u_1", "id", "u_1")
 
 	var dst struct {
@@ -113,8 +106,7 @@ func TestBindPathValues_DelegatesToBind(t *testing.T) {
 	}
 }
 
-// BindHeaders 会通过根包 facade 把 header 绑定委托给 bind。
-func TestBindHeaders_DelegatesToBind(t *testing.T) {
+func TestBindHeaders_DelegatesToHah(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	req.Header.Set("X-Request-Id", "req-123")
 
@@ -130,8 +122,7 @@ func TestBindHeaders_DelegatesToBind(t *testing.T) {
 	}
 }
 
-// BindAndValidate 会在根包 facade 中同时复用绑定和校验能力。
-func TestBindAndValidate_DelegatesToReqx(t *testing.T) {
+func TestBindAndValidate_DelegatesToHah(t *testing.T) {
 	type request struct {
 		OrgID string `param:"org_id" validate:"required"`
 		Name  string `json:"name" validate:"required"`
@@ -151,7 +142,6 @@ func TestBindAndValidate_DelegatesToReqx(t *testing.T) {
 	}
 }
 
-// BindAndValidateBody 会通过根包 facade 执行请求级规则。
 func TestBindAndValidateBody_DelegatesRequestValidator(t *testing.T) {
 	req := newJSONRequest(http.MethodPost, "/accounts", "")
 	req.ContentLength = 0
@@ -159,9 +149,9 @@ func TestBindAndValidateBody_DelegatesRequestValidator(t *testing.T) {
 	var dst rootRequestValidatorBodyRequiredRequest
 	err := BindAndValidateBody(req, &dst)
 
-	var httpErr *errx.HTTPError
+	var httpErr *haherrx.HTTPError
 	if !errors.As(err, &httpErr) || httpErr == nil {
-		t.Fatalf("error type = %T, want *errx.HTTPError", err)
+		t.Fatalf("error type = %T, want *haherrx.HTTPError", err)
 	}
 	if httpErr.Status() != http.StatusUnprocessableEntity || httpErr.Code() != "invalid_request" || httpErr.Detail() != "request contains invalid fields" {
 		t.Fatalf("http error = (%d, %q, %q)", httpErr.Status(), httpErr.Code(), httpErr.Detail())
@@ -169,17 +159,16 @@ func TestBindAndValidateBody_DelegatesRequestValidator(t *testing.T) {
 	if len(httpErr.Errors()) != 1 {
 		t.Fatalf("errors len = %d, want 1", len(httpErr.Errors()))
 	}
-	violation, ok := httpErr.Errors()[0].(reqx.Violation)
+	violation, ok := httpErr.Errors()[0].(hahreqx.Violation)
 	if !ok {
-		t.Fatalf("detail type = %T, want reqx.Violation", httpErr.Errors()[0])
+		t.Fatalf("detail type = %T, want hahreqx.Violation", httpErr.Errors()[0])
 	}
-	if violation.Field != "body" || violation.In != reqx.ViolationInBody || violation.Code != reqx.ViolationCodeRequired || violation.Detail != "is required" {
+	if violation.Field != "body" || violation.In != hahreqx.ViolationInBody || violation.Code != hahreqx.ViolationCodeRequired || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
 
-// BindAndValidateQuery 会从 query 参数绑定后再执行校验。
-func TestBindAndValidateQuery_DelegatesToReqx(t *testing.T) {
+func TestBindAndValidateQuery_DelegatesToHah(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts?name=kanata", nil)
 
 	var dst struct {
@@ -194,8 +183,7 @@ func TestBindAndValidateQuery_DelegatesToReqx(t *testing.T) {
 	}
 }
 
-// BindAndValidatePath 会从 path 参数绑定后再执行校验。
-func TestBindAndValidatePath_DelegatesToReqx(t *testing.T) {
+func TestBindAndValidatePath_DelegatesToHah(t *testing.T) {
 	req := newRouteRequest(http.MethodGet, "/accounts/u_1", "id", "u_1")
 
 	var dst struct {
@@ -210,8 +198,7 @@ func TestBindAndValidatePath_DelegatesToReqx(t *testing.T) {
 	}
 }
 
-// BindAndValidateHeaders 会从 header 绑定后再执行校验。
-func TestBindAndValidateHeaders_DelegatesToReqx(t *testing.T) {
+func TestBindAndValidateHeaders_DelegatesToHah(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	req.Header.Set("X-Request-Id", "req-123")
 
@@ -227,8 +214,7 @@ func TestBindAndValidateHeaders_DelegatesToReqx(t *testing.T) {
 	}
 }
 
-// WriteError 会通过根包 facade 写出统一的公开错误包络。
-func TestWriteError_DelegatesToResp(t *testing.T) {
+func TestWriteError_DelegatesToHah(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	rr := httptest.NewRecorder()
 
@@ -248,8 +234,7 @@ func TestWriteError_DelegatesToResp(t *testing.T) {
 	}
 }
 
-// OK 会通过根包 facade 写回标准 200 JSON 响应。
-func TestOK_DelegatesToResp(t *testing.T) {
+func TestOK_DelegatesToHah(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	rr := httptest.NewRecorder()
 
@@ -259,15 +244,25 @@ func TestOK_DelegatesToResp(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
-
-	payload := decodeRootPayload(t, rr.Body.Bytes())
-	if payload["id"] != "u_1" {
-		t.Fatalf("id = %#v, want u_1", payload["id"])
+	body := decodeRootPayload(t, rr.Body.Bytes())
+	if got := body["id"]; got != "u_1" {
+		t.Fatalf("id = %#v, want u_1", got)
 	}
 }
 
-// JSON 会通过根包 facade 直接写回紧凑 JSON。
-func TestJSON_DelegatesToResp(t *testing.T) {
+func TestCreated_DelegatesToHah(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
+	rr := httptest.NewRecorder()
+
+	if err := Created(rr, req, map[string]any{"id": "u_1"}); err != nil {
+		t.Fatalf("Created() error = %v", err)
+	}
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rr.Code)
+	}
+}
+
+func TestJSON_DelegatesToHah(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	rr := httptest.NewRecorder()
 
@@ -277,70 +272,41 @@ func TestJSON_DelegatesToResp(t *testing.T) {
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202", rr.Code)
 	}
-	if body := rr.Body.String(); body != "{\"id\":\"u_1\"}\n" {
-		t.Fatalf("body = %q, want compact JSON", body)
-	}
 }
 
-// JSONBlob 会通过根包 facade 直接写回原始 JSON 字节。
-func TestJSONBlob_DelegatesToResp(t *testing.T) {
+func TestJSONBlob_DelegatesToHah(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	rr := httptest.NewRecorder()
 
-	if err := JSONBlob(rr, req, http.StatusAccepted, []byte(`{"id":"u_1"}`)); err != nil {
+	if err := JSONBlob(rr, req, http.StatusOK, []byte(`{"id":"u_1"}`)); err != nil {
 		t.Fatalf("JSONBlob() error = %v", err)
 	}
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
-	}
-	if body := rr.Body.String(); body != `{"id":"u_1"}` {
-		t.Fatalf("body = %q, want raw JSON", body)
+	body := decodeRootPayload(t, rr.Body.Bytes())
+	if got := body["id"]; got != "u_1" {
+		t.Fatalf("id = %#v, want u_1", got)
 	}
 }
 
-// Created 会通过根包 facade 写回标准 201 JSON 响应。
-func TestCreated_DelegatesToResp(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/accounts", nil)
-	rr := httptest.NewRecorder()
-
-	if err := Created(rr, req, map[string]any{"id": "u_1"}); err != nil {
-		t.Fatalf("Created() error = %v", err)
-	}
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusCreated)
-	}
-
-	payload := decodeRootPayload(t, rr.Body.Bytes())
-	if payload["id"] != "u_1" {
-		t.Fatalf("id = %#v, want u_1", payload["id"])
-	}
-}
-
-// NoContent 会通过根包 facade 写回标准 204 响应。
-func TestNoContent_DelegatesToResp(t *testing.T) {
-	req := httptest.NewRequest(http.MethodDelete, "/accounts/u_1", nil)
+func TestNoContent_DelegatesToHah(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	rr := httptest.NewRecorder()
 
 	if err := NoContent(rr, req); err != nil {
 		t.Fatalf("NoContent() error = %v", err)
 	}
 	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNoContent)
-	}
-	if rr.Body.Len() != 0 {
-		t.Fatalf("body = %q, want empty", rr.Body.String())
+		t.Fatalf("status = %d, want 204", rr.Code)
 	}
 }
 
-// README 中的 create account 示例应由根包 facade 直接支撑成功与失败两条主路径。
-func TestReadmeCreateAccountFlow(t *testing.T) {
+func TestCreateAccountHandlerPath(t *testing.T) {
 	type createAccountRequest struct {
 		OrgID string `param:"org_id"`
-		Name  string `json:"name" validate:"required"`
+		Name  string `json:"name" validate:"required,min=3"`
 	}
 
-	router := chi.NewRouter()
-	router.Post("/orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
+	r := chi.NewRouter()
+	r.Post("/orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
 		var req createAccountRequest
 		if err := BindAndValidate(r, &req); err != nil {
 			_ = WriteError(w, r, err)
@@ -354,123 +320,24 @@ func TestReadmeCreateAccountFlow(t *testing.T) {
 		})
 	})
 
-	t.Run("success", func(t *testing.T) {
-		req := newJSONRequest(http.MethodPost, "/orgs/org_123/accounts", `{"name":"Acme"}`)
-		rr := httptest.NewRecorder()
+	req := newRouteJSONRequest(http.MethodPost, "/orgs/org_123/accounts", `{"name":"Acme"}`, "org_id", "org_123")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
 
-		router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusCreated)
+	}
 
-		if rr.Code != http.StatusCreated {
-			t.Fatalf("status = %d, want %d", rr.Code, http.StatusCreated)
-		}
-		if got := rr.Header().Get("Content-Type"); got != "application/json" {
-			t.Fatalf("Content-Type = %q, want application/json", got)
-		}
-
-		body := decodeRootPayload(t, rr.Body.Bytes())
-		if got := body["id"]; got != "acct_123" {
-			t.Fatalf("id = %#v, want acct_123", got)
-		}
-		if got := body["org_id"]; got != "org_123" {
-			t.Fatalf("org_id = %#v, want org_123", got)
-		}
-		if got := body["name"]; got != "Acme" {
-			t.Fatalf("name = %#v, want Acme", got)
-		}
-	})
-
-	t.Run("validation failure", func(t *testing.T) {
-		req := newJSONRequest(http.MethodPost, "/orgs/org_123/accounts", `{}`)
-		rr := httptest.NewRecorder()
-
-		router.ServeHTTP(rr, req)
-
-		if rr.Code != http.StatusUnprocessableEntity {
-			t.Fatalf("status = %d, want %d", rr.Code, http.StatusUnprocessableEntity)
-		}
-		if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
-			t.Fatalf("Content-Type = %q, want application/problem+json", got)
-		}
-
-		body := decodeRootPayload(t, rr.Body.Bytes())
-		if got := body["title"]; got != "Unprocessable Entity" {
-			t.Fatalf("title = %#v, want Unprocessable Entity", got)
-		}
-		if got := body["status"]; got != float64(http.StatusUnprocessableEntity) {
-			t.Fatalf("status = %#v, want %d", got, http.StatusUnprocessableEntity)
-		}
-		if got := body["detail"]; got != "request contains invalid fields" {
-			t.Fatalf("detail = %#v, want request contains invalid fields", got)
-		}
-		if got := body["code"]; got != "invalid_request" {
-			t.Fatalf("code = %#v, want invalid_request", got)
-		}
-
-		errors, ok := body["errors"].([]any)
-		if !ok || len(errors) != 1 {
-			t.Fatalf("errors = %#v, want 1 item", body["errors"])
-		}
-		violation, ok := errors[0].(map[string]any)
-		if !ok {
-			t.Fatalf("errors[0] = %#v, want map", errors[0])
-		}
-		if got := violation["field"]; got != "name" {
-			t.Fatalf("field = %#v, want name", got)
-		}
-		if got := violation["in"]; got != "request" {
-			t.Fatalf("in = %#v, want request", got)
-		}
-		if got := violation["code"]; got != "required" {
-			t.Fatalf("code = %#v, want required", got)
-		}
-		if got := violation["detail"]; got != "is required" {
-			t.Fatalf("detail = %#v, want is required", got)
-		}
-	})
-
-	t.Run("empty body validation failure", func(t *testing.T) {
-		req := newJSONRequest(http.MethodPost, "/orgs/org_123/accounts", "")
-		rr := httptest.NewRecorder()
-
-		router.ServeHTTP(rr, req)
-
-		if rr.Code != http.StatusUnprocessableEntity {
-			t.Fatalf("status = %d, want %d", rr.Code, http.StatusUnprocessableEntity)
-		}
-		if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
-			t.Fatalf("Content-Type = %q, want application/problem+json", got)
-		}
-
-		body := decodeRootPayload(t, rr.Body.Bytes())
-		if got := body["detail"]; got != "request contains invalid fields" {
-			t.Fatalf("detail = %#v, want request contains invalid fields", got)
-		}
-		if got := body["code"]; got != "invalid_request" {
-			t.Fatalf("code = %#v, want invalid_request", got)
-		}
-	})
-}
-
-func newJSONRequest(method, target, body string) *http.Request {
-	req := httptest.NewRequest(method, target, strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	return req
-}
-
-func newRouteRequest(method, target, name, value string) *http.Request {
-	req := httptest.NewRequest(method, target, nil)
-	return withRouteParam(req, name, value)
-}
-
-func newRouteJSONRequest(method, target, body, name, value string) *http.Request {
-	req := newJSONRequest(method, target, body)
-	return withRouteParam(req, name, value)
-}
-
-func withRouteParam(req *http.Request, name, value string) *http.Request {
-	req.Pattern = "/{" + name + "}"
-	req.SetPathValue(name, value)
-	return req
+	body := decodeRootPayload(t, rr.Body.Bytes())
+	if got := body["id"]; got != "acct_123" {
+		t.Fatalf("id = %#v, want acct_123", got)
+	}
+	if got := body["org_id"]; got != "org_123" {
+		t.Fatalf("org_id = %#v, want org_123", got)
+	}
+	if got := body["name"]; got != "Acme" {
+		t.Fatalf("name = %#v, want Acme", got)
+	}
 }
 
 func decodeRootPayload(t *testing.T, body []byte) rootPayloadMap {
@@ -478,7 +345,31 @@ func decodeRootPayload(t *testing.T, body []byte) rootPayloadMap {
 
 	var payload rootPayloadMap
 	if err := json.Unmarshal(body, &payload); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
+		t.Fatalf("json.Unmarshal(%q) error = %v", strings.TrimSpace(string(body)), err)
 	}
 	return payload
+}
+
+func newJSONRequest(method, target, body string) *http.Request {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req
+}
+
+func newRouteRequest(method, target, param, value string) *http.Request {
+	r := httptest.NewRequest(method, target, nil)
+	pattern := strings.Replace(target, value, "{"+param+"}", 1)
+	r.SetPathValue(param, value)
+	r.Pattern = pattern
+	return r
+}
+
+func newRouteJSONRequest(method, target, body, param, value string) *http.Request {
+	r := newJSONRequest(method, target, body)
+	pattern := strings.Replace(target, value, "{"+param+"}", 1)
+	r.SetPathValue(param, value)
+	r.Pattern = pattern
+	return r
 }

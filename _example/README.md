@@ -12,7 +12,7 @@
 同时演示几类常见写法：
 
 - `chix.BindAndValidate(...)` 处理 path + JSON body 输入边界
-- `chix.WriteError(...)` 写统一错误响应；其底层 `resp.WriteError(...)` 保留 5xx 时的 request log `error.*` 注解和独立 error log 行为
+- `chix.WriteError(...)` 写统一错误响应，并保留 5xx 时的 request log `error.*` 注解和独立 error log 行为
 - 单个 `healthz` 探针，以及 shutdown 时降级为 `503`
 - `http.Server` 的常见 timeout 配置
 - 基于 `SIGINT` / `SIGTERM` 的优雅停机

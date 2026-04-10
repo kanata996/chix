@@ -7,11 +7,11 @@ import (
 
 	"github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
-	"github.com/kanata996/chix/resp"
+	hah "github.com/kanata996/hah"
 )
 
-// ErrorResponder is the chi-oriented preset alias of resp.ErrorResponder.
-type ErrorResponder = resp.ErrorResponder
+// ErrorResponder is the chi-oriented preset alias of hah.ErrorResponder.
+type ErrorResponder = hah.ErrorResponder
 
 var defaultErrorResponder = NewErrorResponder()
 
@@ -19,15 +19,15 @@ var defaultErrorResponder = NewErrorResponder()
 // services. Callers may mutate the returned value to customize strategy while
 // preserving the package default behavior as a baseline.
 func NewErrorResponder() *ErrorResponder {
-	return &resp.ErrorResponder{
-		ContextAttrs: chixErrorContextAttrs,
-		AnnotateRequestLog: func(r *http.Request, attrs []slog.Attr) {
-			if r == nil || len(attrs) == 0 {
-				return
-			}
-			httplog.SetAttrs(r.Context(), attrs...)
-		},
+	responder := hah.NewErrorResponder()
+	responder.ContextAttrs = chixErrorContextAttrs
+	responder.AnnotateRequestLog = func(r *http.Request, attrs []slog.Attr) {
+		if r == nil || len(attrs) == 0 {
+			return
+		}
+		httplog.SetAttrs(r.Context(), attrs...)
 	}
+	return responder
 }
 
 func chixErrorContextAttrs(ctx context.Context) []slog.Attr {

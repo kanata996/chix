@@ -2,42 +2,21 @@
 
 本文说明两层行为：
 
-- `resp.WriteError(...)` / `resp.ErrorResponder` 零值：纯 `net/http` 核心行为
+- `hah.WriteError(...)` / `hah.ErrorResponder` 零值：纯 `net/http` 核心行为
 - `chix.WriteError(...)`：基于 `chi + httplog + traceid` 预设好的行为
 
 相关源码：
 
 - `chix/error_responder.go`
-- `resp/write_error.go`
-- `resp/error_responder.go`
-- `resp/error_log.go`
+- `hah` 仓库中的 `resp/write_error.go`
+- `hah` 仓库中的 `resp/error_responder.go`
+- `hah` 仓库中的 `resp/error_log.go`
 
-## `ErrorResponder.Respond(...)` 的日志分支
-
-### `err == nil`
-
-- 直接返回 `nil`
-- 不写日志
-
-### 响应已经开始写出
-
-如果满足以下任一条件：
-
-- 传入错误能解出 `responseWriteError`，且 `responseStarted=true`
-- `ResponseWriter` 显式暴露可读的状态信息，且已检测到状态码或已写字节数
-
-则：
-
-- 不再改写响应
-- 不再补 request log 字段
-- 若错误最终收敛为 `5xx`，仍会通过 responder 的 `Logger` 输出一条独立错误日志
-- 返回原错误
-
-### 常规错误响应路径
+## `ErrorResponder.Respond(...)` 的主流程
 
 未命中提前返回时，执行顺序为：
 
-1. `AsHTTPError(err)` 或默认 `asHTTPError(err)`
+1. `AsHTTPError(err)` 或默认错误归一化逻辑
 2. `AnnotateRequestLog(r, RequestLogAttrs(err, httpErr))`
 3. `logServerError(r, httpErr, err)`
 4. `writeHTTPError(w, r, httpErr)`
@@ -46,80 +25,30 @@
 
 其中：
 
-- 第 2 步由 responder 的 hook 决定；`resp` 零值 responder 会自然退化为 no-op
-- 第 3 步只在 `httpErr.Status() >= 500` 时输出独立错误日志
-- 第 5 步只在 `writeErr != nil` 时输出独立错误日志
+- `hah` 的零值 responder 不会主动集成 request log
+- 独立 server error log 只在 `httpErr.Status() >= 500` 时输出
+- 错误响应写出失败时会额外再打一条独立 error log
 
 ## Request Log 行为
 
-`resp.WriteError(...)` 默认不会集成任何 request log。
+`hah.WriteError(...)` 默认不会集成任何 request log。
 
-如果你使用自定义 `ErrorResponder`，或直接使用 `chix.WriteError(...)`，则
-request log 行为由 `AnnotateRequestLog` hook 决定。
-
-在 `chix.WriteError(...)` 的默认预设下，`error.*` attrs 会写入当前 `httplog`
-request log；如果请求没有经过 `httplog.RequestLogger(...)`，这一步会自然退化为 no-op。
-
-### 4xx
-
-当 `httpErr.Status() < 500` 时：
-
-- 不补任何 `error.*` 字段
-- 只保留外层 request log 原有字段
-
-### 5xx
-
-当 `httpErr.Status() >= 500` 时，会补以下字段：
+`chix.WriteError(...)` 的默认预设会在 `5xx` 场景下把以下字段写入当前 `httplog` request log：
 
 - `error.code`
 - `error.timeout`
 - `error.canceled`
 
-其中：
-
-- `error.code` 始终来自 `HTTPError.Code()`
-- `error.timeout` 仅在 `errors.Is(err, context.DeadlineExceeded)` 时写入
-- `error.canceled` 仅在 `errors.Is(err, context.Canceled)` 时写入
-
 如果你希望 access log 带上 `traceId`、`request.id`，需要在服务自己的
-`chi + httplog` 链路里显式挂 `middleware.RequestLogAttrs()`，或自行在
-`httplog` 集成里通过 `httplog.SetAttrs(...)` 补这些字段。
-
-`WriteError(...)` 自己只负责 5xx 时补 `error.*` 诊断字段，不负责统一兜底
-request correlation attrs，这样：
-
-- access log 的字段来源只在中间件层
-- 2xx / 4xx / 5xx 的关联字段行为保持一致
-- `resp` 保持纯 `net/http`，`chix` 只负责 chi 预设集成
-
-### 不再写入 Request Log 的字段
-
-当前不会写入 request log 的字段有：
-
-- `error.message`
-- `error.type`
-- `error.root_message`
-- `error.root_type`
-- `error.details`
-- `error.details_count`
-- `error.details_dropped`
-- `error.chain`
-- `error.chain_types`
-- `error.wrapped`
-- `error.public_message`
-- `error.category`
-- `error.expected`
+`chi + httplog` 链路里显式挂 `middleware.RequestLogAttrs()`。
 
 ## 独立错误日志行为
 
-### 普通 5xx
-
-当 `WriteError(...)` 最终收敛为 `5xx` 时，会通过 responder 的 `Logger`（默认
-为 `slog.Default()`）输出一条独立 `error` 日志：
+当 `WriteError(...)` 最终收敛为 `5xx` 时，会通过 responder 的 `Logger` 输出一条独立 `error` 日志：
 
 - 消息：`resp: request failed with server error`
 
-字段包括：
+字段至少包括：
 
 - `http.response.status_code`
 - `error.code`
@@ -127,62 +56,18 @@ request correlation attrs，这样：
 - `error.type`
 - `error.root_message`
 - `error.root_type`
-- `error.timeout`
-- `error.canceled`
+- `http.request.method`
+- `url.path`
 
-`resp.WriteError(...)` 默认不会补 `traceId` 之类的上下文字段。
-
-`chix.WriteError(...)` 的默认预设会额外补：
+`hah.WriteError(...)` 默认不会补 `traceId`；`chix.WriteError(...)` 的默认预设会额外补：
 
 - `traceId`
 
-### 错误响应写出失败
-
-`logErrorResponseWriteFailure(...)` 只在错误响应写出路径返回非空错误时输出独立
-`error` 日志：
+如果错误响应自身写出失败，还会输出一条：
 
 - 消息：`resp: failed to write error response`
 
-字段包括：
-
-- `http.response.status_code`
-- `error.code`
-- `error.message`
-- `error.type`
-- `error.root_message`
-- `error.root_type`
-
-`resp.WriteError(...)` 默认不会补 `traceId`。
-
-`chix.WriteError(...)` 的默认预设会额外补：
-
-- `traceId`
-
-如果错误可解出 `ErrorWriteDegraded`，还会追加：
+并在可解出 `ErrorWriteDegraded` 时追加：
 
 - `resp.error_degraded`
 - `resp.public_response_preserved`
-
-## 诊断起点与错误链
-
-5xx 诊断起点规则为：
-
-- 如果 `HTTPError` 可通过 `Unwrap()` 解出底层 cause，优先从该 cause 开始
-- 否则从原始 `err` 开始
-
-错误链展开同时兼容：
-
-- `Unwrap() error`
-- `Unwrap() []error`
-
-限制为：
-
-- 最大深度 `8`
-- 使用 `seen` 集合避免循环引用
-
-`error.root_message` 和 `error.root_type` 在普通单链包装场景里通常对应最底层
-错误；在 `errors.Join(...)` 场景里，它们表示本次遍历尾部摘要，不保证是唯一根因。
-
-## `errors` 的当前行为
-
-`errors` 当前只属于公共错误响应，不写入 request log，也不会原样塞进独立错误日志。

@@ -17,10 +17,9 @@ make ci
 
 ```bash
 make test
-make test-pkg PKG=./reqx
-make test-name PKG=./reqx RUN=TestDecodeJSON
 make test-cover
 make test-race
+go test ./...
 ```
 
 ## Pull requests
@@ -63,4 +62,4 @@ make release-gh VERSION=vX.Y.Z
 
 - Follow standard Go formatting (`gofmt`).
 - Prefer clear naming and small, testable functions.
-- Keep package boundaries strict (`chix`, `reqx`, `errx`, `resp`).
+- Keep package boundaries strict (`chix`, `middleware`, `_example`). Lower-level net/http boundary capabilities live in `hah`.

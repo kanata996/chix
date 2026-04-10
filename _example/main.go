@@ -19,8 +19,8 @@ import (
 	"github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
 	"github.com/kanata996/chix"
-	"github.com/kanata996/chix/errx"
 	chixmw "github.com/kanata996/chix/middleware"
+	"github.com/kanata996/hah/errx"
 )
 
 type createAccountRequest struct {

@@ -4,23 +4,14 @@
 [![CI](https://github.com/kanata996/chix/workflows/CI/badge.svg)](https://github.com/kanata996/chix/actions/workflows/ci.yml)
 [![Codecov](https://codecov.io/github/kanata996/chix/graph/badge.svg)](https://codecov.io/github/kanata996/chix)
 
-`chix` 是一个面向 `chi` 的轻量级 JSON API HTTP 边界工具包。
+`chix` 是一个面向 `chi` 的 JSON API HTTP 边界工具包。
 
-它主要解决四件事：
+当前版本聚焦两类能力：
 
-- 将 path/query/header/JSON body 绑定到 DTO
-- 使用 `validator/v10` 校验 DTO
-- 写出 JSON 成功响应
-- 写出统一的结构化错误响应
+- 根包 `github.com/kanata996/chix` 提供常用的请求绑定、校验和响应写回入口
+- `github.com/kanata996/chix/middleware` 提供与 `chi + httplog + traceid` 配套的 request log / error log 封装
 
-当前仓库对外主要暴露五个包：
-
-- `github.com/kanata996/chix`：大多数 handler 直接使用的根包入口
-- `github.com/kanata996/chix/bind`：独立的请求绑定层
-- `github.com/kanata996/chix/reqx`：请求侧校验、Normalize、RequestValidator 与 invalid_request 违规模型
-- `github.com/kanata996/chix/resp`：纯 `net/http` 的响应写回、错误响应输出与 `ErrorResponder`
-- `github.com/kanata996/chix/errx`：共享公共 HTTP 错误模型
-- `github.com/kanata996/chix/middleware`：可选的 chi request log 辅助中间件
+它建立在 [`hah`](https://github.com/kanata996/hah) 提供的 `net/http` 核心能力之上；如果你需要更细粒度的底层能力，可以直接使用 `hah` 及其子包。
 
 ## 状态
 
@@ -78,57 +69,9 @@ func main() {
 }
 ```
 
-成功请求：
+## 根包 API
 
-```bash
-curl -i \
-  -X POST http://localhost:8080/orgs/org_123/accounts \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Acme"}'
-```
-
-预期响应：
-
-```http
-HTTP/1.1 201 Created
-Content-Type: application/json
-
-{"id":"acct_123","org_id":"org_123","name":"Acme"}
-```
-
-校验失败请求：
-
-```bash
-curl -i \
-  -X POST http://localhost:8080/orgs/org_123/accounts \
-  -H 'Content-Type: application/json' \
-  -d '{}'
-```
-
-预期响应：
-
-```http
-HTTP/1.1 422 Unprocessable Entity
-Content-Type: application/problem+json
-
-{"title":"Unprocessable Entity","status":422,"detail":"request contains invalid fields","code":"invalid_request","errors":[{"field":"name","in":"request","code":"required","detail":"is required"}]}
-```
-
-## 请求绑定与校验
-
-支持的 tag：
-
-- `param:"..."`：path 参数
-- `query:"..."`：query 参数
-- `json:"..."`：JSON body
-- `header:"..."`：header
-- `validate:"..."`：`validator/v10` 校验规则
-
-请求侧 body 绑定当前只支持 `application/json`。
-更完整的绑定契约说明见 [docs/request-binding.md](./docs/request-binding.md)。
-如果需要更细粒度的 binding API，直接使用 [`bind`](./bind) 包。
-
-根包常用请求 API：
+根包提供最常用的请求/响应入口：
 
 - `Bind`
 - `BindBody`
@@ -140,101 +83,52 @@ Content-Type: application/problem+json
 - `BindAndValidateQuery`
 - `BindAndValidatePath`
 - `BindAndValidateHeaders`
+- `RequireBody`
+- `WriteError`
+- `JSON`
+- `JSONBlob`
+- `OK`
+- `Created`
+- `NoContent`
 - `Binder`
 - `DefaultBinder`
 - `BindUnmarshaler`
-- `Normalizer`
 - `RequestValidator`
-- `RequireBody`
+- `Normalizer`
+- `ErrorResponder`
+- `NewErrorResponder`
 
-`Bind(...)` 的绑定顺序是：
+这些 API 组成了 `chix` 当前对外的主路径。
+
+`Bind(...)` 的顺序仍然是：
 
 1. path
 2. query（仅 `GET` / `DELETE` / `HEAD`）
 3. body
 
-如果你只处理单一输入来源，优先使用源专用 API：
+body 绑定当前只支持 `application/json`，实际读取到零字节 body 时默认视为 no-op。更完整说明见 [docs/request-binding.md](./docs/request-binding.md)。
 
-- 只处理 body：`BindBody(...)`、`BindAndValidateBody(...)`
-- 只处理 query：`BindQueryParams(...)`、`BindAndValidateQuery(...)`
-- 只处理 path：`BindPathValues(...)`、`BindAndValidatePath(...)`
-- 只处理 header：`BindHeaders(...)`、`BindAndValidateHeaders(...)`
+## 错误与日志
 
-body 绑定契约：
+`chix.WriteError(...)` 使用面向 `chi + httplog + traceid` 的预配置 `ErrorResponder`：
 
-- binding 层默认采用当前约定：`Bind(...)` / `BindAndValidate(...)` / `BindBody(...)` / `BindAndValidateBody(...)` 在 `Content-Length == 0` 时都会把 body 视为 no-op
-- 非空 body 当前只支持 `application/json`
-- `application/json` 默认遵循标准 decoder 语义；默认 binder 只接受标准 `application/json`
-- `BindBody(...)` 遵循标准 decoder 目标能力，可以绑定到 struct、slice、map 等 JSON 目标
-- `BindAndValidate*` 是 DTO 组合入口，目标必须是非 nil 的 `*struct`
-- `BindAndValidate*` 会在字段校验前先执行请求级规则；如果业务要求“即使字段全是可选也必须提交 body”，请在 DTO 上实现 `ValidateRequest(*http.Request) error`
+- 5xx 时给当前 request log 补 `error.*` 诊断字段
+- 5xx 时输出独立 error log
+- 独立 error log 会补 `traceId`
 
-如果 DTO 需要在校验前做裁剪、大小写归一化或默认值补齐，实现 `Normalize()` 即可：
+如果你需要 access log 同时带上 `traceId`、`request.id`，应显式挂载 `middleware.RequestLogAttrs()`。
 
-```go
-type listAccountsRequest struct {
-	Cursor string `query:"cursor" validate:"omitempty,nospace"`
-}
-
-func (r *listAccountsRequest) Normalize() {
-	r.Cursor = strings.TrimSpace(r.Cursor)
-}
-```
-
-如果需要请求级契约，例如“这个接口必须显式提交 body”，实现 `ValidateRequest`：
-
-```go
-type createAccountRequest struct {
-	OrgID string `param:"org_id" validate:"required"`
-	Name  string `json:"name"`
-}
-
-func (*createAccountRequest) ValidateRequest(r *http.Request) error {
-	return chix.RequireBody(r)
-}
-```
-
-## 响应
-
-根包常用响应 API：
-
-- `OK`
-- `Created`
-- `NoContent`
-- `JSON`
-- `JSONBlob`
-- `WriteError`
-- `ErrorResponder`
-- `NewErrorResponder`
-
-`WriteError(...)` 会把错误写成统一的 problem 风格 JSON：
-
-```json
-{
-  "title": "Unprocessable Entity",
-  "status": 422,
-  "detail": "request contains invalid fields",
-  "code": "invalid_request",
-  "errors": [
-    {
-      "field": "name",
-      "in": "request",
-      "code": "required",
-      "detail": "is required"
-    }
-  ]
-}
-```
-
-成功响应使用 `application/json`，错误响应使用 `application/problem+json`。
-
-根包 `WriteError(...)` 使用的是面向 `chi + httplog + traceid` 的预配置
-`ErrorResponder`。如果你只想用纯 `net/http` 的响应错误收敛与写回能力，
-直接导入 `resp` 包即可。
+更完整说明见 [docs/error-logging.md](./docs/error-logging.md)。
 
 ## 共享错误模型
 
-如果你需要在 handler、service、repository 之间共享公共 HTTP 错误，直接使用 `errx`：
+如果你需要在 handler、service、repository 之间共享公共 HTTP 错误，直接使用 `hah/errx`：
+
+```go
+import "github.com/kanata996/hah/errx"
+```
+
+常用构造：
 
 - `errx.NewHTTPError(...)`
 - `errx.NewHTTPErrorWithCause(...)`
@@ -247,75 +141,9 @@ func (*createAccountRequest) ValidateRequest(r *http.Request) error {
 - `errx.UnprocessableEntity(...)`
 - `errx.TooManyRequests(...)`
 
-例如：
-
-```go
-if err := repo.DeleteAccount(ctx, accountID); err != nil {
-	if errors.Is(err, sql.ErrNoRows) {
-		_ = chix.WriteError(w, r, errx.NotFound("account_not_found", "account not found"))
-		return
-	}
-
-	_ = chix.WriteError(w, r, err)
-	return
-}
-```
-
-## 可选中间件
-
-`middleware.RequestLogAttrs()` 用于把请求上下文中的关联字段补到当前 request log。
-`WriteError(...)` 只会在 5xx access log 上补 `error.*` 诊断字段，不再隐式注入
-`traceId` / `request.id`。
-
-如果你需要自定义根包默认行为，可以通过 `chix.NewErrorResponder()` 基于 chi
-预设构造一个 responder，再在应用自己的 HTTP 边界层统一调用。
-
-建议挂载顺序：
-
-1. `chimw.RequestID`
-2. `traceid.Middleware`
-3. `httplog.RequestLogger(...)`
-4. `middleware.RequestLogAttrs()`
-
-示例：
-
-```go
-package main
-
-import (
-	"log/slog"
-	"net/http"
-	"os"
-
-	"github.com/go-chi/chi/v5"
-	chimw "github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/httplog/v3"
-	"github.com/go-chi/traceid"
-	"github.com/kanata996/chix/middleware"
-)
-
-func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-
-	r := chi.NewRouter()
-	r.Use(chimw.RequestID)
-	r.Use(traceid.Middleware)
-	r.Use(httplog.RequestLogger(logger, &httplog.Options{
-		Level:         slog.LevelInfo,
-		Schema:        httplog.SchemaECS,
-		RecoverPanics: true,
-	}))
-	r.Use(middleware.RequestLogAttrs())
-
-	_ = http.ListenAndServe(":8080", r)
-}
-```
-
 ## 什么时候用哪个包
 
-- `chix`：大多数 handler 直接用这个
-- `bind`：只想用独立的 binding 能力
-- `reqx`：只想用组合校验、RequestValidator 和 invalid_request 违规模型
-- `resp`：只想用响应写回
-- `errx`：想显式构造和传递公共 HTTP 错误
+- `chix`：大多数 `chi` handler 直接用这个
+- `hah`：想要纯 `net/http` 的根包边界能力
+- `hah/errx`：想显式构造和传递公共 HTTP 错误
 - `middleware`：想给 request log 增加关联字段
