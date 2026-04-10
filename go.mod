@@ -6,7 +6,7 @@ require (
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-chi/httplog/v3 v3.3.0
 	github.com/go-chi/traceid v0.3.0
-	github.com/kanata996/hah v0.3.0
+	github.com/kanata996/hah v0.3.1
 )
 
 require (
