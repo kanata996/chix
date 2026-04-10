@@ -12,6 +12,12 @@
 
 ## [Unreleased]
 
+## [v0.4.3] - 2026-04-11
+
+### Changed
+
+- `chix` 根包移除 `JSON`、`JSONBlob`、`OK`、`Created`、`NoContent` 成功响应直通入口；成功响应请直接使用 `hah`。
+
 ## [v0.4.2] - 2026-04-10
 
 ### Changed

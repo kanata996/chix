@@ -119,7 +119,7 @@ func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) 
 			_ = chix.WriteError(w, r, errx.NewHTTPError(http.StatusServiceUnavailable, "", "server is shutting down"))
 			return
 		}
-		_ = chix.NoContent(w, r)
+		_ = hah.NoContent(w)
 	})
 
 	r.Post("/orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
@@ -135,7 +135,7 @@ func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) 
 			return
 		}
 
-		_ = chix.Created(w, r, acct)
+		_ = hah.Created(w, acct)
 	})
 
 	r.Get("/orgs/{org_id}/accounts/{account_id}", func(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +148,7 @@ func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) 
 			return
 		}
 
-		_ = chix.OK(w, r, acct)
+		_ = hah.OK(w, acct)
 	})
 
 	return r
