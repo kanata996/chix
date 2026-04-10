@@ -1,9 +1,9 @@
-// Package chix 提供根包常用的请求/响应边界入口，聚合 reqx 与 resp 中最常用的一组能力。
+// Package chix 提供面向 chi 的错误响应与日志预设。
 //
 // 适合在大多数 handler 中直接使用：
-//   - Echo 风格的请求绑定与校验入口
-//   - 常用 JSON 成功响应辅助
-//   - 统一错误响应写回
+//   - 面向 chi + httplog + traceid 的 ErrorResponder 预设
+//   - 默认错误写回入口 WriteError
+//   - 可选的 request log attrs middleware
 //
-// 如果你需要请求侧或响应侧的包级 API，请直接导入 reqx 或 resp。
+// 请求绑定、输入校验和成功响应写回由 github.com/kanata996/hah 提供。
 package chix

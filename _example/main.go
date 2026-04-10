@@ -19,8 +19,9 @@ import (
 	"github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
 	"github.com/kanata996/chix"
-	"github.com/kanata996/chix/errx"
 	chixmw "github.com/kanata996/chix/middleware"
+	hah "github.com/kanata996/hah"
+	"github.com/kanata996/hah/errx"
 )
 
 type createAccountRequest struct {
@@ -118,12 +119,12 @@ func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) 
 			_ = chix.WriteError(w, r, errx.NewHTTPError(http.StatusServiceUnavailable, "", "server is shutting down"))
 			return
 		}
-		_ = chix.NoContent(w, r)
+		_ = hah.NoContent(w, r)
 	})
 
 	r.Post("/orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
 		var req createAccountRequest
-		if err := chix.BindAndValidate(r, &req); err != nil {
+		if err := hah.BindAndValidate(r, &req); err != nil {
 			_ = chix.WriteError(w, r, err)
 			return
 		}
@@ -134,21 +135,12 @@ func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) 
 			return
 		}
 
-		_ = chix.Created(w, r, acct)
+		_ = hah.Created(w, r, acct)
 	})
 
 	r.Get("/orgs/{org_id}/accounts/{account_id}", func(w http.ResponseWriter, r *http.Request) {
-		orgID, err := chix.ParamString(r, "org_id")
-		if err != nil {
-			_ = chix.WriteError(w, r, err)
-			return
-		}
-
-		accountID, err := chix.ParamString(r, "account_id")
-		if err != nil {
-			_ = chix.WriteError(w, r, err)
-			return
-		}
+		orgID := r.PathValue("org_id")
+		accountID := r.PathValue("account_id")
 
 		acct, ok := store.Get(orgID, accountID)
 		if !ok {
@@ -156,7 +148,7 @@ func newRouter(logger *slog.Logger, store *accountStore, draining *atomic.Bool) 
 			return
 		}
 
-		_ = chix.OK(w, r, acct)
+		_ = hah.OK(w, r, acct)
 	})
 
 	return r
