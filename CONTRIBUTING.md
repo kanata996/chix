@@ -6,8 +6,7 @@ Thanks for your interest in contributing.
 
 1. Install Go (version from `go.mod`).
 2. Clone the repo.
-3. Read the project-wide test quality standard: [`docs/testing-standards.md`](./docs/testing-standards.md)
-4. Run checks locally:
+3. Run checks locally:
 
 ```bash
 make ci
@@ -26,7 +25,10 @@ go test ./...
 
 1. Keep PRs focused and small.
 2. Add or update tests for behavior changes.
-3. Review test quality against [`docs/testing-standards.md`](./docs/testing-standards.md).
+3. Review test quality against the repository's public behavior:
+   - root package `chix`: chi-oriented error responder preset and response entrypoints
+   - `middleware`: request log correlation fields
+   - `_example`: recommended integration path
 4. Ensure `make ci` passes before opening a PR.
 5. Update docs when API behavior changes.
 

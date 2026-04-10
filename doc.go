@@ -3,7 +3,9 @@
 // 适合在大多数 handler 中直接使用：
 //   - 面向 chi + httplog + traceid 的 ErrorResponder 预设
 //   - 默认错误写回入口 WriteError
+//   - 与 hah 保持一致的 JSON / JSONBlob / OK / Created / NoContent 成功响应直通入口
 //   - 可选的 request log attrs middleware
 //
-// 请求绑定、输入校验和成功响应写回由 github.com/kanata996/hah 提供。
+// 请求绑定、输入校验和共享错误模型由 github.com/kanata996/hah 提供；
+// chix 的成功响应入口仍委托 hah 的实现。
 package chix
