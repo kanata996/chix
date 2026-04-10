@@ -8,10 +8,10 @@
 
 它只做两件事：
 
-- 根包 `github.com/kanata996/chix` 提供面向 `chi + httplog + traceid` 的错误响应预设，以及成功响应直通入口
+- 根包 `github.com/kanata996/chix` 提供面向 `chi + httplog + traceid` 的错误响应预设
 - `github.com/kanata996/chix/middleware` 提供与 `chi + httplog + traceid` 配套的 request log 关联字段中间件
 
-`chix` 不负责请求绑定、输入校验和共享错误模型；这些能力由 [`hah`](https://github.com/kanata996/hah) 提供。`chix` 根包里的成功响应入口只是对 `hah` 的直通封装，用来让 handler 统一使用 `chix.*` 风格写响应。
+`chix` 不负责请求绑定、输入校验、成功响应和共享错误模型；这些能力由 [`hah`](https://github.com/kanata996/hah) 提供。
 
 ## 安装
 
@@ -53,7 +53,7 @@ func main() {
 			return
 		}
 
-		_ = chix.Created(w, r, map[string]any{
+		_ = hah.Created(w, map[string]any{
 			"id":     "acct_123",
 			"org_id": req.OrgID,
 			"name":   req.Name,
@@ -68,7 +68,7 @@ func main() {
 
 - `hah.BindAndValidate(...)` 负责请求绑定和输入校验
 - `chix.WriteError(...)` 负责统一错误响应
-- `chix.Created(...)` / `chix.OK(...)` 等负责成功响应
+- `hah.Created(...)` / `hah.OK(...)` 等负责成功响应
 
 如果你还需要 access log 里的 `traceId` / `request.id` 关联字段，推荐把 `chi` 链路配置成：
 
@@ -85,7 +85,6 @@ func main() {
 - `WriteError`
 - `ErrorResponder`
 - `NewErrorResponder`
-- `JSON` / `JSONBlob` / `OK` / `Created` / `NoContent`
 
 子包 `github.com/kanata996/chix/middleware` 当前公开：
 
@@ -135,7 +134,7 @@ import "github.com/kanata996/hah/errx"
 
 ## 什么时候用哪个包
 
-- `chix`：想要 `chi` 场景下的错误响应预设，或希望 handler 统一用 `chix.*` 写成功/错误响应
+- `chix`：想要 `chi` 场景下的错误响应预设
 - `middleware`：想把 `traceId`、`request.id` 这类关联字段补进当前 `httplog` request log
-- `hah`：处理请求绑定、输入校验、纯 `net/http` 错误模型，以及 `chix` 成功响应直通入口背后的底层实现
+- `hah`：处理请求绑定、输入校验、成功响应和纯 `net/http` 错误模型
 - `hah/errx`：想显式构造并跨层传递公共 HTTP 错误
