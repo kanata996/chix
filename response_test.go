@@ -24,7 +24,7 @@ func TestSuccessResponseWritersMatchHah(t *testing.T) {
 				return JSON(w, r, http.StatusAccepted, map[string]any{"ok": true})
 			},
 			hahWrite: func(w http.ResponseWriter, r *http.Request) error {
-				return hah.JSON(w, r, http.StatusAccepted, map[string]any{"ok": true})
+				return hah.JSON(w, http.StatusAccepted, map[string]any{"ok": true})
 			},
 		},
 		{
@@ -33,7 +33,7 @@ func TestSuccessResponseWritersMatchHah(t *testing.T) {
 				return JSONBlob(w, r, http.StatusAccepted, []byte(`{"ok":true}`))
 			},
 			hahWrite: func(w http.ResponseWriter, r *http.Request) error {
-				return hah.JSONBlob(w, r, http.StatusAccepted, []byte(`{"ok":true}`))
+				return hah.JSONBlob(w, http.StatusAccepted, []byte(`{"ok":true}`))
 			},
 		},
 		{
@@ -42,7 +42,7 @@ func TestSuccessResponseWritersMatchHah(t *testing.T) {
 				return OK(w, r, map[string]any{"id": "acct_123"})
 			},
 			hahWrite: func(w http.ResponseWriter, r *http.Request) error {
-				return hah.OK(w, r, map[string]any{"id": "acct_123"})
+				return hah.OK(w, map[string]any{"id": "acct_123"})
 			},
 		},
 		{
@@ -51,7 +51,7 @@ func TestSuccessResponseWritersMatchHah(t *testing.T) {
 				return Created(w, r, map[string]any{"id": "acct_123"})
 			},
 			hahWrite: func(w http.ResponseWriter, r *http.Request) error {
-				return hah.Created(w, r, map[string]any{"id": "acct_123"})
+				return hah.Created(w, map[string]any{"id": "acct_123"})
 			},
 		},
 		{
@@ -60,7 +60,7 @@ func TestSuccessResponseWritersMatchHah(t *testing.T) {
 				return NoContent(w, r)
 			},
 			hahWrite: func(w http.ResponseWriter, r *http.Request) error {
-				return hah.NoContent(w, r)
+				return hah.NoContent(w)
 			},
 		},
 	}

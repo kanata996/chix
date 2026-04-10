@@ -13,12 +13,6 @@
 
 `chix` 不负责请求绑定、输入校验和共享错误模型；这些能力由 [`hah`](https://github.com/kanata996/hah) 提供。`chix` 根包里的成功响应入口只是对 `hah` 的直通封装，用来让 handler 统一使用 `chix.*` 风格写响应。
 
-## 状态
-
-`chix` 仍处于 `v1.0.0` 之前阶段。在 `v1.0.0` 之前，小版本发布中仍可能出现破坏性变更。
-
-公开 API 和对外 HTTP 行为变更会记录在 [CHANGELOG.md](./CHANGELOG.md)。
-
 ## 安装
 
 要求：
@@ -108,9 +102,9 @@ func main() {
 
 `chix.WriteError(...)` 使用面向 `chi + httplog + traceid` 的预配置 `ErrorResponder`：
 
-- 5xx 时给当前 request log 补 `error.*` 诊断字段
+- 在存在当前 `httplog` request logger 时，5xx 会给 request log 补 `error.*` 诊断字段
 - 5xx 时输出独立 error log
-- 独立 error log 会补 `traceId`
+- 请求 context 里存在 `traceId` 时，独立 error log 会补 `traceId`
 
 `middleware.RequestLogAttrs()` 只负责把关联字段补到当前 `httplog` request log；它不会替你创建 logger，也不负责独立 error log。
 
