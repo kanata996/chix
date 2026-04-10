@@ -60,16 +60,28 @@
 
 - `resp: request failed with server error`
 
-字段至少包括：
+稳定字段：
 
 - `http.response.status_code`
 - `error.code`
+
+按条件追加：
+
 - `error.message`
 - `error.type`
 - `error.root_message`
 - `error.root_type`
+- `error.timeout`
+- `error.canceled`
 - `http.request.method`
 - `url.path`
+
+说明：
+
+- `error.message` / `error.type` / `error.root_message` / `error.root_type` 只有在能从诊断错误链中提取到值时才会出现
+- `error.timeout` 仅在 `errors.Is(err, context.DeadlineExceeded)` 时写入
+- `error.canceled` 仅在 `errors.Is(err, context.Canceled)` 时写入
+- `http.request.method` / `url.path` 只有请求对象可用且字段非空时才会出现
 
 在 `chix` 预设下，如果请求 context 中有 `traceId`，独立 error log 还会补：
 
@@ -85,10 +97,17 @@
 
 - `resp: failed to write error response`
 
+稳定字段：
+
+- `http.response.status_code`
+- `error.code`
+
 当底层错误可解为 `ErrorWriteDegraded` 时，日志里还会补充：
 
 - `resp.error_degraded`
 - `resp.public_response_preserved`
+
+和普通独立 error log 一样，`traceId`、`http.request.method`、`url.path` 仍然取决于请求 context / 请求对象是否可用；`error.message` / `error.type` / `error.root_message` / `error.root_type` 也属于条件字段。
 
 ## 推荐接入方式
 
