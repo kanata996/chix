@@ -70,6 +70,8 @@ func main() {
 - `chix.WriteError(...)` 负责统一错误响应
 - `hah.Created(...)` / `hah.OK(...)` 等负责成功响应
 
+如果你在 `chi` handler 里只想读取少量已类型化的 path / query 参数，也可以直接使用 `hah.PathParam(...)` / `hah.QueryParam(...)`；这仍然属于 `hah` 的请求输入能力，`chix` 不额外包装一层 request helper。
+
 如果你还需要 access log 里的 `traceId` / `request.id` 关联字段，推荐把 `chi` 链路配置成：
 
 1. `chi/middleware.RequestID`
@@ -92,6 +94,8 @@ func main() {
 
 请求绑定、输入校验和共享错误模型请直接使用 `hah`：
 
+- `hah.PathParam`
+- `hah.QueryParam`
 - `hah.Bind*`
 - `hah.BindAndValidate*`
 - `hah.RequireBody`
@@ -136,5 +140,5 @@ import "github.com/kanata996/hah/errx"
 
 - `chix`：想要 `chi` 场景下的错误响应预设
 - `middleware`：想把 `traceId`、`request.id` 这类关联字段补进当前 `httplog` request log
-- `hah`：处理请求绑定、输入校验、成功响应和纯 `net/http` 错误模型
+- `hah`：处理轻量参数读取、请求绑定、输入校验、成功响应和纯 `net/http` 错误模型
 - `hah/errx`：想显式构造并跨层传递公共 HTTP 错误

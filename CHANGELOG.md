@@ -12,6 +12,12 @@
 
 ## [Unreleased]
 
+## [v0.4.4] - 2026-04-12
+
+### Docs
+
+- README 补充说明：在 `chi` handler 中可直接使用 `hah.PathParam(...)` / `hah.QueryParam(...)` 读取已类型化的 path / query 参数；本次仅修正文档，不新增 `chix` 公开 API。
+
 ## [v0.4.3] - 2026-04-11
 
 ### Changed
