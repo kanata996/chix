@@ -3,10 +3,12 @@ package chix
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -143,4 +145,14 @@ func attrsToMap(attrs []slog.Attr) map[string]any {
 func nilContext() context.Context {
 	var ctx context.Context
 	return ctx
+}
+
+func decodeRootPayload(t *testing.T, body []byte) map[string]any {
+	t.Helper()
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(%q) error = %v", strings.TrimSpace(string(body)), err)
+	}
+	return payload
 }

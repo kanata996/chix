@@ -10,9 +10,8 @@ import (
 	"github.com/go-chi/traceid"
 )
 
-// RequestLogAttrs appends request correlation attrs to the current httplog
-// access log. Mount it after RequestID, traceid.Middleware, and
-// httplog.RequestLogger.
+// RequestLogAttrs 将请求关联属性追加到当前 httplog 访问日志中。
+// 应挂载在 RequestID、traceid.Middleware 和 httplog.RequestLogger 之后。
 func RequestLogAttrs() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
