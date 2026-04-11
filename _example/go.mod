@@ -7,7 +7,7 @@ require (
 	github.com/go-chi/httplog/v3 v3.3.0
 	github.com/go-chi/traceid v0.3.0
 	github.com/kanata996/chix v0.0.0
-	github.com/kanata996/hah v0.3.2
+	github.com/kanata996/hah v0.4.0
 )
 
 require (
