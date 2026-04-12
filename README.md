@@ -70,7 +70,32 @@ func main() {
 - `chix.WriteError(...)` 负责统一错误响应
 - `hah.Created(...)` / `hah.OK(...)` 等负责成功响应
 
-如果你在 `chi` handler 里只想读取少量已类型化的 path / query 参数，也可以直接使用 `hah.PathParam(...)` / `hah.QueryParam(...)`；这仍然属于 `hah` 的请求输入能力，`chix` 不额外包装一层 request helper。
+如果你不想定义 DTO，只想在 `chi` handler 里读取少量 path / query 参数，优先直接使用 `hah.Path(...)` / `hah.Query(...)` 做单参数读取和常见校验：
+
+```go
+r.Get("/orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
+	orgID, err := hah.Path(r, "org_id").String().Required().Get()
+	if err != nil {
+		_ = chix.WriteError(w, r, err)
+		return
+	}
+
+	limit, err := hah.Query(r, "limit").Int().Default(20).Min(1).Max(100).Get()
+	if err != nil {
+		_ = chix.WriteError(w, r, err)
+		return
+	}
+
+	_ = hah.OK(w, map[string]any{
+		"org_id": orgID,
+		"limit":  limit,
+	})
+})
+```
+
+如果你只想要低层 typed getter，或需要 pointer / slice / 自定义类型等语义，再使用 `hah.PathParam(...)` / `hah.QueryParam(...)`。这仍然属于 `hah` 的请求输入能力，`chix` 不额外包装一层 request helper。
+
+如果你只想绑定单一来源，也可以直接使用根包 facade：`hah.BindQueryParams(...)` / `hah.BindPathValues(...)` / `hah.BindHeaders(...)` / `hah.BindBody(...)`；常见场景不需要再单独导入 `hah/bind`。
 
 如果你还需要 access log 里的 `traceId` / `request.id` 关联字段，推荐把 `chi` 链路配置成：
 
@@ -94,10 +119,16 @@ func main() {
 
 请求绑定、输入校验和共享错误模型请直接使用 `hah`：
 
+- `hah.Path`
+- `hah.Query`
 - `hah.PathParam`
 - `hah.QueryParam`
-- `hah.Bind*`
-- `hah.BindAndValidate*`
+- `hah.Bind`
+- `hah.BindBody`
+- `hah.BindQueryParams`
+- `hah.BindPathValues`
+- `hah.BindHeaders`
+- `hah.BindAndValidate`
 - `hah.RequireBody`
 - `hah/errx`
 
@@ -140,5 +171,5 @@ import "github.com/kanata996/hah/errx"
 
 - `chix`：想要 `chi` 场景下的错误响应预设
 - `middleware`：想把 `traceId`、`request.id` 这类关联字段补进当前 `httplog` request log
-- `hah`：处理轻量参数读取、请求绑定、输入校验、成功响应和纯 `net/http` 错误模型
+- `hah`：处理单参数读取（`Path` / `Query` 或 `PathParam` / `QueryParam`）、DTO 绑定（`Bind` / `BindBody` / `BindQueryParams` / `BindPathValues` / `BindHeaders` / `BindAndValidate`）、成功响应和纯 `net/http` 错误模型
 - `hah/errx`：想显式构造并跨层传递公共 HTTP 错误
