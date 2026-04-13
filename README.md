@@ -93,7 +93,9 @@ r.Get("/orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
 })
 ```
 
-如果你只想要低层 typed getter，或需要 pointer / slice / 自定义类型等语义，再使用 `hah.PathParam(...)` / `hah.QueryParam(...)`。这仍然属于 `hah` 的请求输入能力，`chix` 不额外包装一层 request helper。
+`hah.Path(...)` 面向 path segment 里的资源标识，建议只用于 `String()`、`UUID()`、`Int()`、`Int64()`、`Uint()`、`Uint64()` 这类窄类型。更宽的参数语义放到 `hah.Query(...)`：除了常见标量，还支持 `Bool()`、`Float64()`、`Duration()`、`Time()`、`UnixTime()`、`UnixMilliTime()`。
+
+如果 query 参数允许重复 key，`hah.Query(...).String()` / `Int()` / `UUID()` 等标量 helper 默认只消费第一个值；要直接读取全部原始值，请使用 `hah.Query(...).Values()` / `Strings()`。如果你需要结构化多值解码，仍然优先使用 `hah.BindQueryParams(...)` 等 `Bind*` 入口。
 
 如果你只想绑定单一来源，也可以直接使用根包 facade：`hah.BindQueryParams(...)` / `hah.BindPathValues(...)` / `hah.BindHeaders(...)` / `hah.BindBody(...)`；常见场景不需要再单独导入 `hah/bind`。
 
@@ -121,8 +123,6 @@ r.Get("/orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
 
 - `hah.Path`
 - `hah.Query`
-- `hah.PathParam`
-- `hah.QueryParam`
 - `hah.Bind`
 - `hah.BindBody`
 - `hah.BindQueryParams`
@@ -131,6 +131,8 @@ r.Get("/orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
 - `hah.BindAndValidate`
 - `hah.RequireBody`
 - `hah/errx`
+
+重复 query key 的原始值读取可直接使用 `hah.Query(...).Values()` / `hah.Query(...).Strings()`。
 
 ## 错误与日志
 
@@ -171,5 +173,5 @@ import "github.com/kanata996/hah/errx"
 
 - `chix`：想要 `chi` 场景下的错误响应预设
 - `middleware`：想把 `traceId`、`request.id` 这类关联字段补进当前 `httplog` request log
-- `hah`：处理单参数读取（`Path` / `Query` 或 `PathParam` / `QueryParam`）、DTO 绑定（`Bind` / `BindBody` / `BindQueryParams` / `BindPathValues` / `BindHeaders` / `BindAndValidate`）、成功响应和纯 `net/http` 错误模型
+- `hah`：处理单参数读取（`Path` / `Query`；重复 query key 可用 `Values()` / `Strings()`）、DTO 绑定（`Bind` / `BindBody` / `BindQueryParams` / `BindPathValues` / `BindHeaders` / `BindAndValidate`）、成功响应和纯 `net/http` 错误模型
 - `hah/errx`：想显式构造并跨层传递公共 HTTP 错误

@@ -12,6 +12,12 @@
 
 ## [Unreleased]
 
+## [v0.4.6] - 2026-04-13
+
+### Docs
+
+- README 已按 `hah v0.4.2` 的 request helper 边界更新：单参数读取统一使用 `hah.Path(...)` / `hah.Query(...)`，并补充 `Uint64()`、`Values()` / `Strings()` 以及 `Path` / `Query` 分工说明。
+
 ## [v0.4.5] - 2026-04-13
 
 ### Docs
