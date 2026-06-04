@@ -3,8 +3,8 @@ module github.com/kanata996/chix
 go 1.25.9
 
 require (
-	github.com/go-chi/chi/v5 v5.2.5
-	github.com/go-chi/httplog/v3 v3.3.0
+	github.com/go-chi/chi/v5 v5.3.0
+	github.com/go-chi/httplog/v3 v3.4.0
 	github.com/go-chi/traceid v0.3.0
 	github.com/kanata996/hah v0.4.3
 )
